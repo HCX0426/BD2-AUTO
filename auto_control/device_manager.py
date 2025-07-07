@@ -1,12 +1,13 @@
-from .windows_device import WindowsDevice
 from .adb_device import ADBDevice
 from .device_base import BaseDevice
+from .windows_device import WindowsDevice
+
 
 class DeviceManager:
     def __init__(self):
         self.devices = {}
         self.active_device = None
-        
+
     def add_device(self, device_uri, device_type='auto'):
         """
         添加设备
@@ -21,7 +22,7 @@ class DeviceManager:
                 device_type = 'adb'
             else:
                 raise ValueError("无法自动识别设备类型")
-        
+
         # 创建设备实例
         if device_type == 'windows':
             device = WindowsDevice(device_uri)
@@ -29,7 +30,7 @@ class DeviceManager:
             device = ADBDevice(device_uri)
         else:
             raise ValueError(f"不支持的设备类型: {device_type}")
-        
+
         # 连接设备
         if device.connect():
             self.devices[device_uri] = device
@@ -37,30 +38,33 @@ class DeviceManager:
                 self.active_device = device_uri
             return True
         return False
-        
+
     def set_active_device(self, device_uri):
         """设置活动设备"""
         if device_uri in self.devices:
             self.active_device = device_uri
             return True
         return False
-        
+
     def get_active_device(self):
         """获取当前活动设备"""
         if self.active_device:
             return self.devices[self.active_device]
         return None
-        
+
     def get_device(self, device_uri):
         """获取指定设备"""
         return self.devices.get(device_uri)
-        
+
     def remove_device(self, device_uri):
         """移除设备"""
         if device_uri in self.devices:
             device = self.devices.pop(device_uri)
             device.disconnect()
             if self.active_device == device_uri:
-                self.active_device = list(self.devices.keys())[0] if self.devices else None
+                if self.devices:
+                    self.active_device = list(self.devices.keys())[0]
+                else:
+                    self.active_device = None
             return True
         return False

@@ -1,16 +1,22 @@
-from .auto_control.device_manager import DeviceManager
-from .auto_control.image_processor import ImageProcessor
-from .auto_control.task_executor import TaskExecutor
 import time
 
+import cv2
+
+from auto_control.device_manager import DeviceManager
+from auto_control.image_processor import ImageProcessor
+from auto_control.ocr_processor import OCRProcessor
+from auto_control.task_executor import TaskExecutor
+
+
 class BD2Auto:
-    def __init__(self, base_resolution=(1920, 1080)):
+    def __init__(self, base_resolution=(1920, 1080), ocr_engine="easyocr"):  # 添加 ocr_engine 参数
         # 初始化核心模块
         self.device_manager = DeviceManager()
         self.image_processor = ImageProcessor(base_resolution)
+        self.ocr_processor = OCRProcessor(engine=ocr_engine)
         self.task_executor = TaskExecutor(max_workers=3)
         self.running = False
-        
+
     def add_device(self, device_uri, device_type='auto'):
         """添加设备"""
         return self.device_manager.add_device(device_uri, device_type)
@@ -163,3 +169,115 @@ class BD2Auto:
             "tasks": self.task_executor.get_queue_size(),
             "templates": len(self.image_processor.templates)
         }
+    
+    def add_ocr_task(self, callback, lang='en', roi=None, delay=0, device_uri=None):
+        """
+        添加OCR识别任务
+        :param callback: 回调函数，接收识别结果
+        :param lang: 语言
+        :param roi: 感兴趣区域 (x1, y1, x2, y2) 0-1范围
+        :param delay: 延迟执行时间
+        :param device_uri: 指定设备
+        """
+        self.task_executor.add_task(
+            self._execute_ocr, 
+            callback, 
+            lang, 
+            roi, 
+            delay,
+            device_uri
+        )
+        
+    def _execute_ocr(self, callback, lang, roi, delay, device_uri):
+        """执行OCR任务"""
+        if delay > 0:
+            time.sleep(delay)
+            
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            return False
+            
+        # 捕获屏幕
+        screen = device.capture_screen()
+        if screen is None:
+            return False
+            
+        # 提取ROI区域
+        if roi:
+            screen = self.image_processor.get_roi_region(screen, roi)
+            
+        # 执行OCR
+        result = self.ocr_processor.recognize_text(screen, lang=lang)
+        
+        # 调用回调
+        callback(result)
+        return True
+        
+    def add_text_click_task(self, target_text, lang='en', roi=None, max_retry=3, retry_interval=1, delay=0, device_uri=None):
+        """
+        添加点击文本任务
+        :param target_text: 要点击的文本
+        :param lang: 语言
+        :param roi: 感兴趣区域
+        :param max_retry: 最大重试次数
+        :param retry_interval: 重试间隔
+        :param delay: 延迟执行时间
+        :param device_uri: 指定设备
+        """
+        self.task_executor.add_task(
+            self._execute_text_click, 
+            target_text, 
+            lang, 
+            roi, 
+            max_retry, 
+            retry_interval,
+            delay,
+            device_uri
+        )
+        
+    def _execute_text_click(self, target_text, lang, roi, max_retry, retry_interval, delay, device_uri):
+        """执行文本点击任务"""
+        if delay > 0:
+            time.sleep(delay)
+            
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            return False
+            
+        for attempt in range(max_retry):
+            # 捕获屏幕
+            screen = device.capture_screen()
+            if screen is None:
+                time.sleep(retry_interval)
+                continue
+                
+            # 提取ROI区域
+            if roi:
+                roi_screen = self.image_processor.get_roi_region(screen, roi)
+            else:
+                roi_screen = screen
+                
+            # 查找文本位置
+            text_pos = self.ocr_processor.find_text_position(roi_screen, target_text, lang=lang)
+            
+            if text_pos:
+                # 计算绝对坐标
+                x, y, w, h = text_pos
+                center_x = x + w // 2
+                center_y = y + h // 2
+                
+                # 如果是ROI区域，需要调整坐标
+                if roi:
+                    h, w = screen.shape[:2]
+                    roi_x1 = int(w * roi[0])
+                    roi_y1 = int(h * roi[1])
+                    center_x += roi_x1
+                    center_y += roi_y1
+                
+                # 点击文本中心
+                device.click(center_x, center_y)
+                return True
+                
+            time.sleep(retry_interval)
+            
+        return False

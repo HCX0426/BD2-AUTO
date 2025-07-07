@@ -127,3 +127,28 @@ class ImageProcessor:
             )
             
         return result
+    
+
+    def preprocess_for_ocr(self, image):
+        """
+        为OCR优化图像预处理
+        :return: 处理后的图像
+        """
+        # 转换为灰度图
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # 应用CLAHE增强对比度
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+        
+        # 自适应阈值二值化
+        binary = cv2.adaptiveThreshold(
+            enhanced, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 11, 2
+        )
+        
+        # 降噪
+        denoised = cv2.fastNlMeansDenoising(binary, None, 10, 7, 21)
+        
+        return denoised
