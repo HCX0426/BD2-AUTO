@@ -74,6 +74,7 @@ class WindowsDevice(BaseDevice):
     def key_press(self, key, duration=0.1):
         """按键操作"""
         if not self.set_foreground() or self.minimized:
+            print("窗口未置前，无法按键")
             return False
 
         pydirectinput.keyDown(key)
@@ -88,4 +89,10 @@ class WindowsDevice(BaseDevice):
 
         for char in text:
             self.key_press(char, duration=interval)
+        return True
+
+    def disconnect(self):
+        """断开与Windows设备的连接"""
+        # 这里可以添加实际的断开连接逻辑
+        # 对于Windows设备，可能不需要做太多操作
         return True

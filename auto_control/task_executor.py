@@ -1,12 +1,13 @@
+import queue
 import threading
 import time
 import traceback
-from queue import PriorityQueue  # 修改为 PriorityQueue
+from queue import PriorityQueue
 
 
 class TaskExecutor:
     def __init__(self, max_workers=3):
-        self.task_queue = PriorityQueue()  # 修改为 PriorityQueue
+        self.task_queue = PriorityQueue()
         self.workers = []
         self.max_workers = max_workers
         self.running = False
