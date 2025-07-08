@@ -1,7 +1,9 @@
-from bd2_auto import BD2Auto
-import time
-import sys
 import io
+import sys
+import time
+
+from auto_tasks.pc.login import Login
+from bd2_auto import BD2Auto
 
 # 控制台中文调试
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -21,6 +23,11 @@ else:
 auto.add_key_task("h")
 # 启动系统
 auto.start()
+
+# 初始化并添加任务
+# sample_task = Login(auto.task_executor)
+# task_id = sample_task.run(message="主线程启动的示例任务")
+# print(f"已添加示例任务，任务ID: {task_id}")
 
 # 监控状态
 try:

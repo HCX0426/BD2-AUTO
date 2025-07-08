@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -6,31 +7,29 @@ import numpy as np
 
 class BaseOCR(ABC):
     @abstractmethod
-    def detect_text(self, image, lang='eng'):
-        """检测图像中的文本位置"""
+    def detect_text(self, image: np.ndarray, lang: str = 'eng') -> List[Dict[str, Union[str, Tuple[int, int, int, int], float]]]:
         pass
 
     @abstractmethod
-    def recognize_text(self, image, lang='eng'):
-        """识别图像中的文本内容"""
+    def recognize_text(self, image: np.ndarray, lang: str = 'eng') -> str:
         pass
 
     @abstractmethod
-    def detect_and_recognize(self, image, lang='eng'):
-        """检测并识别图像中的文本"""
+    def detect_and_recognize(self, image: np.ndarray, lang: str = 'eng') -> List[Dict[str, Union[str, Tuple[int, int, int, int], float]]]:
         pass
 
 
 class TesseractOCR(BaseOCR):
-    def __init__(self, tesseract_path=None):
+    def __init__(self, tesseract_path: Optional[str] = None):
         try:
             import pytesseract
             self.pytesseract = pytesseract
-
             if tesseract_path:
                 self.pytesseract.pytesseract.tesseract_cmd = tesseract_path
+            print("TesseractOCR初始化成功")
         except ImportError:
-            raise ImportError("请安装pytesseract: pip install pytesseract")
+            print("请安装pytesseract: pip install pytesseract")
+            raise
 
     def preprocess_image(self, image):
         """预处理图像以提高OCR准确率"""
@@ -98,12 +97,14 @@ class TesseractOCR(BaseOCR):
 
 
 class EasyOCRWrapper(BaseOCR):
-    def __init__(self, languages=['en']):
+    def __init__(self, languages: List[str] = ['en']):
         try:
             import easyocr
             self.reader = easyocr.Reader(languages)
+            print(f"EasyOCR初始化完成，支持语言: {languages}")
         except ImportError:
-            raise ImportError("请安装easyocr: pip install easyocr")
+            print("请安装easyocr: pip install easyocr")
+            raise
 
     def detect_text(self, image, lang='en'):
         """检测文本位置"""
@@ -152,17 +153,21 @@ class EasyOCRWrapper(BaseOCR):
 
 
 class OCRProcessor:
-    def __init__(self, engine='tesseract', **kwargs):
-        """
-        :param engine: 可选 'tesseract' 或 'easyocr'
-        :param kwargs: 引擎特定参数
-        """
-        if engine == 'tesseract':
-            self.engine = TesseractOCR(**kwargs)
-        elif engine == 'easyocr':
-            self.engine = EasyOCRWrapper(**kwargs)
-        else:
+    def __init__(self, engine: str = 'tesseract', **kwargs):
+        self.engine_map = {
+            'tesseract': TesseractOCR,
+            'easyocr': EasyOCRWrapper
+        }
+
+        if engine not in self.engine_map:
             raise ValueError(f"不支持的OCR引擎: {engine}")
+
+        try:
+            self.engine = self.engine_map[engine](**kwargs)
+            print(f"OCR处理器初始化完成，使用引擎: {engine}")
+        except Exception as e:
+            print(f"OCR引擎初始化失败: {str(e)}")
+            raise
 
     def detect_text(self, image, lang='en'):
         return self.engine.detect_text(image, lang)

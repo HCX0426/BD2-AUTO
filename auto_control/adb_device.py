@@ -41,3 +41,6 @@ class ADBDevice(BaseDevice):
             
         text(text_str)
         return True
+    
+    def disconnect(self):
+        return super().disconnect()

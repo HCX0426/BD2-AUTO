@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 
 import airtest
 import pydirectinput
@@ -8,20 +9,43 @@ from airtest.core.api import connect_device
 from airtest.core.api import device as airtest_device
 from airtest.core.api import snapshot, touch
 
-from .device_base import BaseDevice
+from .device_base import BaseDevice, DeviceState
 
 
 class WindowsDevice(BaseDevice):
-    def connect(self):
+    def __init__(self, device_uri: str):
+        super().__init__(device_uri)
+        self.window_handle = None
+        self._last_window_state = None
+
+    def connect(self, timeout: float = 10.0) -> bool:
         try:
             connect_device(self.device_uri)
             self.connected = True
+            self.state = DeviceState.CONNECTED
             self.window_handle = win32gui.FindWindow(
                 None, self._get_window_title())
             self._update_window_info()
             return True
         except Exception as e:
+            self.state = DeviceState.ERROR
+            self.last_error = str(e)
             print(f"连接Windows设备失败: {str(e)}")
+            return False
+
+    def disconnect(self) -> bool:
+        try:
+            self.connected = False
+            self.state = DeviceState.DISCONNECTED
+            self.window_handle = None
+            self.resolution = (0, 0)
+            self.minimized = False
+            self._last_window_state = None
+            return True
+        except Exception as e:
+            self.state = DeviceState.ERROR
+            self.last_error = str(e)
+            print(f"断开Windows设备连接失败: {str(e)}")
             return False
 
     def _get_window_title(self):
@@ -45,29 +69,42 @@ class WindowsDevice(BaseDevice):
         if not self.window_handle:
             return False
 
-        # 如果窗口最小化则恢复
-        if self.minimized:
-            win32gui.ShowWindow(self.window_handle, win32con.SW_RESTORE)
-            time.sleep(0.5)
+        # 使用缓存状态避免不必要的API调用
+        if self._last_window_state != 'normal':
+            if self.minimized:
+                win32gui.ShowWindow(self.window_handle, win32con.SW_RESTORE)
+                time.sleep(0.5)
+            self._last_window_state = 'normal'
 
         try:
             win32gui.SetForegroundWindow(self.window_handle)
             self._update_window_info()
             return True
-        except:
+        except Exception as e:
+            print(f"窗口置前失败: {str(e)}")
             return False
 
-    def capture_screen(self):
-        """捕获屏幕截图"""
+    def text_input(self, text, interval=0.05):
+        """文本输入"""
+        if not self.set_foreground() or self.minimized:
+            return False
+
+        # 使用pydirectinput直接输入完整文本
+        try:
+            pydirectinput.write(text, interval=interval)
+            return True
+        except Exception as e:
+            print(f"文本输入失败: {str(e)}")
+            return False
+
+    def capture_screen(self) -> Optional[bytes]:
         if not self.connected:
             return None
         return snapshot()
 
-    def click(self, x, y, duration=0.1):
-        """点击指定位置"""
+    def click(self, x: int, y: int, duration: float = 0.1) -> bool:
         if not self.set_foreground() or self.minimized:
             return False
-
         touch((x, y))
         return True
 
@@ -80,19 +117,4 @@ class WindowsDevice(BaseDevice):
         pydirectinput.keyDown(key)
         time.sleep(duration)
         pydirectinput.keyUp(key)
-        return True
-
-    def text_input(self, text, interval=0.05):
-        """文本输入"""
-        if not self.set_foreground() or self.minimized:
-            return False
-
-        for char in text:
-            self.key_press(char, duration=interval)
-        return True
-
-    def disconnect(self):
-        """断开与Windows设备的连接"""
-        # 这里可以添加实际的断开连接逻辑
-        # 对于Windows设备，可能不需要做太多操作
         return True
