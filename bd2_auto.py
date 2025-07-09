@@ -6,7 +6,7 @@ import cv2
 from auto_control.device_manager import DeviceManager
 from auto_control.image_processor import ImageProcessor
 from auto_control.ocr_processor import OCRProcessor
-from auto_control.task_executor import TaskExecutor
+from auto_control.task_executor import Task, TaskExecutor
 
 
 class BD2Auto:

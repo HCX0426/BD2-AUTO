@@ -116,3 +116,17 @@ class TaskExecutor:
     def get_queue_size(self):
         """获取队列中待处理任务数量"""
         return self.task_queue.qsize()
+
+
+class Task:
+    def __init__(self, func, priority=0, *args, **kwargs):
+        self.func = func
+        self.priority = priority
+        self.args = args
+        self.kwargs = kwargs
+
+    def __lt__(self, other):
+        return self.priority < other.priority
+
+    def run(self):
+        return self.func(*self.args, **self.kwargs)

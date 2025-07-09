@@ -97,7 +97,7 @@ class TesseractOCR(BaseOCR):
 
 
 class EasyOCRWrapper(BaseOCR):
-    def __init__(self, languages: List[str] = ['en']):
+    def __init__(self, languages: List[str] = ['ch_sim', 'en']):
         try:
             import easyocr
             self.reader = easyocr.Reader(languages)
