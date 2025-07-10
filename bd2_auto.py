@@ -13,7 +13,7 @@ class BD2Auto:
     def __init__(self, base_resolution: tuple = None, ocr_engine: str = "easyocr"):
         self.device_manager = DeviceManager()
         self.ocr_processor = OCRProcessor(engine=ocr_engine)
-        self.task_executor = TaskExecutor(max_workers=3)
+        self.task_executor = TaskExecutor(max_workers=5)
         self.running = False
         self.last_error: Optional[str] = None
 
@@ -33,12 +33,15 @@ class BD2Auto:
     def _update_resolution_from_device(self):
         """从活动设备获取分辨率并更新image_processor"""
         device = self.device_manager.get_active_device()
-        if device and device.connected:
-            resolution = device.get_resolution()
-            if resolution:
-                self.image_processor.update_resolution(resolution)
-                return True
-        return False
+        if not device or not device.connected:
+            self.last_error = "无活动设备或设备未连接，无法更新分辨率"
+            return False
+        resolution = device.get_resolution()
+        if not resolution:
+            self.last_error = "从设备获取分辨率失败"
+            return False
+        self.image_processor.update_resolution(resolution)
+        return True
 
     def add_click_task(self, pos: tuple, is_relative: bool = True,
                        delay: float = 0, device_uri: Optional[str] = None,
@@ -50,7 +53,7 @@ class BD2Auto:
             is_relative,
             delay,
             device_uri,
-            callback=callback
+            callback=callback  # 直接使用新的回调机制
         )
 
     def add_ocr_task(self, callback: callable, lang: str = 'en',
@@ -59,20 +62,27 @@ class BD2Auto:
         """添加OCR任务(增强参数类型)"""
         self.task_executor.add_task(
             self._execute_ocr,
-            callback,
+            callback,  # 简化回调处理
             lang,
             roi,
             delay,
             device_uri,
-            callback=lambda res, err: callback(res) if err is None else None
+            callback=callback  # 简化回调处理
         )
 
     def add_device(self, device_uri):
         """添加设备并自动更新分辨率"""
-        success = self.device_manager.add_device(device_uri)
-        if success:
-            self._update_resolution_from_device()
-        return success
+        try:
+            success = self.device_manager.add_device(device_uri)
+            if success:
+                if not self._update_resolution_from_device():
+                    self.last_error = f"设备 {device_uri} 添加成功，但分辨率更新失败"
+            else:
+                self.last_error = f"设备 {device_uri} 添加失败"
+            return success
+        except Exception as e:
+            self.last_error = f"添加设备 {device_uri} 时发生异常: {str(e)}"
+            return False
 
     def set_active_device(self, device_uri):
         """设置活动设备"""
@@ -110,23 +120,14 @@ class BD2Auto:
             return None
         return device.capture_screen()
 
-    def add_click_task(self, pos, is_relative=True, delay=0, device_uri=None):
-        """添加点击任务"""
-        self.task_executor.add_task(
-            self._execute_click,
-            pos,
-            is_relative,
-            delay,
-            device_uri
-        )
-
     def _execute_click(self, pos, is_relative, delay, device_uri):
         """执行点击任务"""
         if delay > 0:
             time.sleep(delay)
 
         device = self._get_device(device_uri)
-        if not device:
+        if not device or not device.connected:
+            self.last_error = "设备未连接"
             return False
 
         # 转换坐标
@@ -174,7 +175,6 @@ class BD2Auto:
         )
 
     def _execute_template_click(self, template_name, delay, max_retry, retry_interval, device_uri):
-        """执行模板点击任务"""
         try:
             if delay > 0:
                 time.sleep(delay)
@@ -182,30 +182,46 @@ class BD2Auto:
             device = self._get_device(device_uri)
             if not device or not device.connected or device.is_minimized():
                 return False
-            
 
-            #  获取屏幕截图
+            # 获取屏幕截图
             screen = device.capture_screen()
             if screen is None:
+                print("[DEBUG] 截图失败")
+                self.last_error = "设备屏幕捕获失败"
                 return False
+
+            # 保存截图用于调试
+            cv2.imwrite("debug_screen.png", screen)
+            print("[DEBUG] 截图已保存为 debug_screen.png")
 
             # 获取设备分辨率
             resolution = device.get_resolution()
+            print(f"[DEBUG] 设备分辨率: {resolution}")
 
             # 匹配模板
             for attempt in range(max_retry):
                 pos = self.image_processor.match_template(
-                    screen,
-                    template_name,
-                    resolution
-                )
+                    screen, template_name, resolution)
+                print(f"[DEBUG] 匹配尝试 {attempt+1}/{max_retry}, 位置: {pos}")
 
                 if pos:
-                    # 点击匹配位置
-                    return device.click(*pos)
+                    print(f"[DEBUG] 准备点击位置: {pos}")
+                    # 确保pos是(x,y)元组
+                    if isinstance(pos, tuple) and len(pos) == 2:
+                        # 添加点击前的延迟
+                        time.sleep(0.5)
+                        # 明确构造坐标元组
+                        click_pos = (int(pos[0]), int(pos[1]))
+                        success = device.click(click_pos)
+                        print(f"[DEBUG] 点击结果: {'成功' if success else '失败'}")
+                        return success
+                    else:
+                        print(f"[ERROR] 无效的坐标格式: {pos}")
+                    return False
 
                 time.sleep(retry_interval)
 
+            self.last_error = f"模板点击任务重试{max_retry}次仍未找到匹配模板"
             return False
         except Exception as e:
             self.last_error = f"模板点击任务执行失败: {str(e)}"
@@ -230,24 +246,6 @@ class BD2Auto:
             "last_error": self.last_error,
             "workers": self.task_executor.max_workers
         }
-
-    def add_ocr_task(self, callback, lang='en', roi=None, delay=0, device_uri=None):
-        """
-        添加OCR识别任务
-        :param callback: 回调函数，接收识别结果
-        :param lang: 语言
-        :param roi: 感兴趣区域 (x1, y1, x2, y2) 0-1范围
-        :param delay: 延迟执行时间
-        :param device_uri: 指定设备
-        """
-        self.task_executor.add_task(
-            self._execute_ocr,
-            callback,
-            lang,
-            roi,
-            delay,
-            device_uri
-        )
 
     def _execute_ocr(self, callback, lang, roi, delay, device_uri):
         """执行OCR任务"""
@@ -274,7 +272,7 @@ class BD2Auto:
         callback(result)
         return True
 
-    def add_text_click_task(self, target_text, lang='en', roi=None, max_retry=3, retry_interval=1, delay=0, device_uri=None):
+    def add_text_click_task(self, target_text, lang="ch_sim", roi=None, max_retry=3, retry_interval=1, delay=0, device_uri=None):
         """
         添加点击文本任务
         :param target_text: 要点击的文本
@@ -298,49 +296,68 @@ class BD2Auto:
 
     def _execute_text_click(self, target_text, lang, roi, max_retry, retry_interval, delay, device_uri):
         """执行文本点击任务(支持模糊匹配和正则表达式)"""
+        print(f"[DEBUG] 开始执行文本点击任务，目标文本: '{target_text}'")
         if delay > 0:
+            print(f"[DEBUG] 等待延迟 {delay} 秒")
             time.sleep(delay)
 
         device = self._get_device(device_uri)
         if not device or not device.connected:
+            print("[ERROR] 设备未连接或无效")
             return False
 
         for attempt in range(max_retry):
+            print(f"[DEBUG] 尝试 {attempt + 1}/{max_retry}")
             # 捕获屏幕
             screen = device.capture_screen()
             if screen is None:
+                print("[WARNING] 屏幕捕获失败")
                 time.sleep(retry_interval)
                 continue
 
             # 提取ROI区域(如果没有指定ROI则使用全屏)
             roi_screen = self.image_processor.get_roi_region(
                 screen, roi) if roi else screen
+            print(f"[DEBUG] ROI区域: {'自定义' if roi else '全屏'}")
 
             # 查找文本位置(支持模糊匹配和正则表达式)
+            print(f"[DEBUG] 正在查找文本位置...")
             text_pos = self.ocr_processor.find_text_position(
                 roi_screen,
                 target_text,
                 lang=lang,
-                fuzzy_match=True,  # 启用模糊匹配
-                regex=False        # 默认关闭正则，可通过参数控制
+                fuzzy_match=True,
+                regex=False
             )
 
             if text_pos:
+                print(f"[DEBUG] 找到文本位置: {text_pos}")
                 # 计算绝对坐标
                 x, y, w, h = text_pos
                 center_x = x + w // 2
                 center_y = y + h // 2
 
-                if roi:
+                if roi and len(roi) >= 4:  # 确保roi是(x1,y1,x2,y2)
                     h, w = screen.shape[:2]
                     roi_x1 = int(w * roi[0])
                     roi_y1 = int(h * roi[1])
                     center_x += roi_x1
                     center_y += roi_y1
 
-                device.click(center_x, center_y)
-                return True
+                # 确保坐标为整数类型
+                center_x = int(center_x)
+                center_y = int(center_y)
+                click_pos = (center_x, center_y)
+                print(f"[DEBUG] 准备点击坐标: {click_pos}")
+                try:
+                    device.click(click_pos)
+                    print("[DEBUG] 点击完成")
+                    return True
+                except Exception as e:
+                    print(f"点击操作失败: {e}")
 
+            print(f"[DEBUG] 未找到文本，等待 {retry_interval} 秒后重试")
             time.sleep(retry_interval)
 
+        print(f"[ERROR] 重试 {max_retry} 次后仍未找到文本")
         return False

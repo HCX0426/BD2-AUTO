@@ -133,15 +133,22 @@ class ImageProcessor:
 
             # 检查匹配阈值
             if max_val >= template.threshold:
+                # 获取模板尺寸
+                template_h, template_w = template_img.shape[:2]
+                
+                # 计算中心点坐标
+                center_x = max_loc[0] + template_w // 2
+                center_y = max_loc[1] + template_h // 2
+                
                 # 转换到全局坐标
                 if roi:
                     h, w = screen.shape[:2]
                     x1, y1, _, _ = roi
                     return (
-                        int(max_loc[0] + w * x1),
-                        int(max_loc[1] + h * y1)
+                        int(center_x + w * x1),
+                        int(center_y + h * y1)
                     )
-                return (int(max_loc[0]), int(max_loc[1]))
+                return (int(center_x), int(center_y))
         except Exception as e:
             print(f"模板匹配错误: {str(e)}")
         return None

@@ -206,31 +206,50 @@ class OCRProcessor:
     def find_text_position(self, image, target_text, lang=DEFAULT_LANGUAGES,
                            fuzzy_match=False, regex=False):
         results = self.engine.detect_and_recognize(image, lang)
-
-        # 修改结果处理逻辑
+    
         found_results = []
         for item in results:
-            if isinstance(item, tuple) and len(item) == 3:
-                bbox, text, prob = item
-            elif isinstance(item, dict):
+            # 处理不同格式的bbox数据
+            if isinstance(item, dict):  # EasyOCR格式
                 bbox = item.get('bbox')
                 text = item.get('text')
                 prob = item.get('confidence', 0)
+            elif isinstance(item, tuple) and len(item) == 3:  # Tesseract格式
+                bbox, text, prob = item
             else:
                 continue
-
+                
+            # 转换bbox为统一格式
+            if isinstance(bbox, (list, tuple)) and len(bbox) == 4:  # (x,y,w,h)格式
+                rect = bbox
+            elif isinstance(bbox, list) and len(bbox) == 4 and all(isinstance(p, (list, tuple)) for p in bbox):  # 四点坐标格式
+                rect = self._bbox_to_rect(bbox)
+            else:
+                print(f"[WARNING] 忽略无效的bbox格式: {bbox}")
+                continue
+                
+            # 检查文本匹配
+            match = False
             if fuzzy_match:
-                if self._fuzzy_compare(text, target_text):
-                    found_results.append(self._bbox_to_rect(bbox))
+                match = self._fuzzy_compare(text, target_text)
             elif regex:
                 import re
-                if re.search(target_text, text):
-                    found_results.append(self._bbox_to_rect(bbox))
+                match = bool(re.search(target_text, text))
             else:
-                if text.strip() == target_text.strip():
-                    found_results.append(self._bbox_to_rect(bbox))
+                match = text.strip() == target_text.strip()
+            
+            if match:
+                found_results.append({
+                    'rect': rect,
+                    'text': text,
+                    'confidence': prob
+                })
 
-        return found_results[0] if found_results else None
+        # 按置信度排序后返回最佳匹配
+        if found_results:
+            found_results.sort(key=lambda x: x['confidence'], reverse=True)
+            return found_results[0]['rect']
+        return None
 
     def _fuzzy_compare(self, text1, text2, threshold=0.8):
         """模糊字符串比较"""
@@ -240,10 +259,16 @@ class OCRProcessor:
 
     def _bbox_to_rect(self, bbox):
         """将边界框转换为(x,y,w,h)格式"""
-        x_coords = [point[0] for point in bbox]
-        y_coords = [point[1] for point in bbox]
-        x = min(x_coords)
-        y = min(y_coords)
-        w = max(x_coords) - x
-        h = max(y_coords) - y
-        return (x, y, w, h)
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            if all(isinstance(p, (int, float)) for p in bbox):  # 已经是(x,y,w,h)格式
+                return bbox
+            elif all(isinstance(p, (list, tuple)) for p in bbox):  # 四点坐标格式
+                x_coords = [point[0] for point in bbox]
+                y_coords = [point[1] for point in bbox]
+                x = min(x_coords)
+                y = min(y_coords)
+                w = max(x_coords) - x
+                h = max(y_coords) - y
+                return (int(x), int(y), int(w), int(h))
+        print(f"[ERROR] 无法处理的bbox格式: {bbox}")
+        return (0, 0, 0, 0)  # 返回无效坐标
