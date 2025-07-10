@@ -1,24 +1,24 @@
-import os
-import easyocr
 import io
+import os
 import sys
+import threading
 import time
 
+import airtest
 import cv2
+import easyocr
+import numpy as np
+import win32gui
+from airtest.core.api import Template, connect_device, paste, swipe, touch
 
-from auto_tasks.pc.login import Login
+from auto_control.image_processor import ImageProcessor
 from bd2_auto import BD2Auto
 
+processor = ImageProcessor()
+# 你的代码
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-try:
-    reader = easyocr.Reader(['ch_sim', 'en'])  # 测试简体中文+英文
-    print("✅ 中文支持已安装！")
-except Exception as e:
-    print("❌ 中文未正确安装，错误信息:", e)
-
-
-# 初始化自动化系统
+# 修改这里：初始化自动化系统时指定支持的语言
 auto = BD2Auto(ocr_engine='easyocr')
 
 # 添加Windows设备
@@ -29,45 +29,51 @@ if a:
     print("窗口已置前")
 else:
     print("窗口未置前")
+a =  auto.image_processor.load_template(
+    name="lo",
+    path=r"C:/Users/hcx/Desktop/BD2-AUTO/Snipaste_2025-07-09_21-33-47.png"
+)
+# 加载模板后添加检查
+print("已加载模板:", auto.image_processor.templates.keys())
 
-# 调试截
+# device = auto.device_manager.get_active_device()
+# screen = device.capture_screen()
+# if screen is not None:
+#     cv2.imwrite('current_screen.png', screen)
+#     print("当前屏幕已保存为 current_screen.png")
 
-device = auto.device_manager.get_active_device()
-print("=== 设备调试信息 ===")
-print(f"设备URI: {device.device_uri}")
-print(f"连接状态: {device.connected}")
-# print(f"窗口句柄: {device.window_handle}")
-print(f"分辨率: {device.resolution}")
-if device.is_minimized():
-    print("⚠️ 窗口已最小化，无法截图")
-    device.set_foreground()  # 尝试恢复窗口
-    time.sleep(1)  # 等待窗口恢复
+#     # 检查模板图像是否加载成功
+#     template_path = r"C:/Users/hcx/Desktop/BD2-AUTO/Snipaste_2025-07-09_21-33-47.png"
+#     if not os.path.exists(template_path):
+#         print(f"⚠️ 模板文件不存在: {template_path}")
+#     else:
+#         template_img = cv2.imread(template_path)
+#         print(
+#             f"模板图像尺寸: {template_img.shape if template_img is not None else '加载失败'}")
 
-screen = auto.capture_screen()
-if screen is not None:
-    print(f"截图尺寸: {screen.shape if hasattr(screen, 'shape') else '未知'}")
-    cv2.imwrite('debug_screen.png', screen)
-    result = auto.ocr_processor.recognize_text(screen, lang='ch_sim')
-    print(f"直接识别结果: {result}")
-else:
-    print("⚠️ 截图失败")
+#     resolution = device.get_resolution()
+#     print(f"设备分辨率: {resolution}")
 
-# auto.add_key_task("h")
-time.sleep(5)
-auto.add_text_click_task("餐馆营业额", lang='ch_sim')
+#     pos = auto.image_processor.match_template(screen, "lo", resolution)
+#     if pos:
+#         print(f"匹配位置: {pos}")
+#         # 在图像上标记匹配位置
+#         marked = screen.copy()
+#         cv2.circle(marked, pos, 10, (0, 0, 255), 2)
+#         cv2.imwrite('matched_position.png', marked)
+#         print("匹配位置已标记并保存为 matched_position.png")
+
+#         if device.click(*pos):
+#             print("点击执行成功")
+#         else:
+#             print("点击执行失败")
+#     else:
+#         print("⚠️ 模板匹配失败")
+
+auto.add_template_click_task("lo")
+
+# 添加模板点击任务
+# auto.add_template_click_task("lo")
 
 # 启动系统
 auto.start()
-# 初始化并添加任务
-# sample_task = Login(auto.task_executor)
-# task_id = sample_task.run(message="主线程启动的示例任务")
-# print(f"已添加示例任务，任务ID: {task_id}")
-
-# 监控状态
-try:
-    while True:
-        status = auto.get_status()
-        print(f"运行状态: {status}")
-        time.sleep(5)
-except KeyboardInterrupt:
-    auto.stop()

@@ -77,6 +77,52 @@ class BaseDevice(ABC):
         """
         pass
 
+    @abstractmethod
+    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5) -> bool:
+        """
+        滑动操作 (跨平台)
+        :param start_x: 起始X坐标
+        :param start_y: 起始Y坐标
+        :param end_x: 结束X坐标
+        :param end_y: 结束Y坐标
+        :param duration: 滑动持续时间(秒)
+        :return: 是否滑动成功
+        """
+        pass
+
+    @abstractmethod
+    def wait(self, template, timeout: float = 10.0) -> bool:
+        """
+        等待元素出现 (跨平台)
+        :param template: 要等待的模板
+        :param timeout: 超时时间(秒)
+        :return: 是否等待成功
+        """
+        pass
+
+    @abstractmethod
+    def exists(self, template) -> bool:
+        """
+        检查元素是否存在 (跨平台)
+        :param template: 要检查的模板
+        :return: 元素是否存在
+        """
+        pass
+
+    def paste_text(self, text: str) -> bool:
+        """
+        粘贴文本 (跨平台实现)
+        :param text: 要粘贴的文本
+        :return: 是否粘贴成功
+        """
+        try:
+            from airtest.core.api import paste
+            paste(text)
+            return True
+        except Exception as e:
+            print(f"粘贴文本失败: {str(e)}")
+            return False
+
     def set_foreground(self) -> bool:
         """
         将窗口置前

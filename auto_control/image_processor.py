@@ -1,3 +1,5 @@
+import re
+
 import cv2
 import numpy as np
 from airtest.core.cv import Template
@@ -10,6 +12,14 @@ class ImageProcessor:
         """
         self.base_resolution = base_resolution
         self.templates = {}
+
+    def update_resolution(self, new_resolution):
+        """更新基准分辨率"""
+        self.base_resolution = new_resolution
+        # 清除所有已缩放的模板，下次使用时重新缩放
+        for name in self.templates:
+            if 'scaled_template' in self.templates[name]:
+                del self.templates[name]['scaled_template']
 
     def load_template(self, name, path, roi=None, threshold=0.8, scale_strategy='fit'):
         """
@@ -94,13 +104,7 @@ class ImageProcessor:
         return screen[abs_y1:abs_y2, abs_x1:abs_x2]
 
     def match_template(self, screen, template_name, target_resolution):
-        """
-        在屏幕中匹配模板
-        :param screen: 屏幕截图 (OpenCV格式)
-        :param template_name: 模板名称
-        :param target_resolution: 目标分辨率 (宽, 高)
-        :return: 匹配结果 (x, y) 或 None
-        """
+        """修改后的匹配方法"""
         if template_name not in self.templates:
             raise ValueError(f"模板 {template_name} 未加载")
 
@@ -116,19 +120,31 @@ class ImageProcessor:
         # 提取ROI区域
         roi_img = self.get_roi_region(screen, roi)
 
-        # 在ROI区域匹配
-        result = template.match_in(roi_img)
+        # 直接使用OpenCV进行模板匹配
+        try:
+            # 获取模板图像数据
+            template_img = cv2.imread(
+                template_info['path'], cv2.IMREAD_UNCHANGED)
 
-        # 转换到全局坐标
-        if result and roi:
-            h, w = screen.shape[:2]
-            x1, y1, _, _ = roi
-            result = (
-                int(result[0] + w * x1),
-                int(result[1] + h * y1)
-            )
+            # 执行模板匹配
+            result = cv2.matchTemplate(
+                roi_img, template_img, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
 
-        return result
+            # 检查匹配阈值
+            if max_val >= template.threshold:
+                # 转换到全局坐标
+                if roi:
+                    h, w = screen.shape[:2]
+                    x1, y1, _, _ = roi
+                    return (
+                        int(max_loc[0] + w * x1),
+                        int(max_loc[1] + h * y1)
+                    )
+                return (int(max_loc[0]), int(max_loc[1]))
+        except Exception as e:
+            print(f"模板匹配错误: {str(e)}")
+        return None
 
     def preprocess_for_ocr(self, image):
         """
@@ -172,8 +188,8 @@ class ImageProcessor:
         :param threshold: 颜色匹配阈值
         :return: 颜色区域的中心点坐标 (x, y) 或 None
         """
-        from airtest.core.cv import loop_find
         from airtest import aircv
+        from airtest.core.cv import loop_find
 
         # 创建颜色模板
         color_template = aircv.create_color_template(color)

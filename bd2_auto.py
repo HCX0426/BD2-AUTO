@@ -10,13 +10,35 @@ from auto_control.task_executor import Task, TaskExecutor
 
 
 class BD2Auto:
-    def __init__(self, base_resolution: tuple = (1920, 1080), ocr_engine: str = "easyocr"):
+    def __init__(self, base_resolution: tuple = None, ocr_engine: str = "easyocr"):
         self.device_manager = DeviceManager()
-        self.image_processor = ImageProcessor(base_resolution)
         self.ocr_processor = OCRProcessor(engine=ocr_engine)
         self.task_executor = TaskExecutor(max_workers=3)
         self.running = False
         self.last_error: Optional[str] = None
+
+        # 确定最终使用的分辨率
+        resolution = None
+        if base_resolution is None:
+            # 尝试从设备获取分辨率
+            device = self.device_manager.get_active_device()
+            if device and device.connected:
+                resolution = device.get_resolution()
+
+        # 初始化image_processor，优先级：设备分辨率 > 传入的分辨率 > 默认分辨率
+        self.image_processor = ImageProcessor(
+            resolution or base_resolution or (1920, 1080)
+        )
+
+    def _update_resolution_from_device(self):
+        """从活动设备获取分辨率并更新image_processor"""
+        device = self.device_manager.get_active_device()
+        if device and device.connected:
+            resolution = device.get_resolution()
+            if resolution:
+                self.image_processor.update_resolution(resolution)
+                return True
+        return False
 
     def add_click_task(self, pos: tuple, is_relative: bool = True,
                        delay: float = 0, device_uri: Optional[str] = None,
@@ -45,9 +67,12 @@ class BD2Auto:
             callback=lambda res, err: callback(res) if err is None else None
         )
 
-    def add_device(self, device_uri, device_type='auto'):
-        """添加设备"""
-        return self.device_manager.add_device(device_uri, device_type)
+    def add_device(self, device_uri):
+        """添加设备并自动更新分辨率"""
+        success = self.device_manager.add_device(device_uri)
+        if success:
+            self._update_resolution_from_device()
+        return success
 
     def set_active_device(self, device_uri):
         """设置活动设备"""
@@ -150,36 +175,42 @@ class BD2Auto:
 
     def _execute_template_click(self, template_name, delay, max_retry, retry_interval, device_uri):
         """执行模板点击任务"""
-        if delay > 0:
-            time.sleep(delay)
+        try:
+            if delay > 0:
+                time.sleep(delay)
 
-        device = self._get_device(device_uri)
-        if not device or not device.connected or device.is_minimized():
+            device = self._get_device(device_uri)
+            if not device or not device.connected or device.is_minimized():
+                return False
+            
+
+            #  获取屏幕截图
+            screen = device.capture_screen()
+            if screen is None:
+                return False
+
+            # 获取设备分辨率
+            resolution = device.get_resolution()
+
+            # 匹配模板
+            for attempt in range(max_retry):
+                pos = self.image_processor.match_template(
+                    screen,
+                    template_name,
+                    resolution
+                )
+
+                if pos:
+                    # 点击匹配位置
+                    return device.click(*pos)
+
+                time.sleep(retry_interval)
+
             return False
-
-        # 获取屏幕截图
-        screen = device.capture_screen()
-        if screen is None:
+        except Exception as e:
+            self.last_error = f"模板点击任务执行失败: {str(e)}"
+            print("模板点击任务执行失败:", str(e))
             return False
-
-        # 获取设备分辨率
-        resolution = device.get_resolution()
-
-        # 匹配模板
-        for attempt in range(max_retry):
-            pos = self.image_processor.match_template(
-                screen,
-                template_name,
-                resolution
-            )
-
-            if pos:
-                # 点击匹配位置
-                return device.click(*pos)
-
-            time.sleep(retry_interval)
-
-        return False
 
     def _get_device(self, device_uri):
         """获取设备实例"""
@@ -266,7 +297,7 @@ class BD2Auto:
         )
 
     def _execute_text_click(self, target_text, lang, roi, max_retry, retry_interval, delay, device_uri):
-        """执行文本点击任务"""
+        """执行文本点击任务(支持模糊匹配和正则表达式)"""
         if delay > 0:
             time.sleep(delay)
 
@@ -281,15 +312,18 @@ class BD2Auto:
                 time.sleep(retry_interval)
                 continue
 
-            # 提取ROI区域
-            if roi:
-                roi_screen = self.image_processor.get_roi_region(screen, roi)
-            else:
-                roi_screen = screen
+            # 提取ROI区域(如果没有指定ROI则使用全屏)
+            roi_screen = self.image_processor.get_roi_region(
+                screen, roi) if roi else screen
 
-            # 查找文本位置
+            # 查找文本位置(支持模糊匹配和正则表达式)
             text_pos = self.ocr_processor.find_text_position(
-                roi_screen, target_text, lang=lang)
+                roi_screen,
+                target_text,
+                lang=lang,
+                fuzzy_match=True,  # 启用模糊匹配
+                regex=False        # 默认关闭正则，可通过参数控制
+            )
 
             if text_pos:
                 # 计算绝对坐标
@@ -297,7 +331,6 @@ class BD2Auto:
                 center_x = x + w // 2
                 center_y = y + h // 2
 
-                # 如果是ROI区域，需要调整坐标
                 if roi:
                     h, w = screen.shape[:2]
                     roi_x1 = int(w * roi[0])
@@ -305,7 +338,6 @@ class BD2Auto:
                     center_x += roi_x1
                     center_y += roi_y1
 
-                # 点击文本中心
                 device.click(center_x, center_y)
                 return True
 

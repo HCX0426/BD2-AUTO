@@ -4,18 +4,34 @@ from typing import Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
+# 新增全局语言配置常量
+DEFAULT_LANGUAGES = 'chi_sim+chi_tra+eng+jpn'  # 默认支持的语言
+SUPPORTED_LANGUAGES = {  # 各引擎支持的语言映射
+    'tesseract': {
+        'chi_sim': '简体中文',
+        'chi_tra': '繁体中文',
+        'eng': '英文',
+        'jpn': '日文'
+    },
+    'easyocr': {
+        'ch_sim': ['ch_sim'],  # 简体中文可以单独使用
+        'ch_tra': ['ch_tra', 'en'],  # 繁体中文必须与英文一起使用
+        'en': ['en']
+    }
+}
+
 
 class BaseOCR(ABC):
     @abstractmethod
-    def detect_text(self, image: np.ndarray, lang: str = 'eng') -> List[Dict[str, Union[str, Tuple[int, int, int, int], float]]]:
+    def detect_text(self, image: np.ndarray, lang: str = DEFAULT_LANGUAGES) -> List[Dict[str, Union[str, Tuple[int, int, int, int], float]]]:
         pass
 
     @abstractmethod
-    def recognize_text(self, image: np.ndarray, lang: str = 'eng') -> str:
+    def recognize_text(self, image: np.ndarray, lang: str = DEFAULT_LANGUAGES) -> str:
         pass
 
     @abstractmethod
-    def detect_and_recognize(self, image: np.ndarray, lang: str = 'eng') -> List[Dict[str, Union[str, Tuple[int, int, int, int], float]]]:
+    def detect_and_recognize(self, image: np.ndarray, lang: str = DEFAULT_LANGUAGES) -> List[Dict[str, Union[str, Tuple[int, int, int, int], float]]]:
         pass
 
 
@@ -97,16 +113,26 @@ class TesseractOCR(BaseOCR):
 
 
 class EasyOCRWrapper(BaseOCR):
-    def __init__(self, languages: List[str] = ['ch_sim', 'en']):
+    def __init__(self, languages: List[str] = ['ch_sim', 'en']):  # 默认只使用简体中文和英文
         try:
             import easyocr
-            self.reader = easyocr.Reader(languages)
-            print(f"EasyOCR初始化完成，支持语言: {languages}")
+
+            # 根据语言自动处理组合
+            processed_langs = []
+            for lang in languages:
+                if lang in SUPPORTED_LANGUAGES['easyocr']:
+                    processed_langs.extend(
+                        SUPPORTED_LANGUAGES['easyocr'][lang])
+            # 去重
+            processed_langs = list(dict.fromkeys(processed_langs))
+
+            self.reader = easyocr.Reader(processed_langs)
+            print(f"EasyOCR初始化完成，使用语言: {processed_langs}")
         except ImportError:
             print("请安装easyocr: pip install easyocr")
             raise
 
-    def detect_text(self, image, lang='en'):
+    def detect_text(self, image, lang=DEFAULT_LANGUAGES):  # 使用全局默认语言
         """检测文本位置"""
         # 转换图像格式
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -124,31 +150,29 @@ class EasyOCRWrapper(BaseOCR):
             })
         return formatted
 
-    def recognize_text(self, image, lang='en'):
+    def recognize_text(self, image, lang=DEFAULT_LANGUAGES):  # 使用全局默认语言
         """识别图像中的文本"""
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         results = self.reader.readtext(image_rgb)
         return "\n".join([result[1] for result in results])
 
-    def detect_and_recognize(self, image, lang='en'):
+    def detect_and_recognize(self, image, lang=DEFAULT_LANGUAGES):  # 使用全局默认语言
         """同时检测位置和识别文本"""
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         results = self.reader.readtext(image_rgb)
 
+        # 统一返回格式
         formatted = []
-        for bbox, text, confidence in results:
-            (top_left, top_right, bottom_right, bottom_left) = bbox
-            x_min = int(min([p[0] for p in bbox]))
-            y_min = int(min([p[1] for p in bbox]))
-            x_max = int(max([p[0] for p in bbox]))
-            y_max = int(max([p[1] for p in bbox]))
-
-            formatted.append({
-                'text': text,
-                'bbox': (x_min, y_min, x_max - x_min, y_max - y_min),
-                'confidence': confidence
-            })
-
+        for item in results:
+            if len(item) == 3:  # (bbox, text, confidence)
+                bbox, text, confidence = item
+                (x_min, y_min) = map(int, map(min, zip(*bbox)))
+                (x_max, y_max) = map(int, map(max, zip(*bbox)))
+                formatted.append({
+                    'text': text,
+                    'bbox': (x_min, y_min, x_max - x_min, y_max - y_min),
+                    'confidence': confidence
+                })
         return formatted
 
 
@@ -165,39 +189,61 @@ class OCRProcessor:
         try:
             self.engine = self.engine_map[engine](**kwargs)
             print(f"OCR处理器初始化完成，使用引擎: {engine}")
+            print(f"支持的语言: {SUPPORTED_LANGUAGES.get(engine, {})}")
         except Exception as e:
             print(f"OCR引擎初始化失败: {str(e)}")
             raise
 
-    def detect_text(self, image, lang='en'):
+    def detect_text(self, image, lang=DEFAULT_LANGUAGES):
         return self.engine.detect_text(image, lang)
 
-    def recognize_text(self, image, lang='en'):
+    def recognize_text(self, image, lang=DEFAULT_LANGUAGES):
         return self.engine.recognize_text(image, lang)
 
-    def detect_and_recognize(self, image, lang='en'):
+    def detect_and_recognize(self, image, lang=DEFAULT_LANGUAGES):
         return self.engine.detect_and_recognize(image, lang)
 
-    def find_text_position(self, image, target_text, lang='en'):
-        """
-        在图像中查找特定文本的位置
-        :param target_text: 要查找的文本
-        :return: (x, y, w, h) 或 None
-        """
-        results = self.detect_and_recognize(image, lang)
-        if isinstance(self.engine, TesseractOCR):
-            details = results['details']
-            n_boxes = len(details['text'])
-            for i in range(n_boxes):
-                if target_text.lower() in details['text'][i].lower():
-                    return (
-                        details['left'][i],
-                        details['top'][i],
-                        details['width'][i],
-                        details['height'][i]
-                    )
-        elif isinstance(self.engine, EasyOCRWrapper):
-            for item in results:
-                if target_text.lower() in item['text'].lower():
-                    return item['bbox']
-        return None
+    def find_text_position(self, image, target_text, lang=DEFAULT_LANGUAGES,
+                           fuzzy_match=False, regex=False):
+        results = self.engine.detect_and_recognize(image, lang)
+
+        # 修改结果处理逻辑
+        found_results = []
+        for item in results:
+            if isinstance(item, tuple) and len(item) == 3:
+                bbox, text, prob = item
+            elif isinstance(item, dict):
+                bbox = item.get('bbox')
+                text = item.get('text')
+                prob = item.get('confidence', 0)
+            else:
+                continue
+
+            if fuzzy_match:
+                if self._fuzzy_compare(text, target_text):
+                    found_results.append(self._bbox_to_rect(bbox))
+            elif regex:
+                import re
+                if re.search(target_text, text):
+                    found_results.append(self._bbox_to_rect(bbox))
+            else:
+                if text.strip() == target_text.strip():
+                    found_results.append(self._bbox_to_rect(bbox))
+
+        return found_results[0] if found_results else None
+
+    def _fuzzy_compare(self, text1, text2, threshold=0.8):
+        """模糊字符串比较"""
+        from difflib import SequenceMatcher
+        ratio = SequenceMatcher(None, text1, text2).ratio()
+        return ratio >= threshold
+
+    def _bbox_to_rect(self, bbox):
+        """将边界框转换为(x,y,w,h)格式"""
+        x_coords = [point[0] for point in bbox]
+        y_coords = [point[1] for point in bbox]
+        x = min(x_coords)
+        y = min(y_coords)
+        w = max(x_coords) - x
+        h = max(y_coords) - y
+        return (x, y, w, h)

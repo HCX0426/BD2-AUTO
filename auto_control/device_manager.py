@@ -10,22 +10,20 @@ class DeviceManager:
         self.devices: Dict[str, BaseDevice] = {}
         self.active_device: Optional[str] = None
 
-    def add_device(self, device_uri: str, device_type: str = 'auto', timeout: float = 10.0) -> bool:
+    def add_device(self, device_uri: str, timeout: float = 10.0) -> bool:
         """
-        添加设备
+        添加设备(从URI自动判断设备类型)
         :param device_uri: 设备连接URI
-        :param device_type: 设备类型 (windows, adb, auto)
         :param timeout: 连接超时时间(秒)
         :return: 是否添加成功
         """
         # 自动检测设备类型
-        if device_type == 'auto':
-            if 'Windows' in device_uri:
-                device_type = 'windows'
-            elif 'Android' in device_uri:
-                device_type = 'adb'
-            else:
-                raise ValueError("无法自动识别设备类型")
+        if 'Windows' in device_uri:
+            device_type = 'windows'
+        elif 'Android' in device_uri:
+            device_type = 'adb'
+        else:
+            raise ValueError("无法自动识别设备类型")
 
         # 创建设备实例
         if device_type == 'windows':
