@@ -1,16 +1,15 @@
 from enum import Enum
-from typing import Tuple, Optional
+import os
 
 import cv2
 
+# 基础配置
 class ScaleStrategy(Enum):
-    """图像缩放策略枚举"""
-    FIT = 'fit'      # 保持宽高比，适应目标区域
-    STRETCH = 'stretch'  # 拉伸填充目标区域
-    CROP = 'crop'    # 裁剪以适应目标区域
+    FIT = 'fit'
+    STRETCH = 'stretch'
+    CROP = 'crop'
 
 class MatchMethod(Enum):
-    """模板匹配方法枚举"""
     SQDIFF = cv2.TM_SQDIFF
     SQDIFF_NORMED = cv2.TM_SQDIFF_NORMED
     CCORR = cv2.TM_CCORR
@@ -18,7 +17,20 @@ class MatchMethod(Enum):
     CCOEFF = cv2.TM_CCOEFF
     CCOEFF_NORMED = cv2.TM_CCOEFF_NORMED
 
-# 默认配置
+# 路径配置
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+TEMPLATE_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'image') # 默认模板路径
+AUTO_LOAD_TEMPLATES = True  # 是否自动加载模板
+TEMPLATE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp')  # 支持的图片格式
+
+# ROI配置 (可选)
+TEMPLATE_ROI_CONFIG = {
+    # 'template_name': (x1, y1, x2, y2)  # 0-1范围
+    'button_start': (0.4, 0.8, 0.6, 0.9),
+    'button_exit': (0.8, 0.05, 0.95, 0.15)
+}
+
+# 性能配置
 DEFAULT_RESOLUTION = (1920, 1080)
 DEFAULT_THRESHOLD = 0.8
 DEFAULT_SCALE_STRATEGY = ScaleStrategy.FIT

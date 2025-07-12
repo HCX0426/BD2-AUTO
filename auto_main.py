@@ -190,35 +190,31 @@ class Auto:
                 self.last_error = "设备屏幕捕获失败"
                 return False
 
-            # 保存截图用于调试
-            cv2.imwrite("debug_screen.png", screen)
-            print("[DEBUG] 截图已保存为 debug_screen.png")
-
             # 获取设备分辨率
             resolution = device.get_resolution()
             print(f"[DEBUG] 设备分辨率: {resolution}")
 
             # 匹配模板
             for attempt in range(max_retry):
-                # 修改：处理 ImageProcessor.match_template 返回值
-                pos, confidence = self.image_processor.match_template(
+                # 修改这里：直接获取MatchResult对象
+                match_result = self.image_processor.match_template(
                     screen, template_name, resolution)
                 print(
-                    f"[DEBUG] 匹配尝试 {attempt+1}/{max_retry}, 位置: {pos}, 置信度: {confidence}")
+                    f"[DEBUG] 匹配尝试 {attempt+1}/{max_retry}, 位置: {match_result.position}, 置信度: {match_result.confidence}")
 
-                if pos:
-                    print(f"[DEBUG] 准备点击位置: {pos}")
-                    # 确保pos是(x,y)元组
-                    if isinstance(pos, tuple) and len(pos) == 2:
+                if match_result.position:
+                    print(f"[DEBUG] 准备点击位置: {match_result.position}")
+                    # 确保position是(x,y)元组
+                    if isinstance(match_result.position, tuple) and len(match_result.position) == 2:
                         # 添加点击前的延迟
                         time.sleep(0.5)
                         # 明确构造坐标元组
-                        click_pos = (int(pos[0]), int(pos[1]))
+                        click_pos = (int(match_result.position[0]), int(match_result.position[1]))
                         success = device.click(click_pos)
                         print(f"[DEBUG] 点击结果: {'成功' if success else '失败'}")
                         return success
                     else:
-                        print(f"[ERROR] 无效的坐标格式: {pos}")
+                        print(f"[ERROR] 无效的坐标格式: {match_result.position}")
                     return False
 
                 time.sleep(retry_interval)
@@ -362,3 +358,137 @@ class Auto:
 
         print(f"[ERROR] 重试 {max_retry} 次后仍未找到文本")
         return False
+
+    def add_minimize_window_task(self, delay=0, device_uri=None):
+        """添加最小化窗口任务"""
+        self.task_executor.add_task(
+            self._execute_minimize_window,
+            delay,
+            device_uri
+        )
+
+    def _execute_minimize_window(self, delay, device_uri):
+        """执行最小化窗口任务"""
+        if delay > 0:
+            time.sleep(delay)
+
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            print("[ERROR] 设备未连接或无效")
+            return False
+
+        try:
+            result = device.minimize_window()
+            print(f"[DEBUG] 窗口最小化结果: {'成功' if result else '失败'}")
+            return result
+        except Exception as e:
+            print(f"最小化窗口任务执行失败: {str(e)}")
+            return False
+
+    def add_maximize_window_task(self, delay=0, device_uri=None):
+        """添加最大化窗口任务"""
+        self.task_executor.add_task(
+            self._execute_maximize_window,
+            delay,
+            device_uri
+        )
+
+    def _execute_maximize_window(self, delay, device_uri):
+        """执行最大化窗口任务"""
+        if delay > 0:
+            time.sleep(delay)
+
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            print("[ERROR] 设备未连接或无效")
+            return False
+
+        try:
+            result = device.maximize_window()
+            print(f"[DEBUG] 窗口最大化结果: {'成功' if result else '失败'}")
+            return result
+        except Exception as e:
+            print(f"最大化窗口任务执行失败: {str(e)}")
+            return False
+
+    def add_restore_window_task(self, delay=0, device_uri=None):
+        """添加恢复窗口任务"""
+        self.task_executor.add_task(
+            self._execute_restore_window,
+            delay,
+            device_uri
+        )
+
+    def _execute_restore_window(self, delay, device_uri):
+        """执行恢复窗口任务"""
+        if delay > 0:
+            time.sleep(delay)
+
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            print("[ERROR] 设备未连接或无效")
+            return False
+
+        try:
+            result = device.restore_window()
+            print(f"[DEBUG] 窗口恢复结果: {'成功' if result else '失败'}")
+            return result
+        except Exception as e:
+            print(f"恢复窗口任务执行失败: {str(e)}")
+            return False
+
+    def add_resize_window_task(self, width: int, height: int, delay=0, device_uri=None):
+        """添加调整窗口大小任务"""
+        self.task_executor.add_task(
+            self._execute_resize_window,
+            width,
+            height,
+            delay,
+            device_uri
+        )
+
+    def _execute_resize_window(self, width: int, height: int, delay, device_uri):
+        """执行调整窗口大小任务"""
+        if delay > 0:
+            time.sleep(delay)
+
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            print("[ERROR] 设备未连接或无效")
+            return False
+
+        try:
+            result = device.resize_window(width, height)
+            print(f"[DEBUG] 窗口调整大小结果: {'成功' if result else '失败'}")
+            return result
+        except Exception as e:
+            print(f"调整窗口大小任务执行失败: {str(e)}")
+            return False
+    
+    def add_check_element_exist_task(self, template, delay=0, device_uri=None):
+        """添加检查元素是否存在的任务"""
+        self.task_executor.add_task(
+            self._execute_check_element_exist,
+            template,
+            delay,
+            device_uri
+        )
+
+    def _execute_check_element_exist(self, template, delay, device_uri):
+        """执行检查元素是否存在的任务"""
+        if delay > 0:
+            time.sleep(delay)
+
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            print("[ERROR] 设备未连接或无效")
+            return False
+
+        try:
+            result = device.exists(template)
+            print(f"[DEBUG] 元素存在检查结果: {'存在' if result else '不存在'}")
+            return result
+        except Exception as e:
+            print(f"检查元素存在任务执行失败: {str(e)}")
+            return False
+
