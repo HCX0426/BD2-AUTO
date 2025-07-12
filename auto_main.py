@@ -6,7 +6,7 @@ import cv2
 from auto_control.device_manager import DeviceManager
 from auto_control.image_processor import ImageProcessor
 from auto_control.ocr_processor import OCRProcessor
-from auto_control.task_executor import Task, TaskExecutor
+from auto_control.task_executor import TaskExecutor
 
 
 class Auto:
@@ -62,12 +62,12 @@ class Auto:
         """添加OCR任务(增强参数类型)"""
         self.task_executor.add_task(
             self._execute_ocr,
-            callback,  # 简化回调处理
+            callback,
             lang,
             roi,
             delay,
             device_uri,
-            callback=callback  # 简化回调处理
+            callback=callback
         )
 
     def add_device(self, device_uri):
