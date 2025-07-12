@@ -9,7 +9,7 @@ from auto_control.ocr_processor import OCRProcessor
 from auto_control.task_executor import Task, TaskExecutor
 
 
-class BD2Auto:
+class Auto:
     def __init__(self, base_resolution: tuple = None, ocr_engine: str = "easyocr"):
         self.device_manager = DeviceManager()
         self.ocr_processor = OCRProcessor(engine=ocr_engine)
@@ -200,9 +200,11 @@ class BD2Auto:
 
             # 匹配模板
             for attempt in range(max_retry):
-                pos = self.image_processor.match_template(
+                # 修改：处理 ImageProcessor.match_template 返回值
+                pos, confidence = self.image_processor.match_template(
                     screen, template_name, resolution)
-                print(f"[DEBUG] 匹配尝试 {attempt+1}/{max_retry}, 位置: {pos}")
+                print(
+                    f"[DEBUG] 匹配尝试 {attempt+1}/{max_retry}, 位置: {pos}, 置信度: {confidence}")
 
                 if pos:
                     print(f"[DEBUG] 准备点击位置: {pos}")
@@ -326,8 +328,7 @@ class BD2Auto:
                 roi_screen,
                 target_text,
                 lang=lang,
-                fuzzy_match=True,
-                regex=False
+                fuzzy_match=True
             )
 
             if text_pos:

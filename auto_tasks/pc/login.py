@@ -2,7 +2,7 @@ import time
 from typing import Optional
 
 from auto_control.device_base import BaseDevice
-from bd2_auto import BD2Auto
+from auto_main import BD2Auto
 
 
 class Login:
