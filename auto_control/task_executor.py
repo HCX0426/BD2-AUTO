@@ -2,17 +2,10 @@ import asyncio
 import queue
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from queue import PriorityQueue
-from typing import (
-    Any,
-    Callable,
-    Coroutine,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Coroutine, Optional, Tuple, TypeVar, Union
 
 T = TypeVar("T")
 TaskFunc = Union[Callable[..., T], Callable[..., Coroutine[Any, Any, T]]]
@@ -30,19 +23,22 @@ class Task:
         kwargs: Optional[dict] = None,
         callback: Optional[CallbackFunc] = None,
         timeout: Optional[float] = 30,
+        future: Optional[Future] = None,
     ):
+        self.id = str(uuid.uuid4())  # 唯一任务ID
         self.func = func
         self.priority = priority
         self.args = args or ()
         self.kwargs = kwargs or {}
         self.callback = callback
         self.timeout = timeout
+        self.future = future or Future()
         self._created_at = time.time()
 
     def __lt__(self, other: "Task") -> bool:
         """优先级比较，数值越小优先级越高"""
         if self.priority == other.priority:
-            return self._created_at < other._created_at  # 相同优先级时，先创建的优先
+            return self._created_at < other._created_at
         return self.priority < other.priority
 
     def adjust_priority(self, new_priority: int) -> None:
@@ -54,15 +50,18 @@ class TaskExecutor:
     """任务执行器，支持同步/异步任务、优先级队列和动态优先级调整"""
 
     def __init__(self, max_workers: int = 3):
-        self.input_queue: PriorityQueue[Task] = PriorityQueue()  # 输入队列
-        self.output_queue: queue.Queue[Tuple[Optional[T], Optional[Exception], Optional[CallbackFunc]]] = queue.Queue()  # 输出队列
+        self.input_queue: PriorityQueue[Task] = PriorityQueue()
+        self.output_queue: queue.Queue[Tuple[Optional[T], Optional[Exception],
+                                            Optional[CallbackFunc]]] = queue.Queue()
         self.workers: list[threading.Thread] = []
         self.max_workers = max_workers
         self.running = False
         self.pause_flag = threading.Event()
         self.lock = threading.Lock()
-        self.io_executor = ThreadPoolExecutor(max_workers=2)  # IO线程池
-        self.loop = asyncio.new_event_loop()  # 协程事件循环
+        self.io_executor = ThreadPoolExecutor(max_workers=2)
+        self.loop = asyncio.new_event_loop()
+        self.active_futures: dict[str, Future] = {}
+        self.task_registry: dict[str, Task] = {}
 
     async def _async_task_wrapper(
         self, task_func: TaskFunc[T], *args: Any, timeout: Optional[float] = None, **kwargs: Any
@@ -117,7 +116,8 @@ class TaskExecutor:
                             ),
                             self.loop,
                         )
-                        result = future.result(timeout=task.timeout if task.timeout else None)
+                        result = future.result(
+                            timeout=task.timeout if task.timeout else None)
                     else:
                         # 普通线程任务处理
                         if task.timeout and task.timeout > 0:
@@ -142,17 +142,29 @@ class TaskExecutor:
                         else:
                             result = task.func(*task.args, **task.kwargs)
 
+                    # 设置Future结果
+                    if not task.future.done():
+                        task.future.set_result(result)
+                    
                     # 将结果放入输出队列
                     if task.callback:
                         self.output_queue.put((result, None, task.callback))
 
                 except Exception as e:
+                    # 设置Future异常
+                    if not task.future.done():
+                        task.future.set_exception(e)
+                    
                     print(f"[ERROR] 任务执行失败: {str(e)}")
                     if task.callback:
                         self.output_queue.put((None, e, task.callback))
 
                 finally:
                     self.input_queue.task_done()
+                    # 清理注册表
+                    with self.lock:
+                        if task.id in self.task_registry:
+                            del self.task_registry[task.id]
                     print(f"[INFO] 任务完成, 耗时: {time.time()-start_time:.2f}秒")
 
             except queue.Empty:
@@ -169,28 +181,70 @@ class TaskExecutor:
         callback: Optional[CallbackFunc] = None,
         timeout: Optional[float] = 30,
         **kwargs: Any,
-    ) -> None:
-        """添加任务到队列"""
+    ) -> Future:
+        """添加任务到队列并返回Future对象"""
         with self.lock:
-            task = Task(task_func, priority, args, kwargs, callback, timeout)
+            future = Future()
+            task = Task(
+                task_func,
+                priority,
+                args,
+                kwargs,
+                callback,
+                timeout,
+                future
+            )
             self.input_queue.put(task)
-            print(f"[INFO] 已添加任务: {task_func.__name__}, 优先级: {priority}")
+            self.task_registry[task.id] = task
+            print(f"[INFO] 已添加任务: {task_func.__name__}, 优先级: {priority}, 任务ID: {task.id}")
+            return future
 
-    def adjust_task_priority(self, condition: Callable[[Task], bool], new_priority: int) -> None:
-        """调整满足条件的任务的优先级"""
+    def adjust_task_priority(self, task_id: str, new_priority: int) -> bool:
+        """调整指定任务的优先级"""
         with self.lock:
-            # 临时存储队列中的任务
+            if task_id not in self.task_registry:
+                return False
+            
+            task = self.task_registry[task_id]
+            task.adjust_priority(new_priority)
+            
+            # 重新排序队列
             temp_tasks = []
             while not self.input_queue.empty():
-                task = self.input_queue.get()
-                if condition(task):
-                    task.adjust_priority(new_priority)
-                    print(f"[INFO] 已调整任务优先级: {task.func.__name__} -> {new_priority}")
-                temp_tasks.append(task)
+                temp_task = self.input_queue.get()
+                if temp_task.id == task_id:
+                    temp_task = task
+                temp_tasks.append(temp_task)
+            
+            for temp_task in temp_tasks:
+                self.input_queue.put(temp_task)
+                
+            print(f"[INFO] 已调整任务优先级: {task_id} -> {new_priority}")
+            return True
 
-            # 重新放回队列
-            for task in temp_tasks:
-                self.input_queue.put(task)
+    def cancel_task(self, task_id: str) -> bool:
+        """取消指定任务"""
+        with self.lock:
+            if task_id not in self.task_registry:
+                return False
+            
+            task = self.task_registry[task_id]
+            if not task.future.done():
+                task.future.cancel()
+            
+            # 从队列中移除
+            temp_tasks = []
+            while not self.input_queue.empty():
+                temp_task = self.input_queue.get()
+                if temp_task.id != task_id:
+                    temp_tasks.append(temp_task)
+            
+            for temp_task in temp_tasks:
+                self.input_queue.put(temp_task)
+                
+            del self.task_registry[task_id]
+            print(f"[INFO] 已取消任务: {task_id}")
+            return True
 
     def start(self) -> None:
         """启动执行器"""
@@ -241,10 +295,14 @@ class TaskExecutor:
 
             # 停止事件循环
             self.loop.call_soon_threadsafe(self.loop.stop)
-            
+
             # 关闭线程池
             self.io_executor.shutdown(wait=False)
-            
+
+            # 取消所有未完成任务
+            for task_id in list(self.task_registry.keys()):
+                self.cancel_task(task_id)
+
             # 等待工作线程结束
             for worker in self.workers:
                 if worker.is_alive():
@@ -262,11 +320,15 @@ class TaskExecutor:
         self.pause_flag.clear()
         print("[INFO] 执行器已恢复")
 
-    def wait_all_tasks(self, timeout: Optional[float] = None) -> None:
+    def wait_all_tasks(self, timeout: Optional[float] = None) -> bool:
         """等待所有任务完成"""
-        self.input_queue.join(timeout=timeout)
-        if timeout and not self.input_queue.empty():
-            print("[WARNING] 等待任务超时")
+        start_time = time.time()
+        while not self.input_queue.empty():
+            if timeout and (time.time() - start_time) > timeout:
+                print("[WARNING] 等待任务超时")
+                return False
+            time.sleep(0.1)
+        return True
 
     def get_queue_size(self) -> int:
         """获取队列中待处理任务数量"""
