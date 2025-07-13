@@ -1,4 +1,5 @@
-from auto_main import Auto
+import sys
+from auto import Auto
 
 
 def login(auto: Auto):
@@ -9,4 +10,5 @@ def login(auto: Auto):
     #     auto.add_click_task(pos)
 
     print("tes1")
-    auto.add_template_click_task("touch_to_start")
+    auto.add_key_task("h").add_key_task("esc").wait()
+    sys.stdout.flush()
