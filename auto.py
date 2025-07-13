@@ -153,7 +153,7 @@ class Auto:
         return self.device_manager.get_device(device_uri) if device_uri else self.device_manager.get_active_device()
 
     @chainable
-    def add_click_task(self, pos: tuple, is_relative: bool = True,
+    def add_click_task(self, pos: tuple, is_relative: bool = False,
                       delay: float = 0, device_uri: Optional[str] = None) -> Task:
         """添加点击任务并返回Task对象"""
         return self.task_executor.add_task(
@@ -284,7 +284,8 @@ class Auto:
             if not (device := self._check_device(device_uri, "模板点击")) or device.is_minimized():
                 return False
 
-            if not (screen := device.capture_screen()):
+            screen = device.capture_screen()  # 先获取截图
+            if screen is None:  # 明确检查是否为 None，而不是 `if not screen`
                 print("[DEBUG] 截图失败")
                 self.last_error = "屏幕捕获失败"
                 return False
@@ -309,7 +310,7 @@ class Auto:
             return False
         except Exception as e:
             return self._handle_task_exception(e, "模板点击")
-
+        
     def get_status(self) -> dict:
         """获取详细系统状态"""
         active_device = self.device_manager.get_active_device()
@@ -354,7 +355,8 @@ class Auto:
 
         for attempt in range(max_retry):
             print(f"[DEBUG] 尝试 {attempt + 1}/{max_retry}")
-            if not (screen := device.capture_screen()):
+            screen = device.capture_screen()
+            if screen is None:  # 明确检查是否为 None
                 print("[WARNING] 屏幕捕获失败")
                 time.sleep(retry_interval)
                 continue
@@ -577,7 +579,7 @@ class Auto:
         """创建按键任务函数"""
         return self.create_task(lambda: self.add_key_task(key, duration, delay, device_uri))
     
-    def create_click_task(self, pos: tuple, is_relative: bool = True, delay: float = 0, 
+    def create_click_task(self, pos: tuple, is_relative: bool = False, delay: float = 0, 
                          device_uri: Optional[str] = None) -> Callable[[], bool]:
         """创建点击任务函数"""
         return self.create_task(lambda: self.add_click_task(pos, is_relative, delay, device_uri))

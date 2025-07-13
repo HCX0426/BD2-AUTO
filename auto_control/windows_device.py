@@ -248,6 +248,9 @@ class WindowsDevice(BaseDevice):
         try:
             if not self.connected:
                 return False
+            
+            if not isinstance(template, Template):
+                raise ValueError(f"模板参数必须是Template对象,当前类型为:{type(template)}")
 
             result = exists(template)
             self._update_device_state(DeviceState.IDLE)
