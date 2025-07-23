@@ -18,10 +18,24 @@ def run():
 
         # 启动系统
         auto.start()
-        sys.stdout.flush()
-        auto._execute_template_click("touch_to_start",delay=0, max_retry=3, retry_interval=1, device_uri=None)
-        sys.stdout.flush()
+        # 添加模板点击任务
+        auto._execute_text_click("活动",lang="ch_sim", roi=None, max_retry=10, retry_interval=1, delay=0, device_uri=None)
+        # print(f"任务ID: {task.id}, 状态: {'已完成' if task.future.done() else '未完成'}")
 
+        # # 等待任务
+        # auto.wait(timeout=60)
+
+        # # 检查任务状态
+        # print(f"任务状态: {'已完成' if task.future.done() else '未完成'}")
+        # print(f"任务异常: {task.future.exception()}")
+        # print(f"任务结果: {task.future.result()}")
+        sys.stdout.flush()
+        
+        # if login(auto):
+        #     print("登录成功")
+        # else:
+        #     print("登录失败")
+        
         sys.stdout.flush()
     except Exception as e:
         print(f"运行过程中出错: {e}")

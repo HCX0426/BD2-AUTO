@@ -21,7 +21,7 @@ class Task:
         args: Optional[Tuple] = None,
         kwargs: Optional[dict] = None,
         callback: Optional[CallbackFunc] = None,
-        timeout: Optional[float] = 30,
+        timeout: Optional[float] = 60,
         future: Optional[Future] = None,
     ):
         self.id = str(uuid.uuid4())  # 唯一任务ID

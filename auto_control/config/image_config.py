@@ -10,12 +10,7 @@ class ScaleStrategy(Enum):
     CROP = 'crop'
 
 class MatchMethod(Enum):
-    SQDIFF = cv2.TM_SQDIFF
-    SQDIFF_NORMED = cv2.TM_SQDIFF_NORMED
-    CCORR = cv2.TM_CCORR
-    CCORR_NORMED = cv2.TM_CCORR_NORMED
-    CCOEFF = cv2.TM_CCOEFF
-    CCOEFF_NORMED = cv2.TM_CCOEFF_NORMED
+    AIRTEST = 'airtest'
 
 # 路径配置
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -34,5 +29,5 @@ TEMPLATE_ROI_CONFIG = {
 DEFAULT_RESOLUTION = (1920, 1080)
 DEFAULT_THRESHOLD = 0.8
 DEFAULT_SCALE_STRATEGY = ScaleStrategy.FIT
-DEFAULT_MATCH_METHOD = MatchMethod.CCOEFF_NORMED
+DEFAULT_MATCH_METHOD = MatchMethod.AIRTEST
 MAX_WORKERS = 4

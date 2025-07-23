@@ -31,24 +31,48 @@ class Auto:
         )
 
     def chainable(func: Callable) -> Callable:
-        """装饰器使方法支持链式调用"""
+        """装饰器使方法支持链式调用（修复闭包问题）"""
         @wraps(func)
         def wrapper(self, *args, **kwargs) -> "Auto":
             prev_task = self.last_task
             current_task = func(self, *args, **kwargs)
             self.last_task = current_task
             
+            # 捕获任务ID（而不是任务对象）
+            task_id = current_task.id if hasattr(current_task, 'id') else None
+            
             if prev_task and not prev_task.future.done():
                 def dependency_callback(f):
-                    if not f.exception() and hasattr(current_task, 'id'):
-                        return current_task
-                    if hasattr(current_task, 'id'):
-                        self.task_executor.cancel_task(current_task.id)
+                    # 使用局部变量task_id（闭包安全）
+                    if not f.exception() and task_id:
+                        # 通过任务执行器获取任务
+                        task = self.task_executor.get_task(task_id)
+                        if task:
+                            # 确保不会意外覆盖last_task
+                            if self.last_task is None:
+                                self.last_task = task
+                            return task
+                    if task_id:
+                        self.task_executor.cancel_task(task_id)
                     return self
+                    
                 prev_task.future.add_done_callback(dependency_callback)
             
             return self
-        return wrapper
+        return wrapper    
+    def get_task(self, task_id: str) -> Optional[Task]:
+        """根据ID获取任务"""
+        with self._lock:
+            # 检查正在运行的任务
+            if task_id in self._running_tasks:
+                return self._running_tasks[task_id]
+            
+            # 检查队列中的任务
+            for task in list(self._queue.queue):
+                if task.id == task_id:
+                    return task
+                    
+            return None
     
     def then(self, callback: Callable[[Any], Any]) -> "Auto":
         """添加任务完成后的回调"""
@@ -74,19 +98,41 @@ class Auto:
             self.last_task.future.add_done_callback(wrapper)
         return self
     
-    def wait(self, timeout: Optional[float] = None) -> "Auto":
-        """等待当前任务完成（不抛出异常）"""
+    def wait(self, timeout: Optional[float] = None) -> Any:
+        """等待任务完成并返回结果"""
         if self.last_task and self.last_task.future:
             try:
-                self.last_task.future.result(timeout=timeout)
-            except Exception:
-                pass
-        return self
-    
-    def result(self) -> Any:
-        """获取上一个任务的结果"""
-        return self.last_task.future.result() if self.last_task and self.last_task.future.done() else None
-    
+                return self.last_task.future.result(timeout=timeout)
+            except Exception as e:
+                self.last_error = f"等待任务超时: {str(e)}"
+                return None
+        return None
+        
+    def result(self, timeout: Optional[float] = None) -> Any:
+        """获取上一个任务的结果（支持等待）"""
+        # 确保 last_task 和 future 存在
+        if not self.last_task or not self.last_task.future:
+            print("[WARNING] 尝试获取结果但无有效任务")
+            return None
+        
+        try:
+            # 如果指定超时，等待任务完成
+            if timeout is not None:
+                return self.last_task.future.result(timeout=timeout)
+            
+            # 不指定超时，只返回已完成任务的结果
+            if self.last_task.future.done():
+                return self.last_task.future.result()
+            
+            print("[WARNING] 任务尚未完成")
+            return None
+        except TimeoutError:
+            print("[WARNING] 获取结果超时")
+            return None
+        except Exception as e:
+            print(f"[ERROR] 获取结果时出错: {str(e)}")
+            return None
+        
     def exception(self) -> Optional[Exception]:
         """获取上一个任务的异常"""
         return self.last_task.future.exception() if self.last_task and self.last_task.future.done() else None
@@ -271,7 +317,7 @@ class Auto:
         return device.key_press(key, duration)
 
     @chainable
-    def add_template_click_task(self, template_name, delay=0, max_retry=3, retry_interval=1, device_uri=None) -> Task:
+    def add_template_click_task(self, template_name, delay=0, max_retry=10, retry_interval=1, device_uri=None) -> Task:
         """添加模板点击任务并返回Task对象"""
         return self.task_executor.add_task(
             self._execute_template_click, template_name, delay, max_retry, retry_interval, device_uri
@@ -299,11 +345,17 @@ class Auto:
 
                 if match_result.position and isinstance(match_result.position, tuple) and len(match_result.position) == 2:
                     time.sleep(0.5)
-                    click_pos = (int(match_result.position[0]), int(match_result.position[1]))
-                    success = device.click(click_pos)
-                    print(f"[DEBUG] 点击结果: {'成功' if success else '失败'}")
-                    return success
-
+                    try:
+                        click_pos = (int(match_result.position[0]), int(match_result.position[1]))
+                        # 再次确认 click_pos 符合要求
+                        if isinstance(click_pos, (tuple, list)) and len(click_pos) == 2:
+                            success = device.click(click_pos)
+                            print(f"[DEBUG] 点击结果: {'成功' if success else '失败'}")
+                            return success
+                        else:
+                            print(f"[DEBUG] 点击坐标 {click_pos} 不符合要求")
+                    except ValueError:
+                        print(f"[DEBUG] 无法将匹配位置 {match_result.position} 转换为整数坐标")
                 time.sleep(retry_interval)
 
             self.last_error = f"重试{max_retry}次未找到模板"
@@ -339,7 +391,7 @@ class Auto:
         return self.ocr_processor.recognize_text(screen, lang=lang)
 
     @chainable
-    def add_text_click_task(self, target_text, lang="ch_sim", roi=None, max_retry=3, retry_interval=1, delay=0, device_uri=None) -> Task:
+    def add_text_click_task(self, target_text, lang="ch_sim", roi=None, max_retry=10, retry_interval=1, delay=0, device_uri=None) -> Task:
         """添加点击文本任务并返回Task对象"""
         return self.task_executor.add_task(
             self._execute_text_click, target_text, lang, roi, max_retry, retry_interval, delay, device_uri

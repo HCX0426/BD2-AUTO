@@ -242,10 +242,9 @@ class ImageProcessor:
         screen: np.ndarray,
         template_name: str,
         target_resolution: Tuple[int, int],
-        method: MatchMethod = DEFAULT_MATCH_METHOD
     ) -> MatchResult:
         """
-        模板匹配 (使用Airtest的Template类)
+        模板匹配 (完全使用Airtest的Template类)
         """
         if template_name not in self.templates:
             print(f"[WARN] 模板 {template_name} 未加载")
@@ -259,43 +258,52 @@ class ImageProcessor:
         try:
             # 使用Airtest的匹配方法
             template = template_info.template
-            match_pos = template.match_in(roi_img)
             
-            if match_pos:
-                # 计算置信度 (Airtest不直接提供置信度，我们需要自己计算)
-                template_img = aircv.imread(template_info.path)
-                if template_img is None:
+            # 添加类型检查
+            if not isinstance(template, Template):
+                print(f"[ERROR] 模板 {template_name} 不是 Template 类型，实际类型: {type(template).__name__}")
+                return MatchResult(name=template_name, position=None, confidence=0.0)
+
+            match_result = template.match_in(roi_img)
+            print(f"[DEBUG] 匹配结果类型: {type(match_result).__name__}, 匹配结果: {match_result}")
+            
+            if match_result:
+                center_x, center_y = None, None
+                confidence = 0.0
+                
+                if isinstance(match_result, dict):
+                    if 'result' in match_result and 'confidence' in match_result:
+                        if isinstance(match_result['result'], (tuple, list)) and len(match_result['result']) == 2:
+                            center_x, center_y = match_result['result']
+                            confidence = match_result['confidence']
+                        else:
+                            print(f"[ERROR] 字典中 'result' 不是有效的坐标: {match_result['result']}")
+                    else:
+                        print(f"[ERROR] 字典缺少 'result' 或 'confidence' 键: {match_result}")
+                elif isinstance(match_result, tuple) and len(match_result) == 2:
+                    # 兼容之前元组形式返回结果
+                    center_x, center_y = match_result
+                    confidence = 1.0
+                else:
+                    print(f"[ERROR] 不支持的匹配结果类型: {type(match_result).__name__}")
+
+                if center_x is not None and center_y is not None:
+                    # 转换到全局坐标 (如果有ROI)
+                    if template_info.roi:
+                        screen_h, screen_w = screen.shape[:2]
+                        roi_x1 = int(screen_w * template_info.roi[0])
+                        roi_y1 = int(screen_h * template_info.roi[1])
+                        center_x += roi_x1
+                        center_y += roi_y1
+                    
                     return MatchResult(
                         name=template_name,
-                        position=None,
-                        confidence=0.0,
+                        position=(int(center_x), int(center_y)),
+                        confidence=float(confidence),
                         template=template
                     )
-                
-                # 计算匹配区域的中心点
-                h, w = template_img.shape[:2]
-                center_x = match_pos[0] + w // 2
-                center_y = match_pos[1] + h // 2
-                
-                # 转换到全局坐标 (如果有ROI)
-                if template_info.roi:
-                    screen_h, screen_w = screen.shape[:2]
-                    roi_x1 = int(screen_w * template_info.roi[0])
-                    roi_y1 = int(screen_h * template_info.roi[1])
-                    center_x += roi_x1
-                    center_y += roi_y1
-                
-                # 计算置信度 (使用OpenCV的模板匹配)
-                result = cv2.matchTemplate(roi_img, template_img, method.value)
-                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-                confidence = max_val if method in [MatchMethod.CCORR_NORMED, MatchMethod.CCOEFF_NORMED] else 1 - min_val
-                
-                return MatchResult(
-                    name=template_name,
-                    position=(int(center_x), int(center_y)),
-                    confidence=float(confidence),
-                    template=template
-                )
+            else:
+                print("[DEBUG] 未找到匹配结果")
                 
         except Exception as e:
             print(f"模板匹配错误: {str(e)}")

@@ -156,21 +156,8 @@ class WindowsDevice(BaseDevice):
             if not self.set_foreground() or self.minimized:
                 return False
 
-            # 增强参数检查和处理
-            if isinstance(pos_or_template, Template):
-                touch(pos_or_template, duration=duration)
-            elif isinstance(pos_or_template, (tuple, list)) and len(pos_or_template) == 2:
-                # 确保坐标是整数
-                x, y = int(pos_or_template[0]), int(pos_or_template[1])
-                touch((x, y), duration=duration)
-            else:
-                error_msg = (
-                    f"无效参数类型: {type(pos_or_template)}. "
-                    "参数必须是坐标(x,y)或Template对象。"
-                    f"接收到的值: {pos_or_template}"
-                )
-                print(error_msg)
-                raise ValueError(error_msg)
+            # 使用Airtest的touch方法处理坐标和模板
+            touch(pos_or_template, duration=duration)
             
             self._update_device_state(DeviceState.IDLE)
             return True
