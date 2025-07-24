@@ -1,13 +1,14 @@
 import time
-import cv2
 from concurrent.futures import Future
 from functools import wraps
 from typing import Any, Callable, Optional
 
+import cv2
+
 from auto_control.device_manager import DeviceManager
 from auto_control.image_processor import ImageProcessor
 from auto_control.ocr_processor import OCRProcessor
-from auto_control.task_executor import TaskExecutor, Task
+from auto_control.task_executor import Task, TaskExecutor
 
 
 class Auto:
@@ -37,14 +38,14 @@ class Auto:
             try:
                 # 执行原始方法
                 current_task = func(self, *args, **kwargs)
-                
+
                 # 保存上一个任务的引用
                 prev_task = self.last_task
                 self.last_task = current_task
-                
+
                 # 获取任务ID
                 task_id = getattr(current_task, 'id', None)
-                
+
                 # 如果存在前置任务,添加依赖
                 if prev_task and not prev_task.future.done():
                     def chain_tasks(future: Future) -> None:
@@ -60,30 +61,31 @@ class Auto:
                                     self.task_executor.cancel_task(task_id)
                         except Exception as e:
                             print(f"[ERROR] 任务链执行失败: {str(e)}")
-                            
+
                     prev_task.future.add_done_callback(chain_tasks)
-                    
+
                 return self
-                
+
             except Exception as e:
                 print(f"[ERROR] 方法调用失败 {func.__name__}: {str(e)}")
                 return self
-                
+
         return wrapper
+
     def get_task(self, task_id: str) -> Optional[Task]:
         """根据ID获取任务"""
         with self._lock:
             # 检查正在运行的任务
             if task_id in self._running_tasks:
                 return self._running_tasks[task_id]
-            
+
             # 检查队列中的任务
             for task in list(self._queue.queue):
                 if task.id == task_id:
                     return task
-                    
+
             return None
-    
+
     def then(self, callback: Callable[[Any], Any]) -> "Auto":
         """添加任务完成后的回调"""
         if self.last_task and self.last_task.future:
@@ -107,7 +109,7 @@ class Auto:
                         print(f"Catch处理错误: {e}")
             self.last_task.future.add_done_callback(wrapper)
         return self
-    
+
     def wait(self, timeout: Optional[float] = None) -> Any:
         """等待任务完成并返回结果"""
         if self.last_task and self.last_task.future:
@@ -117,23 +119,23 @@ class Auto:
                 self.last_error = f"等待任务超时: {str(e)}"
                 return None
         return None
-        
+
     def result(self, timeout: Optional[float] = None) -> Any:
         """获取上一个任务的结果（支持等待）"""
         # 确保 last_task 和 future 存在
         if not self.last_task or not self.last_task.future:
             print("[WARNING] 尝试获取结果但无有效任务")
             return None
-        
+
         try:
             # 如果指定超时，等待任务完成
             if timeout is not None:
                 return self.last_task.future.result(timeout=timeout)
-            
+
             # 不指定超时，只返回已完成任务的结果
             if self.last_task.future.done():
                 return self.last_task.future.result()
-            
+
             print("[WARNING] 任务尚未完成")
             return None
         except TimeoutError:
@@ -142,7 +144,7 @@ class Auto:
         except Exception as e:
             print(f"[ERROR] 获取结果时出错: {str(e)}")
             return None
-        
+
     def exception(self) -> Optional[Exception]:
         """获取上一个任务的异常"""
         return self.last_task.future.exception() if self.last_task and self.last_task.future.done() else None
@@ -154,21 +156,21 @@ class Auto:
             if self.last_task:
                 return self.last_task.id
             return None
-        
+
         # 如果指定了任务对象，直接返回其ID
         if isinstance(task, Task):
             return task.id
-        
+
         # 如果传入的是任务ID字符串，直接返回
         if isinstance(task, str):
             return task
-        
+
         return None
-    
+
     def cancel_task(self, task_id: str) -> bool:
         """取消指定任务"""
         return self.task_executor.cancel_task(task_id)
-    
+
     def adjust_task_priority(self, task_id: str, new_priority: int) -> bool:
         """调整任务优先级"""
         return self.task_executor.adjust_task_priority(task_id, new_priority)
@@ -203,14 +205,14 @@ class Auto:
         """应用任务延迟"""
         if delay > 0:
             time.sleep(delay)
-    
+
     def _get_device(self, device_uri):
         """获取设备实例"""
         return self.device_manager.get_device(device_uri) if device_uri else self.device_manager.get_active_device()
 
     @chainable
     def add_click_task(self, pos: tuple, is_relative: bool = False,
-                      delay: float = 0, device_uri: Optional[str] = None) -> Task:
+                       delay: float = 0, device_uri: Optional[str] = None) -> Task:
         """添加点击任务并返回Task对象"""
         return self.task_executor.add_task(
             self._execute_click, pos, is_relative, delay, device_uri
@@ -227,16 +229,18 @@ class Auto:
         if not resolution:
             print("[ERROR] 无法获取设备分辨率")
             return False
-        
+
         # 处理坐标转换
         if is_relative:
             # 相对坐标：确保是0-1之间的浮点数
             if isinstance(pos[0], float) and isinstance(pos[1], float):
-                abs_pos = (int(pos[0] * resolution[0]), int(pos[1] * resolution[1]))
+                abs_pos = (int(pos[0] * resolution[0]),
+                           int(pos[1] * resolution[1]))
             else:
                 # 如果传递的是整数，但标记为相对坐标，给出警告并尝试转换
                 print(f"[WARNING] 相对坐标应使用0-1的浮点数，但收到: {pos}")
-                abs_pos = (int(pos[0] * resolution[0] / 1000), int(pos[1] * resolution[1] / 1000))
+                abs_pos = (int(pos[0] * resolution[0] / 1000),
+                           int(pos[1] * resolution[1] / 1000))
         else:
             # 绝对坐标：直接使用整数像素值
             if isinstance(pos[0], int) and isinstance(pos[1], int):
@@ -245,19 +249,19 @@ class Auto:
                 # 如果传递的是浮点数但标记为绝对坐标，四舍五入取整
                 print(f"[WARNING] 绝对坐标应使用整数，但收到: {pos}")
                 abs_pos = (round(pos[0]), round(pos[1]))
-        
+
         # 坐标边界检查
         if abs_pos[0] < 0 or abs_pos[0] >= resolution[0] or abs_pos[1] < 0 or abs_pos[1] >= resolution[1]:
             print(f"[ERROR] 坐标超出屏幕范围: {abs_pos}, 屏幕分辨率: {resolution}")
             return False
-        
+
         # 执行点击
         return device.click(abs_pos)
 
     @chainable
     def add_ocr_task(self, lang: str = 'en',
-                    roi: Optional[tuple] = None, delay: float = 0,
-                    device_uri: Optional[str] = None) -> Task:
+                     roi: Optional[tuple] = None, delay: float = 0,
+                     device_uri: Optional[str] = None) -> Task:
         """添加OCR任务并返回Task对象"""
         return self.task_executor.add_task(
             self._execute_ocr, lang, roi, delay, device_uri
@@ -336,57 +340,57 @@ class Auto:
     def _execute_template_click(self, template_name, delay, max_retry, retry_interval, device_uri):
         """优化模板点击任务执行"""
         print(f"[DEBUG] 开始模板点击任务: {template_name}")
-        
+
         try:
             self._apply_delay(delay)
-            
+
             # 获取设备并检查状态
             device = self._check_device(device_uri, "模板点击")
             if not device or device.is_minimized():
                 return False
-                
+
             # 获取屏幕截图
             screen = device.capture_screen()
             if screen is None:
                 raise RuntimeError("屏幕捕获失败")
-                
+
             resolution = device.get_resolution()
             print(f"[DEBUG] 当前分辨率: {resolution}")
-            
+
             # 重试循环
             for attempt in range(max_retry):
                 try:
                     match_result = self.image_processor.match_template(
                         screen, template_name, resolution
                     )
-                    
+
                     print(f"[DEBUG] 匹配结果 ({attempt + 1}/{max_retry}):"
-                        f" 位置={match_result.position},"
-                        f" 置信度={match_result.confidence:.3f}")
-                    
+                          f" 位置={match_result.position},"
+                          f" 置信度={match_result.confidence:.3f}")
+
                     # 验证匹配结果
-                    if (match_result.position and 
-                        isinstance(match_result.position, tuple) and 
-                        len(match_result.position) == 2):
-                        
+                    if (match_result.position and
+                        isinstance(match_result.position, tuple) and
+                            len(match_result.position) == 2):
+
                         # 执行点击
                         click_pos = tuple(map(int, match_result.position))
                         if device.click(click_pos):
                             print(f"[DEBUG] 点击成功: {click_pos}")
                             return True
-                            
+
                     time.sleep(retry_interval)
-                    
+
                 except Exception as e:
                     print(f"[ERROR] 匹配/点击失败: {str(e)}")
                     time.sleep(retry_interval)
-                    
+
             print(f"[ERROR] 模板点击失败: {template_name} (重试{max_retry}次)")
             return False
-            
+
         except Exception as e:
             return self._handle_task_exception(e, f"模板点击: {template_name}")
-        
+
     def get_status(self) -> dict:
         """获取详细系统状态"""
         active_device = self.device_manager.get_active_device()
@@ -425,7 +429,7 @@ class Auto:
         """执行文本点击任务"""
         print(f"[DEBUG] 开始文本点击: '{target_text}'")
         self._apply_delay(delay)
-        
+
         if not (device := self._check_device(device_uri, "文本点击")):
             return False
 
@@ -437,7 +441,8 @@ class Auto:
                 time.sleep(retry_interval)
                 continue
 
-            roi_screen = self.image_processor.get_roi_region(screen, roi) if roi else screen
+            roi_screen = self.image_processor.get_roi_region(
+                screen, roi) if roi else screen
             print(f"[DEBUG] ROI区域: {'自定义' if roi else '全屏'}")
 
             if text_pos := self.ocr_processor.find_text_position(roi_screen, target_text, lang=lang, fuzzy_match=True):
@@ -584,7 +589,7 @@ class Auto:
         return self.task_executor.add_task(
             func, *args, **kwargs
         )
-    
+
     def strict_sequence(self, *tasks: Callable[[], bool], timeout: Optional[float] = None) -> bool:
         """
         严格顺序执行任务链
@@ -594,13 +599,13 @@ class Auto:
         """
         start_time = time.time()
         self.last_error = None  # 重置错误信息
-        
+
         for task in tasks:
             # 检查超时
             if timeout and time.time() - start_time > timeout:
                 self.last_error = "任务链执行超时"
                 return False
-                
+
             try:
                 # 执行当前任务
                 success = task()
@@ -611,9 +616,9 @@ class Auto:
             except Exception as e:
                 self.last_error = f"任务执行异常: {str(e)}"
                 return False
-                
+
         return True
-    
+
     def create_task(self, func: Callable, *args, **kwargs) -> Callable[[], bool]:
         """
         创建标准化任务函数
@@ -624,7 +629,7 @@ class Auto:
             try:
                 # 执行任务并返回结果
                 result = func(*args, **kwargs)
-                
+
                 # 处理不同类型的返回结果
                 if isinstance(result, Future):
                     # 等待Future完成
@@ -633,29 +638,179 @@ class Auto:
                     except Exception as e:
                         self.last_error = f"任务等待超时或失败: {str(e)}"
                         return False
-                
+
                 # 检查结果是否为布尔值
                 if isinstance(result, bool):
                     return result
-                
+
                 # 对于非布尔值的结果，我们将其视为成功
                 return True
             except Exception as e:
                 self.last_error = f"任务执行异常: {str(e)}"
                 return False
-        
+
         return task_wrapper
 
     def create_wait_task(self, seconds: float) -> Callable[[], bool]:
         """创建等待任务函数"""
         return self.create_task(lambda: self.add_wait_task(seconds))
 
-    def create_key_task(self, key: str, duration: float = 0.1, delay: float = 0, 
-                       device_uri: Optional[str] = None) -> Callable[[], bool]:
+    def create_key_task(self, key: str, duration: float = 0.1, delay: float = 0,
+                        device_uri: Optional[str] = None) -> Callable[[], bool]:
         """创建按键任务函数"""
         return self.create_task(lambda: self.add_key_task(key, duration, delay, device_uri))
-    
-    def create_click_task(self, pos: tuple, is_relative: bool = False, delay: float = 0, 
-                         device_uri: Optional[str] = None) -> Callable[[], bool]:
+
+    def create_click_task(self, pos: tuple, is_relative: bool = False, delay: float = 0,
+                          device_uri: Optional[str] = None) -> Callable[[], bool]:
         """创建点击任务函数"""
         return self.create_task(lambda: self.add_click_task(pos, is_relative, delay, device_uri))
+
+    def create_template_click_task(
+        self,
+        template_name: str,
+        delay: float = 0,
+        max_retry: int = 10,
+        retry_interval: float = 1,
+        device_uri: Optional[str] = None
+    ) -> Callable[[], bool]:
+        """创建模板点击任务函数"""
+        return self.create_task(
+            lambda: self.add_template_click_task(
+                template_name,
+                delay=delay,
+                max_retry=max_retry,
+                retry_interval=retry_interval,
+                device_uri=device_uri
+            )
+        )
+
+    def create_text_click_task(
+        self,
+        target_text: str,
+        lang: str = "ch_sim",
+        roi: Optional[tuple] = None,
+        max_retry: int = 10,
+        retry_interval: float = 1,
+        delay: float = 0,
+        device_uri: Optional[str] = None
+    ) -> Callable[[], bool]:
+        """创建文本点击任务函数"""
+        return self.create_task(
+            lambda: self.add_text_click_task(
+                target_text,
+                lang=lang,
+                roi=roi,
+                max_retry=max_retry,
+                retry_interval=retry_interval,
+                delay=delay,
+                device_uri=device_uri
+            )
+        )
+
+    def create_ocr_task(
+        self,
+        lang: str = "en",
+        roi: Optional[tuple] = None,
+        delay: float = 0,
+        device_uri: Optional[str] = None
+    ) -> Callable[[], bool]:
+        """创建OCR识别任务函数"""
+        return self.create_task(
+            lambda: self.add_ocr_task(
+                lang=lang,
+                roi=roi,
+                delay=delay,
+                device_uri=device_uri
+            )
+        )
+
+    def create_window_task(
+        self,
+        action: str,
+        width: int = 0,
+        height: int = 0,
+        delay: float = 0,
+        device_uri: Optional[str] = None
+    ) -> Callable[[], bool]:
+        """
+        创建窗口操作任务函数
+        :param action: 操作类型 ("minimize"/"maximize"/"restore"/"resize")
+        """
+        action_map = {
+            "minimize": self.add_minimize_window_task,
+            "maximize": self.add_maximize_window_task,
+            "restore": self.add_restore_window_task,
+            "resize": lambda d=0, du=None: self.add_resize_window_task(width, height, d, du)
+        }
+
+        if action not in action_map:
+            raise ValueError(f"不支持的窗口操作: {action}")
+
+        return self.create_task(
+            lambda: action_map[action](delay=delay, device_uri=device_uri)
+        )
+
+    def create_check_element_task(
+        self,
+        template,
+        delay: float = 0,
+        device_uri: Optional[str] = None
+    ) -> Callable[[], bool]:
+        """创建检查元素存在任务函数"""
+        return self.create_task(
+            lambda: self.add_check_element_exist_task(
+                template,
+                delay=delay,
+                device_uri=device_uri
+            )
+        )
+
+    def create_screenshot_task(
+        self,
+        save_path: Optional[str] = None,
+        delay: float = 0,
+        device_uri: Optional[str] = None
+    ) -> Callable[[], bool]:
+        """创建截图任务函数"""
+        return self.create_task(
+            lambda: self.add_screenshot_task(
+                save_path=save_path,
+                delay=delay,
+                device_uri=device_uri
+            )
+        )
+
+    def create_retry_task(
+        self,
+        task_func: Callable[[], bool],
+        max_retry: int = 3,
+        retry_interval: float = 1.0,
+        delay: float = 0
+    ) -> Callable[[], bool]:
+        """
+        创建带重试机制的任务函数包装器
+        :param task_func: 原始任务函数
+        :param max_retry: 最大重试次数
+        :param retry_interval: 重试间隔(秒)
+        :param delay: 初始延迟时间(秒)
+        """
+        def retry_wrapper() -> bool:
+            self._apply_delay(delay)
+
+            for attempt in range(max_retry):
+                try:
+                    if result := task_func():
+                        return True
+
+                    print(f"[重试 {attempt + 1}/{max_retry}] 任务执行失败")
+                    if attempt < max_retry - 1:
+                        time.sleep(retry_interval)
+
+                except Exception as e:
+                    print(f"[重试 {attempt + 1}/{max_retry}] 任务异常: {str(e)}")
+                    if attempt < max_retry - 1:
+                        time.sleep(retry_interval)
+
+            return False
+
+        return retry_wrapper
