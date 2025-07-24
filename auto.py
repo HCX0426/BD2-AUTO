@@ -539,18 +539,21 @@ class Auto:
             return self._handle_task_exception(e, "调整窗口大小")
 
     @chainable
-    def add_check_element_exist_task(self, template, delay=0, device_uri=None) -> Task:
+    def add_check_element_exist_task(self, template_name, delay=0, device_uri=None) -> Task:
         """添加检查元素是否存在的任务并返回Task对象"""
         return self.task_executor.add_task(
-            self._execute_check_element_exist, template, delay, device_uri
+            self._execute_check_element_exist, template_name, delay, device_uri
         )
 
-    def _execute_check_element_exist(self, template, delay, device_uri):
+    def _execute_check_element_exist(self, template_name, delay, device_uri):
         """执行检查元素是否存在的任务"""
         self._apply_delay(delay)
         if not (device := self._check_device(device_uri, "检查元素存在")):
             return False
         try:
+            template = self.image_processor.get_template(template_name)
+            if template is None:
+                return False
             return device.exists(template)
         except Exception as e:
             return self._handle_task_exception(e, "检查元素存在")

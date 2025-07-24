@@ -169,6 +169,23 @@ class ImageProcessor:
         except Exception as e:
             print(f"[ERROR] 加载模板 '{name}' 失败: {str(e)}")
             raise ValueError(f"模板加载失败: {str(e)}") from e
+    
+    def get_template(self, template_name: str) -> Optional[Template]:
+        """
+        根据模板名称获取模板对象
+        
+        Args:
+            template_name: 模板名称
+            
+        Returns:
+            Template: 如果存在则返回模板对象,否则返回None
+        """
+        template_info = self.templates.get(template_name)
+        if template_info is None:
+            print(f"[WARN] 模板 '{template_name}' 未加载")
+            return None
+        
+        return template_info.template
 
     def _scale_image(
         self,
