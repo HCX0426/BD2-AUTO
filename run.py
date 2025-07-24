@@ -18,8 +18,15 @@ def run():
 
         # 启动系统
         auto.start()
+        while True:
+
+            auto.add_key_task('h')
+            time.sleep(3)
+            if auto.add_check_element_exist_task("21"):
+                print("检测到元素存在，21")
+                break
         # 添加模板点击任务
-        auto._execute_text_click("活动",lang="ch_sim", roi=None, max_retry=10, retry_interval=1, delay=0, device_uri=None)
+        # auto._execute_text_click("活动",lang="ch_sim", roi=None, max_retry=10, retry_interval=1, delay=0, device_uri=None)
         # print(f"任务ID: {task.id}, 状态: {'已完成' if task.future.done() else '未完成'}")
 
         # # 等待任务

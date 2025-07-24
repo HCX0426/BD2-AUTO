@@ -31,35 +31,45 @@ class Auto:
         )
 
     def chainable(func: Callable) -> Callable:
-        """装饰器使方法支持链式调用（修复闭包问题）"""
+        """改进的链式调用装饰器"""
         @wraps(func)
         def wrapper(self, *args, **kwargs) -> "Auto":
-            prev_task = self.last_task
-            current_task = func(self, *args, **kwargs)
-            self.last_task = current_task
-            
-            # 捕获任务ID（而不是任务对象）
-            task_id = current_task.id if hasattr(current_task, 'id') else None
-            
-            if prev_task and not prev_task.future.done():
-                def dependency_callback(f):
-                    # 使用局部变量task_id（闭包安全）
-                    if not f.exception() and task_id:
-                        # 通过任务执行器获取任务
-                        task = self.task_executor.get_task(task_id)
-                        if task:
-                            # 确保不会意外覆盖last_task
-                            if self.last_task is None:
-                                self.last_task = task
-                            return task
-                    if task_id:
-                        self.task_executor.cancel_task(task_id)
-                    return self
+            try:
+                # 执行原始方法
+                current_task = func(self, *args, **kwargs)
+                
+                # 保存上一个任务的引用
+                prev_task = self.last_task
+                self.last_task = current_task
+                
+                # 获取任务ID
+                task_id = getattr(current_task, 'id', None)
+                
+                # 如果存在前置任务,添加依赖
+                if prev_task and not prev_task.future.done():
+                    def chain_tasks(future: Future) -> None:
+                        try:
+                            # 检查前置任务是否成功
+                            if future.exception() is None and task_id:
+                                if task := self.task_executor.get_task(task_id):
+                                    if self.last_task is None:
+                                        self.last_task = task
+                            else:
+                                # 取消当前任务
+                                if task_id:
+                                    self.task_executor.cancel_task(task_id)
+                        except Exception as e:
+                            print(f"[ERROR] 任务链执行失败: {str(e)}")
+                            
+                    prev_task.future.add_done_callback(chain_tasks)
                     
-                prev_task.future.add_done_callback(dependency_callback)
-            
-            return self
-        return wrapper    
+                return self
+                
+            except Exception as e:
+                print(f"[ERROR] 方法调用失败 {func.__name__}: {str(e)}")
+                return self
+                
+        return wrapper
     def get_task(self, task_id: str) -> Optional[Task]:
         """根据ID获取任务"""
         with self._lock:
@@ -324,44 +334,58 @@ class Auto:
         )
 
     def _execute_template_click(self, template_name, delay, max_retry, retry_interval, device_uri):
-        """执行模板点击任务"""
+        """优化模板点击任务执行"""
+        print(f"[DEBUG] 开始模板点击任务: {template_name}")
+        
         try:
             self._apply_delay(delay)
-            if not (device := self._check_device(device_uri, "模板点击")) or device.is_minimized():
+            
+            # 获取设备并检查状态
+            device = self._check_device(device_uri, "模板点击")
+            if not device or device.is_minimized():
                 return False
-
-            screen = device.capture_screen()  # 先获取截图
-            if screen is None:  # 明确检查是否为 None，而不是 `if not screen`
-                print("[DEBUG] 截图失败")
-                self.last_error = "屏幕捕获失败"
-                return False
-
+                
+            # 获取屏幕截图
+            screen = device.capture_screen()
+            if screen is None:
+                raise RuntimeError("屏幕捕获失败")
+                
             resolution = device.get_resolution()
-            print(f"[DEBUG] 设备分辨率: {resolution}")
-
+            print(f"[DEBUG] 当前分辨率: {resolution}")
+            
+            # 重试循环
             for attempt in range(max_retry):
-                match_result = self.image_processor.match_template(screen, template_name, resolution)
-                print(f"[DEBUG] 匹配尝试 {attempt+1}/{max_retry}, 位置: {match_result.position}, 置信度: {match_result.confidence}")
-
-                if match_result.position and isinstance(match_result.position, tuple) and len(match_result.position) == 2:
-                    time.sleep(0.5)
-                    try:
-                        click_pos = (int(match_result.position[0]), int(match_result.position[1]))
-                        # 再次确认 click_pos 符合要求
-                        if isinstance(click_pos, (tuple, list)) and len(click_pos) == 2:
-                            success = device.click(click_pos)
-                            print(f"[DEBUG] 点击结果: {'成功' if success else '失败'}")
-                            return success
-                        else:
-                            print(f"[DEBUG] 点击坐标 {click_pos} 不符合要求")
-                    except ValueError:
-                        print(f"[DEBUG] 无法将匹配位置 {match_result.position} 转换为整数坐标")
-                time.sleep(retry_interval)
-
-            self.last_error = f"重试{max_retry}次未找到模板"
+                try:
+                    match_result = self.image_processor.match_template(
+                        screen, template_name, resolution
+                    )
+                    
+                    print(f"[DEBUG] 匹配结果 ({attempt + 1}/{max_retry}):"
+                        f" 位置={match_result.position},"
+                        f" 置信度={match_result.confidence:.3f}")
+                    
+                    # 验证匹配结果
+                    if (match_result.position and 
+                        isinstance(match_result.position, tuple) and 
+                        len(match_result.position) == 2):
+                        
+                        # 执行点击
+                        click_pos = tuple(map(int, match_result.position))
+                        if device.click(click_pos):
+                            print(f"[DEBUG] 点击成功: {click_pos}")
+                            return True
+                            
+                    time.sleep(retry_interval)
+                    
+                except Exception as e:
+                    print(f"[ERROR] 匹配/点击失败: {str(e)}")
+                    time.sleep(retry_interval)
+                    
+            print(f"[ERROR] 模板点击失败: {template_name} (重试{max_retry}次)")
             return False
+            
         except Exception as e:
-            return self._handle_task_exception(e, "模板点击")
+            return self._handle_task_exception(e, f"模板点击: {template_name}")
         
     def get_status(self) -> dict:
         """获取详细系统状态"""
