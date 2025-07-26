@@ -279,7 +279,6 @@ class ImageProcessor:
         Args:
             screen: 屏幕截图
             template_name: 模板名称
-            target_resolution: 目标分辨率
 
         Returns:
             MatchResult: 匹配结果
@@ -396,8 +395,12 @@ class ImageProcessor:
             # 兼容之前元组形式返回结果
             center_x, center_y = match_result
             confidence = 1.0
+        elif isinstance(match_result, (tuple, list)) and len(match_result) == 2:  # 修改这行
+            # 兼容元组和列表形式的坐标
+            center_x, center_y = match_result
+            confidence = 1.0
         else:
-            print(f"[ERROR] 不支持的匹配结果类型: {type(match_result).__name__}")
+            print(f"[ERROR] 不支持的匹配结果类型: {type(match_result).__name__}, 内容: {match_result}")
 
         return center_x, center_y, confidence
 

@@ -20,7 +20,7 @@ def run():
         auto.start()
         # while True:
         
-        pos = auto.add_template_click_task("main_interface1").wait()
+        pos = auto.add_template_click_task("活动").wait()
         if pos:
             print(f"点击位置: {pos}")
 

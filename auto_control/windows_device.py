@@ -157,10 +157,11 @@ class WindowsDevice(BaseDevice):
                 return False
 
             # 使用Airtest的touch方法处理坐标和模板
-            touch(pos_or_template, duration=duration)
-            
+            pos = touch(pos_or_template, duration=duration)
+            if pos is None:
+                return False
             self._update_device_state(DeviceState.IDLE)
-            return True
+            return pos
         except Exception as e:
             print(f"点击操作失败: {str(e)}")
             self._update_device_state(DeviceState.ERROR)

@@ -306,20 +306,28 @@ class Auto:
         if not device or not device.connected or device.is_minimized():
             print("[ERROR] 模板点击失败: 设备不可用")
             return False
-
-        screen = device.capture_screen()
-        if screen is None:
-            print("[ERROR] 屏幕捕获失败")
+        
+        # 速度快
+        template = self.image_processor.get_template(template_name)
+        if template is None:
             return False
+        return device.click(template)
 
-        match_result = self.image_processor.match_template(screen, template_name)
+        # 以下为用CV的匹配
+        # screen = device.capture_screen()
+        # if screen is None:
+        #     print("[ERROR] 屏幕捕获失败")
+        #     return False
 
-        if not match_result.position:
-            print(f"[DEBUG] 未找到模板: {template_name}")
-            return False
+        # match_result = self.image_processor.match_template(screen, template_name)
 
-        click_pos = tuple(map(int, match_result.position))
-        return device.click(click_pos)
+        # if not match_result.position:
+        #     print(f"[DEBUG] 未找到模板: {template_name}")
+        #     return False
+
+        # click_pos = tuple(map(int, match_result.position))
+
+        # return device.click(click_pos)
 
     @chainable
     def add_text_click_task(
