@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from queue import PriorityQueue
 from typing import Any, Callable, Coroutine, Optional, Tuple, TypeVar, Union
 
+from .config.control__config import *
 T = TypeVar("T")
 TaskFunc = Union[Callable[..., T], Callable[..., Coroutine[Any, Any, T]]]
 CallbackFunc = Callable[[Optional[T], Optional[Exception]], None]
@@ -22,7 +23,7 @@ class Task:
         args: Optional[Tuple] = None,
         kwargs: Optional[dict] = None,
         callback: Optional[CallbackFunc] = None,
-        timeout: Optional[float] = 60,
+        timeout: Optional[float] = DEFAULT_TASK_TIMEOUT,
         future: Optional[Future] = None,
     ):
         # 使用 dataclass 来简化初始化
@@ -32,7 +33,7 @@ class Task:
         self.args = tuple(args or ())  # 确保是元组类型
         self.kwargs = dict(kwargs or {})  # 确保是字典类型
         self.callback = callback
-        self.timeout = max(0, timeout) if timeout else None  # 确保timeout非负
+        self.timeout = timeout or DEFAULT_TASK_TIMEOUT # 确保timeout非负
         self.future = future or Future()
         self._created_at = time.monotonic()  # 使用 monotonic 更准确
 
@@ -159,7 +160,8 @@ class TaskExecutor:
         with self.lock:
             if task.id in self.task_registry:
                 del self.task_registry[task.id]
-        print(f"[INFO] 任务完成, 耗时: {time.time()-start_time:.2f}秒")
+        duration = time.monotonic() - start_time
+        print(f"[INFO] 任务完成, 耗时: {duration:.2f}秒")
 
     def _worker_loop(self) -> None:
         """优化工作线程循环"""

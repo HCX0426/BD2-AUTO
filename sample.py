@@ -2,7 +2,7 @@ import io
 import sys
 import time
 import random
-from auto import Auto
+from auto_control.auto import Auto
 
 # 设置UTF-8编码输出
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')

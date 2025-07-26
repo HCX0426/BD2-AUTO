@@ -271,8 +271,7 @@ class ImageProcessor:
     def match_template(
         self,
         screen: np.ndarray,
-        template_name: str,
-        target_resolution: Tuple[int, int]
+        template_name: str
     ) -> MatchResult:
         """
         模板匹配

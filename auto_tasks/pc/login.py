@@ -1,5 +1,5 @@
 import sys
-from auto import Auto
+from auto_control.auto import Auto
 
 
 def login(auto: Auto):
