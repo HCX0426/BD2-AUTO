@@ -208,3 +208,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Airtest log
+auto_tasks/pc/log/*

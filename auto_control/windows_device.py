@@ -4,6 +4,7 @@ import win32con
 import win32gui
 import numpy as np
 from airtest.core.api import Template, connect_device, paste, swipe, touch, wait, exists
+from airtest.core.helper import log
 import pydirectinput
 import cv2
 from ctypes import windll
@@ -161,11 +162,13 @@ class WindowsDevice(BaseDevice):
             if pos is None:
                 return False
             self._update_device_state(DeviceState.IDLE)
+            log(f"点击坐标 {pos}", snapshot=True)  # 自动记录带截图的日志
             return pos
         except Exception as e:
             print(f"点击操作失败: {str(e)}")
             self._update_device_state(DeviceState.ERROR)
             self.last_error = str(e)
+            log(e, desc="点击操作异常")  # 记录异常堆栈
             return False
 
     def key_press(self, key: str, duration: float = 0.1) -> bool:

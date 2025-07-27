@@ -13,6 +13,6 @@ DEFAULT_SCREENSHOT_DELAY = 0.0  # 截图操作默认延迟
 DEFAULT_CHECK_ELEMENT_DELAY = 0.0  # 检查元素默认延迟
 # DEFAULT_CUSTOM_TASK_DELAY = 0.0  # 自定义任务默认延迟
 DEFAULT_CLICK_DELAY = 0.0  # 点击操作默认延迟
-DEFAULT_MAX_RETRY = 10  # 默认最大重试次数
+DEFAULT_MAX_RETRY = 3  # 默认最大重试次数
 DEFAULT_RETRY_INTERVAL = 1.0  # 默认重试间隔(秒)
 DEFAULT_KEY_DURATION = 0.1  # 默认按键持续时间(秒)

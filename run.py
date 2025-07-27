@@ -1,9 +1,11 @@
 import io
+import os
 import sys
 import time
 from auto_control.auto import Auto
 from auto_tasks.pc import *
 from auto_tasks.pc.login import login
+from auto_control.config.control__config import *
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
@@ -30,6 +32,7 @@ def run():
         print(f"运行过程中出错: {e}")
         sys.stdout.flush()
     finally:
+        generate_report(__file__)
         auto.stop()
         sys.exit(1)
         print("程序已退出")

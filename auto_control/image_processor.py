@@ -101,7 +101,7 @@ class ImageProcessor:
                         threshold=threshold,
                         scale_strategy=scale_strategy
                     )
-                    print(f"成功加载模板: {template_name}")
+                    # print(f"成功加载模板: {template_name}")
                 except Exception as e:
                     print(f"[ERROR] 加载模板失败 {template_name}: {str(e)}")
         return loaded
