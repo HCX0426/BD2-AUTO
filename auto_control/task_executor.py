@@ -101,43 +101,31 @@ class TaskExecutor:
                 print(f"[ERROR] 输出线程异常: {str(e)}")
 
     def _execute_task(self, task: Task) -> Any:
-        """优化任务执行逻辑"""
-        # 使用 contextmanager 处理超时
-        from contextlib import contextmanager
-        
-        @contextmanager
-        def timeout_handler(seconds: Optional[float]):
-            if not seconds:
-                yield
-                return
-                
-            def timeout_callback():
-                raise TimeoutError(f"任务执行超时 ({seconds}秒)")
-                
-            timer = threading.Timer(seconds, timeout_callback)
-            timer.start()
-            try:
-                yield
-            finally:
-                timer.cancel()
-
+        """优化后的任务执行逻辑"""
         try:
-            with timeout_handler(task.timeout):
-                # 协程任务处理
-                if asyncio.iscoroutinefunction(task.func):
-                    return asyncio.run_coroutine_threadsafe(
-                        self._async_task_wrapper(
-                            task.func, *task.args, **task.kwargs
-                        ),
-                        self.loop
-                    ).result(timeout=task.timeout)
-                    
-                # 普通任务处理
-                return task.func(*task.args, **task.kwargs)
+            # 协程任务处理
+            if asyncio.iscoroutinefunction(task.func):
+                # 使用asyncio原生超时机制
+                async def run():
+                    try:
+                        return await asyncio.wait_for(
+                            task.func(*task.args, **task.kwargs),
+                            timeout=task.timeout
+                        )
+                    except asyncio.TimeoutError:
+                        raise TimeoutError(f"任务执行超时 ({task.timeout}秒)")
+
+                return asyncio.run_coroutine_threadsafe(run(), self.loop).result()
+            
+            # 同步任务处理 - 使用ThreadPoolExecutor实现超时
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(task.func, *task.args, **task.kwargs)
+                return future.result(timeout=task.timeout)
                 
+        except TimeoutError:
+            raise  # 重新抛出超时异常
         except Exception as e:
-            print(f"[ERROR] 任务执行失败: {str(e)}")
-            raise
+            raise  # 其他异常直接抛出
 
     def _set_task_result(self, task: Task, result: Any) -> None:
         """设置任务结果"""
