@@ -1,14 +1,16 @@
+import logging
 import time
 from concurrent.futures import Future
 from functools import wraps
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import cv2
 
-from auto_control.device_manager import DeviceManager
-from auto_control.image_processor import ImageProcessor
-from auto_control.ocr_processor import OCRProcessor
-from auto_control.task_executor import Task, TaskExecutor
+from .device_manager import DeviceManager
+from .image_processor import ImageProcessor
+from .ocr_processor import OCRProcessor
+from .task_executor import Task, TaskExecutor
+from .logger import Logger
 
 # 导入配置文件
 from .config.control__config import *
@@ -24,11 +26,16 @@ class Auto:
     ):
         self.device_manager = DeviceManager()
         self.ocr_processor = OCRProcessor(engine=ocr_engine)
-        self.task_executor = TaskExecutor(max_workers=max_workers)
+        self.task_executor = TaskExecutor()
         self.running = False
         self.last_error: Optional[str] = None
         self.last_task: Optional[Task] = None
         self.default_device_uri = device_uri
+        self.logger = Logger(
+            task_name="System",
+            base_log_dir=LOG_CONFIG["BASE_LOG_DIR"],
+            log_file_prefix="system"
+        )
 
         # 确定最终使用的分辨率
         resolution = None
@@ -139,6 +146,10 @@ class Auto:
             return True
         self.last_error = "获取分辨率失败"
         return False
+    
+    def get_task_logger(self, task_name: str) -> logging.Logger:
+        """获取任务专用日志记录器"""
+        return self.logger.create_task_logger(task_name)
 
     # ======================== 系统控制方法 ========================
     

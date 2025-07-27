@@ -11,7 +11,6 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def run():
     try:
-        sys.stdout.flush()
         # 创建Auto实例
         auto = Auto()
 
@@ -20,17 +19,10 @@ def run():
 
         # 启动系统
         auto.start()
-        # while True:
-        
-        pos = auto.add_template_click_task("活动").wait()
-        if pos:
-            print(f"点击位置: {pos}")
-
-        time.sleep(3)
+        login(auto)
 
     except Exception as e:
         print(f"运行过程中出错: {e}")
-        sys.stdout.flush()
     finally:
         generate_report(__file__)
         auto.stop()
@@ -41,7 +33,6 @@ def run():
     try:
         while True:
             time.sleep(1)
-            sys.stdout.flush()
     except KeyboardInterrupt:
         auto.stop()
         print("程序已退出")

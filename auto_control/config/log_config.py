@@ -1,11 +1,14 @@
-# log_config.py
 import os
 from pathlib import Path
-import logging
+from .image_config import PROJECT_ROOT  # 使用工程统一配置
 
-# 默认日志配置
+
+TASK_LOG_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'log', 'task_log')
+os.makedirs(TASK_LOG_DIR, exist_ok=True)
+
+# 默认日志配置（集中管理所有配置）
 LOG_CONFIG = {
-    "BASE_LOG_DIR": "logs",  # 基础日志目录（支持相对/绝对路径）
+    "BASE_LOG_DIR": TASK_LOG_DIR,  # 基础日志目录（支持相对/绝对路径）
     "LOG_FILE_PREFIX": "task",  # 日志文件前缀
     "FILE_LOG_LEVEL": "DEBUG",  # 文件日志级别
     "CONSOLE_LOG_LEVEL": "INFO",  # 控制台日志级别

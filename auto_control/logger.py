@@ -1,4 +1,3 @@
-# logger.py
 import os
 import gzip
 import logging
@@ -7,7 +6,7 @@ from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from .config.control__config import *
+from .config.log_config import LOG_CONFIG, get_log_dir  # 集中导入日志配置
 
 class CompressedTimedRotatingFileHandler(TimedRotatingFileHandler):
     """支持压缩旧日志 + 自动清理超期日志的 Handler"""
@@ -88,18 +87,18 @@ class Logger:
     def __init__(
         self,
         task_name=None,
-        base_log_dir="logs",
-        log_file_prefix="task",
-        file_log_level="DEBUG",
-        console_log_level="INFO",
-        when="midnight",
-        interval=1,
-        backup_count=30,
-        async_logging=True,
-        compress_old_logs=True,
+        base_log_dir=None,
+        log_file_prefix=None,
+        file_log_level=None,
+        console_log_level=None,
+        when=None,
+        interval=None,
+        backup_count=None,
+        async_logging=None,
+        compress_old_logs=None,
     ):
         """
-        初始化日志记录器
+        初始化日志记录器（参数为 None 时使用默认配置）
         :param task_name: 任务名（作为日志子目录）
         :param base_log_dir: 基础日志目录（支持相对/绝对路径）
         :param log_file_prefix: 日志文件前缀
@@ -111,15 +110,26 @@ class Logger:
         :param async_logging: 是否启用异步日志
         :param compress_old_logs: 是否压缩旧日志
         """
-        # 动态计算日志目录
-        self.log_dir = Path(base_log_dir)
-        if task_name:
-            self.log_dir = self.log_dir / str(task_name)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        # 从 log_config 加载默认配置
+        config = LOG_CONFIG
+        
+        # 动态计算日志目录（使用 log_config 的辅助函数）
+        base_log_dir = base_log_dir or config["BASE_LOG_DIR"]
+        self.log_dir = get_log_dir(base_log_dir, task_name)
 
-        # 日志文件名
-        log_filename = f"{log_file_prefix}.log"
-        log_file_path = self.log_dir / log_filename
+        # 使用配置值或参数值（优先使用参数）
+        log_file_prefix = log_file_prefix or config["LOG_FILE_PREFIX"]
+        file_log_level = file_log_level or config["FILE_LOG_LEVEL"]
+        console_log_level = console_log_level or config["CONSOLE_LOG_LEVEL"]
+        when = when or config["WHEN"]
+        interval = interval or config["INTERVAL"]
+        backup_count = backup_count or config["BACKUP_COUNT"]
+        async_logging = async_logging if async_logging is not None else config["ASYNC_LOGGING"]
+        compress_old_logs = compress_old_logs if compress_old_logs is not None else config["COMPRESS_OLD_LOGS"]
+        log_format = config["LOG_FORMAT"]
+
+        # 日志文件路径
+        log_file_path = Path(self.log_dir) / f"{log_file_prefix}.log"
 
         # 配置日志记录器
         self.logger = logging.getLogger(f"{__name__}.{task_name}" if task_name else __name__)
@@ -142,10 +152,8 @@ class Logger:
             console_handler = logging.StreamHandler()
             console_handler.setLevel(console_log_level)
 
-            # 日志格式
-            formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(message)s"
-            )
+            # 日志格式（从配置获取）
+            formatter = logging.Formatter(log_format)
             file_handler.setFormatter(formatter)
             console_handler.setFormatter(formatter)
 
@@ -157,6 +165,11 @@ class Logger:
         if async_logging:
             self.async_handler = AsyncLogHandler(self.logger)
 
+    def create_task_logger(self, task_name: str) -> logging.Logger:
+        """创建带任务名称的子日志"""
+        return self.logger.getChild(task_name)
+
+    # 以下日志方法保持不变...
     def debug(self, message):
         if self.async_logging:
             self.async_handler.log("DEBUG", message)

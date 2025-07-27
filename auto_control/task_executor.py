@@ -54,11 +54,11 @@ class Task:
 class TaskExecutor:
     """任务执行器，支持同步/异步任务、优先级队列和动态优先级调整"""
 
-    def __init__(self, max_workers: int = 3):
+    def __init__(self):
         self.input_queue = PriorityQueue()  # 输入队列（优先级队列）
         self.output_queue = queue.Queue()  # 输出队列（处理回调）
         self.workers = []  # 工作线程列表
-        self.max_workers = max_workers
+        self.max_workers = DEFAULT_MAX_WORKERS
         self.running = False
         self.pause_flag = threading.Event()
         self.lock = threading.Lock()
