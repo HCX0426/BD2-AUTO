@@ -6,14 +6,13 @@ from typing import Any, Callable, Optional
 
 import cv2
 
-from .device_manager import DeviceManager
-from .image_processor import ImageProcessor
-from .ocr_processor import OCRProcessor
-from .task_executor import Task, TaskExecutor
-from .logger import Logger
-
 # 导入配置文件
 from .config.control__config import *
+from .device_manager import DeviceManager
+from .image_processor import ImageProcessor
+from .logger import Logger
+from .ocr_processor import OCRProcessor
+from .task_executor import Task, TaskExecutor
 
 
 class Auto:
@@ -21,7 +20,6 @@ class Auto:
         self,
         base_resolution: tuple = None,
         ocr_engine: str = DEFAULT_OCR_ENGINE,
-        max_workers: int = DEFAULT_MAX_WORKERS,
         device_uri: str = DEFAULT_DEVICE_URI
     ):
         self.device_manager = DeviceManager()
@@ -40,7 +38,8 @@ class Auto:
         # 确定最终使用的分辨率
         resolution = None
         if base_resolution is None and DEFAULT_RESOLUTION_UPDATE:
-            device = self.device_manager.get_device(device_uri) if device_uri else self.device_manager.get_active_device()
+            device = self.device_manager.get_device(
+                device_uri) if device_uri else self.device_manager.get_active_device()
             if device and device.connected:
                 resolution = device.get_resolution()
 
@@ -109,19 +108,19 @@ class Auto:
                 print(f"[重试 {attempt+1}/{max_retry}] {task_name}")
             except Exception as e:
                 print(f"[重试 {attempt+1}/{max_retry}] {task_name}异常: {str(e)}")
-            
+
             if attempt < max_retry - 1:
                 time.sleep(retry_interval)
-        
+
         print(f"[ERROR] {task_name}超过最大重试次数")
         return None
 
     # ======================== 设备管理方法 ========================
-    
-    def add_device(self, device_uri: str) -> bool:
+
+    def add_device(self, device_uri: str = DEFAULT_DEVICE_URI, timeout: float = 10.0) -> bool:
         """添加设备并自动更新分辨率"""
         try:
-            if success := self.device_manager.add_device(device_uri):
+            if success := self.device_manager.add_device(device_uri, timeout=timeout):
                 if not self._update_resolution_from_device():
                     self.last_error = f"设备 {device_uri} 添加成功，但分辨率更新失败"
                 return success
@@ -146,13 +145,13 @@ class Auto:
             return True
         self.last_error = "获取分辨率失败"
         return False
-    
+
     def get_task_logger(self, task_name: str) -> logging.Logger:
         """获取任务专用日志记录器"""
         return self.logger.create_task_logger(task_name)
 
     # ======================== 系统控制方法 ========================
-    
+
     def start(self) -> None:
         """启动自动化系统"""
         if self.running:
@@ -193,7 +192,7 @@ class Auto:
         }
 
     # ======================== 任务执行方法 ========================
-    
+
     @chainable
     def add_click_task(
         self,
@@ -236,13 +235,14 @@ class Auto:
 
         # 坐标转换逻辑
         if is_relative:
-            abs_pos = (int(pos[0] * resolution[0]), int(pos[1] * resolution[1]))
+            abs_pos = (int(pos[0] * resolution[0]),
+                       int(pos[1] * resolution[1]))
         else:
             abs_pos = (round(pos[0]), round(pos[1]))
 
         # 坐标边界检查
-        if (abs_pos[0] < 0 or abs_pos[0] >= resolution[0] or 
-            abs_pos[1] < 0 or abs_pos[1] >= resolution[1]):
+        if (abs_pos[0] < 0 or abs_pos[0] >= resolution[0] or
+                abs_pos[1] < 0 or abs_pos[1] >= resolution[1]):
             print(f"[ERROR] 坐标超出屏幕范围: {abs_pos}, 屏幕分辨率: {resolution}")
             return False
 
@@ -317,7 +317,7 @@ class Auto:
         if not device or not device.connected or device.is_minimized():
             print("[ERROR] 模板点击失败: 设备不可用")
             return False
-        
+
         # 速度快
         template = self.image_processor.get_template(template_name)
         if template is None:
@@ -384,7 +384,8 @@ class Auto:
             print("[WARNING] 屏幕捕获失败")
             return False
 
-        roi_screen = self.image_processor.get_roi_region(screen, roi) if roi else screen
+        roi_screen = self.image_processor.get_roi_region(
+            screen, roi) if roi else screen
         text_pos = self.ocr_processor.find_text_position(
             roi_screen, target_text, lang=lang, fuzzy_match=DEFAULT_TEXT_FUZZY_MATCH
         )
@@ -394,12 +395,12 @@ class Auto:
 
         x, y, w, h = text_pos
         center_x, center_y = x + w // 2, y + h // 2
-        
+
         if roi and len(roi) >= 4:
             h, w = screen.shape[:2]
             center_x += int(w * roi[0])
             center_y += int(h * roi[1])
-            
+
         return device.click((int(center_x), int(center_y)))
 
     @chainable
@@ -585,7 +586,7 @@ class Auto:
         )
 
     # ======================== 任务链控制方法 ========================
-    
+
     def then(self, callback: Callable[[Any], Any]) -> "Auto":
         """添加任务完成后的回调"""
         if self.last_task and self.last_task.future:
@@ -680,7 +681,7 @@ class Auto:
         return self.task_executor.get_task(task_id)
 
     # ======================== 高级任务链方法 ========================
-    
+
     def strict_sequence(self, *tasks: Callable[[], bool], timeout: Optional[float] = None) -> bool:
         """
         严格顺序执行任务链

@@ -1,5 +1,4 @@
 import io
-import os
 import sys
 import time
 from auto_control.auto import Auto
@@ -13,12 +12,12 @@ def run():
     try:
         # 创建Auto实例
         auto = Auto()
-
         # 添加设备
-        auto.add_device("Windows:///?title_re=BrownDust II")
-
+        auto.add_device()
         # 启动系统
         auto.start()
+
+        # 子任务
         login(auto)
 
     except Exception as e:
