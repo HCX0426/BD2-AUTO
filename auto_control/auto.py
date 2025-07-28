@@ -895,3 +895,165 @@ class Auto:
                 retry_interval=retry_interval
             ) or False
         return retry_wrapper
+
+
+    @chainable
+    def add_wait_element_task(
+        self,
+        template_name: str,
+        timeout: float = DEFAULT_TASK_TIMEOUT,
+        delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
+        device_uri: Optional[str] = None
+    ) -> Task:
+        """添加等待元素出现的任务"""
+        return self.task_executor.add_task(
+            self._execute_wait_element, 
+            template_name,
+            timeout,
+            delay,
+            device_uri,
+            timeout=timeout + 1  # 总超时稍长于等待时间
+        )
+
+    def _execute_wait_element(self, template_name, timeout, delay, device_uri):
+        """执行等待元素操作"""
+        self._apply_delay(delay)
+        device = self._get_device(device_uri)
+        if not device:
+            return False
+        
+        template = self.image_processor.get_template(template_name)
+        if not template:
+            print(f"模板 {template_name} 未找到")
+            return False
+        
+        return self._execute_with_retry(
+            func=device.wait,
+            task_name=f"等待元素[{template_name}]",
+            max_retry=1,  # 内置已有重试机制
+            retry_interval=0,
+            template=template,
+            timeout=timeout
+        )
+    
+
+    @chainable
+    def add_swipe_task(
+        self,
+        start_pos: tuple,
+        end_pos: tuple,
+        duration: float = 0.5,
+        delay: float = DEFAULT_CLICK_DELAY,
+        device_uri: Optional[str] = None
+    ) -> Task:
+        """添加滑动操作任务"""
+        return self.task_executor.add_task(
+            self._execute_swipe, start_pos, end_pos, duration, delay, device_uri,
+            timeout=DEFAULT_TASK_TIMEOUT
+        )
+
+    def _execute_swipe(self, start_pos, end_pos, duration, delay, device_uri):
+        """执行滑动操作"""
+        self._apply_delay(delay)
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            return False
+        return device.swipe(start_pos[0], start_pos[1], end_pos[0], end_pos[1], duration)
+    
+
+    @chainable
+    def add_text_input_task(
+        self,
+        text: str,
+        interval: float = 0.05,
+        delay: float = DEFAULT_CLICK_DELAY,
+        device_uri: Optional[str] = None
+    ) -> Task:
+        """添加文本输入任务"""
+        return self.task_executor.add_task(
+            self._execute_text_input, text, interval, delay, device_uri,
+            timeout=DEFAULT_TASK_TIMEOUT
+        )
+
+    def _execute_text_input(self, text, interval, delay, device_uri):
+        """执行文本输入"""
+        self._apply_delay(delay)
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            return False
+        return device.text_input(text, interval)
+
+    @chainable
+    def add_move_window_task(
+        self,
+        x: int,
+        y: int,
+        delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
+        device_uri: Optional[str] = None
+    ) -> Task:
+        """添加移动窗口任务并返回Task对象"""
+        return self.task_executor.add_task(
+            self._execute_move_window, x, y, delay, device_uri,
+            timeout=DEFAULT_TASK_TIMEOUT
+        )
+
+    def _execute_move_window(self, x: int, y: int, delay, device_uri):
+        """执行移动窗口任务"""
+        self._apply_delay(delay)
+        device = self._get_device(device_uri)
+        if not device:
+            return False
+        return device.move_window(x, y)
+    
+
+    @chainable
+    def add_reset_window_task(
+        self,
+        delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
+        device_uri: Optional[str] = None
+    ) -> Task:
+        """添加重置窗口任务并返回Task对象"""
+        return self.task_executor.add_task(
+            self._execute_reset_window, delay, device_uri,
+            timeout=DEFAULT_TASK_TIMEOUT
+        )
+
+    def _execute_reset_window(self, delay, device_uri):
+        """执行重置窗口任务"""
+        self._apply_delay(delay)
+        device = self._get_device(device_uri)
+        if not device:
+            return False
+        return device.reset_window()
+    
+    @chainable
+    def add_sleep_task(
+        self, 
+        secs: float = 1.0,
+        delay: float = 0,
+        device_uri: Optional[str] = None
+    ) -> Task:
+        """添加带日志记录的睡眠任务
+        
+        Args:
+            secs: 睡眠时长（秒）
+            delay: 执行前延迟（秒）
+            device_uri: 指定设备URI
+        """
+        return self.task_executor.add_task(
+            self._execute_sleep,
+            secs,
+            delay,
+            device_uri,
+            timeout=secs + 1  # 设置比睡眠时间稍长的超时
+        )
+
+    def _execute_sleep(self, secs, delay, device_uri):
+        """执行带设备状态的睡眠操作"""
+        self._apply_delay(delay)
+        device = self._get_device(device_uri)
+        if device and device.connected:
+            device.sleep(secs)
+        else:
+            time.sleep(secs)
+        return True

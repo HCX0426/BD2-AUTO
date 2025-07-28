@@ -1,14 +1,17 @@
-from typing import Optional, Tuple, Union
 import time
+from ctypes import windll
+from typing import Optional, Tuple, Union
+
+import cv2
+import numpy as np
+import pydirectinput
 import win32con
 import win32gui
-import numpy as np
-from airtest.core.api import Template, connect_device, paste, swipe, touch, wait, exists
-from airtest.core.helper import log
-import pydirectinput
-import cv2
-from ctypes import windll
 import win32ui
+from airtest.core.api import Template, connect_device, exists, paste
+from airtest.core.api import sleep as air_sleep
+from airtest.core.api import swipe, touch, wait
+from airtest.core.helper import log, logwrap
 from PIL import Image
 
 from auto_control.device_base import BaseDevice, DeviceState
@@ -42,10 +45,11 @@ class WindowsDevice(BaseDevice):
             return
 
         try:
-            left, top, right, bottom = win32gui.GetWindowRect(self.window_handle)
+            left, top, right, bottom = win32gui.GetWindowRect(
+                self.window_handle)
             self.resolution = (right - left, bottom - top)
             self.minimized = win32gui.IsIconic(self.window_handle)
-            
+
             if self._window_original_rect is None:
                 self._window_original_rect = (left, top, right, bottom)
         except Exception as e:
@@ -60,15 +64,15 @@ class WindowsDevice(BaseDevice):
             connect_device(self.device_uri)
             self.connected = True
             window_title = self._get_window_title()
-            
+
             while time.time() - start_time < timeout:
                 self.window_handle = win32gui.FindWindow(None, window_title)
                 if self.window_handle:
                     self._update_window_info()
                     self._update_device_state(DeviceState.CONNECTED)
                     return True
-                time.sleep(0.1)
-            
+                self.sleep(0.1)
+
             raise TimeoutError("查找窗口超时")
         except Exception as e:
             self._update_device_state(DeviceState.ERROR)
@@ -111,7 +115,8 @@ class WindowsDevice(BaseDevice):
             saveBitMap.CreateCompatibleBitmap(mfcDC, width, height)
             saveDC.SelectObject(saveBitMap)
 
-            result = windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 0x00000002)
+            result = windll.user32.PrintWindow(
+                hwnd, saveDC.GetSafeHdc(), 0x00000002)
 
             if result == 1:
                 bmpinfo = saveBitMap.GetInfo()
@@ -140,7 +145,7 @@ class WindowsDevice(BaseDevice):
         try:
             if self.minimized:
                 self.restore_window()
-                time.sleep(0.3)
+                self.sleep(0.3)
 
             win32gui.SetForegroundWindow(self.window_handle)
             self._update_window_info()
@@ -171,6 +176,7 @@ class WindowsDevice(BaseDevice):
             log(e, desc="点击操作异常")  # 记录异常堆栈
             return False
 
+    @logwrap
     def key_press(self, key: str, duration: float = 0.1) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:
@@ -239,7 +245,7 @@ class WindowsDevice(BaseDevice):
         try:
             if not self.connected:
                 return False
-            
+
             if not isinstance(template, Template):
                 raise ValueError(f"模板参数必须是Template对象,当前类型为:{type(template)}")
 
@@ -253,6 +259,7 @@ class WindowsDevice(BaseDevice):
             return False
 
     # 新增窗口管理功能
+
     def minimize_window(self) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:
@@ -309,8 +316,8 @@ class WindowsDevice(BaseDevice):
 
             left, top, _, _ = win32gui.GetWindowRect(self.window_handle)
             win32gui.SetWindowPos(
-                self.window_handle, 
-                win32con.HWND_TOP, 
+                self.window_handle,
+                win32con.HWND_TOP,
                 left, top, width, height,
                 win32con.SWP_NOZORDER
             )
@@ -331,8 +338,8 @@ class WindowsDevice(BaseDevice):
 
             _, _, width, height = self.resolution
             win32gui.SetWindowPos(
-                self.window_handle, 
-                win32con.HWND_TOP, 
+                self.window_handle,
+                win32con.HWND_TOP,
                 x, y, width, height,
                 win32con.SWP_NOZORDER | win32con.SWP_NOSIZE
             )
@@ -353,10 +360,10 @@ class WindowsDevice(BaseDevice):
             left, top, right, bottom = self._window_original_rect
             width = right - left
             height = bottom - top
-            
+
             win32gui.SetWindowPos(
-                self.window_handle, 
-                win32con.HWND_TOP, 
+                self.window_handle,
+                win32con.HWND_TOP,
                 left, top, width, height,
                 win32con.SWP_NOZORDER
             )
@@ -368,3 +375,8 @@ class WindowsDevice(BaseDevice):
             self._update_device_state(DeviceState.ERROR)
             self.last_error = str(e)
             return False
+
+    # 睡眠方法
+    def sleep(self, secs: float = 1.0) -> None:
+        """设置睡眠间隔并记录到测试报告中"""
+        air_sleep(secs)
