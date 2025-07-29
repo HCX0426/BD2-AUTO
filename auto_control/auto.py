@@ -404,6 +404,50 @@ class Auto:
         return device.click((int(center_x), int(center_y)))
 
     @chainable
+    def add_find_text_position_task(
+        self,
+        target_text: str,
+        lang: str = DEFAULT_OCR_LANG,
+        roi: Optional[tuple] = None,
+        fuzzy_match: bool = DEFAULT_TEXT_FUZZY_MATCH,
+        min_confidence: float = DEFAULT_TEXT_MIN_CONFIDENCE,
+        device_uri: Optional[str] = None
+    ) -> Task:
+        """添加文本位置查找任务并返回Task对象
+        :param target_text: 要查找的目标文本
+        :param lang: OCR语言配置
+        :param roi: 感兴趣区域 (相对坐标)
+        :param fuzzy_match: 是否启用模糊匹配
+        :param min_confidence: 最小置信度阈值
+        :param device_uri: 指定设备URI
+        :return: Task对象，结果格式为 (x, y, w, h) 或 None
+        """
+        return self.task_executor.add_task(
+            self._execute_find_text_position, target_text, lang, roi, fuzzy_match, min_confidence, device_uri,
+            timeout=DEFAULT_TASK_TIMEOUT
+        )
+    
+    def _execute_find_text_position(self, target_text, lang, roi, fuzzy_match, min_confidence, device_uri):
+        """执行文本位置查找操作"""
+        device = self._get_device(device_uri)
+        if not device or not device.connected:
+            return None
+    
+        if not (screen := device.capture_screen()):
+            return None
+    
+        if roi:
+            screen = self.image_processor.get_roi_region(screen, roi)
+    
+        return self.ocr_processor.find_text_position(
+            screen, 
+            target_text, 
+            lang=lang, 
+            fuzzy_match=fuzzy_match, 
+            min_confidence=min_confidence
+        )
+
+    @chainable
     def add_ocr_task(
         self,
         lang: str = DEFAULT_OCR_LANG,
@@ -1045,7 +1089,7 @@ class Auto:
             secs,
             delay,
             device_uri,
-            timeout=secs + 1  # 设置比睡眠时间稍长的超时
+            timeout=secs
         )
 
     def _execute_sleep(self, secs, delay, device_uri):

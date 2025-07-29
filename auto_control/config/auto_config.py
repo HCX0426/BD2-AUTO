@@ -17,3 +17,5 @@ DEFAULT_CLICK_DELAY = 0.0  # 点击操作默认延迟
 DEFAULT_MAX_RETRY = 1  # 默认最大重试次数
 DEFAULT_RETRY_INTERVAL = 1.0  # 默认重试间隔(秒)
 DEFAULT_KEY_DURATION = 0.1  # 默认按键持续时间(秒)
+
+DEFAULT_TEXT_MIN_CONFIDENCE = 0.7  # 文本匹配最小置信度阈值

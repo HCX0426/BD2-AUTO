@@ -14,7 +14,7 @@ class MatchMethod(Enum):
 
 # 路径配置
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-TEMPLATE_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'image') # 默认模板路径
+TEMPLATE_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'images') # 默认模板路径
 AUTO_LOAD_TEMPLATES = True  # 是否自动加载模板
 TEMPLATE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp')  # 支持的图片格式
 

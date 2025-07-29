@@ -70,41 +70,48 @@ class ImageProcessor:
             )
 
     def load_templates_from_dir(
-        self,
-        dir_path: str,
-        extensions: Tuple[str, ...] = TEMPLATE_EXTENSIONS,
-        recursive: bool = True,
-        roi_config: Optional[Dict[str,
-                                  Tuple[float, float, float, float]]] = None,
-        threshold: float = DEFAULT_THRESHOLD,
-        scale_strategy: ScaleStrategy = DEFAULT_SCALE_STRATEGY
-    ) -> Dict[str, Template]:
-        """
-        从目录加载所有图片作为模板
-        """
-        if not os.path.exists(dir_path):
-            print(f"[WARN] 模板目录不存在: {dir_path}")
-            return {}
+            self,
+            dir_path: str,
+            extensions: Tuple[str, ...] = TEMPLATE_EXTENSIONS,
+            recursive: bool = True,
+            roi_config: Optional[Dict[str,
+                                    Tuple[float, float, float, float]]] = None,
+            threshold: float = DEFAULT_THRESHOLD,
+            scale_strategy: ScaleStrategy = DEFAULT_SCALE_STRATEGY
+        ) -> Dict[str, Template]:
+            """
+            从目录加载所有图片作为模板（包含子目录）
+            """
+            if not os.path.exists(dir_path):
+                print(f"[WARN] 模板目录不存在: {dir_path}")
+                return {}
 
-        loaded = {}
-        pattern = os.path.join(dir_path, '**' if recursive else '', '*')
-        for file_path in glob(pattern, recursive=recursive):
-            if file_path.lower().endswith(extensions):
-                template_name = os.path.splitext(
-                    os.path.basename(file_path))[0]
-                try:
-                    loaded[template_name] = self.load_template(
-                        name=template_name,
-                        path=file_path,
-                        roi=roi_config.get(
-                            template_name) if roi_config else None,
-                        threshold=threshold,
-                        scale_strategy=scale_strategy
-                    )
-                    # print(f"成功加载模板: {template_name}")
-                except Exception as e:
-                    print(f"[ERROR] 加载模板失败 {template_name}: {str(e)}")
-        return loaded
+            loaded = {}
+            # 遍历目录及子目录中的所有文件
+            for root, _, files in os.walk(dir_path):
+                if not recursive and root != dir_path:
+                    continue  # 非递归模式时跳过子目录
+                    
+                for file_name in files:
+                    if file_name.lower().endswith(extensions):
+                        file_path = os.path.join(root, file_name)
+                        
+                        # 生成相对路径作为模板名（保留目录结构）
+                        rel_path = os.path.relpath(file_path, start=dir_path)
+                        template_name = os.path.splitext(rel_path)[0].replace('\\', '/')  # 统一使用斜杠
+                        
+                        try:
+                            loaded[template_name] = self.load_template(
+                                name=template_name,
+                                path=file_path,
+                                roi=roi_config.get(
+                                    template_name) if roi_config else None,
+                                threshold=threshold,
+                                scale_strategy=scale_strategy
+                            )
+                        except Exception as e:
+                            print(f"[ERROR] 加载模板失败 {template_name}: {str(e)}")
+            return loaded
 
     def __del__(self):
         self.executor.shutdown()
