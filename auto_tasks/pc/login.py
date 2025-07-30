@@ -21,12 +21,12 @@ def login(auto: Auto, timeout: int = 300):
                 logger.info("检测到开始游戏界面，点击开始游戏")
                 auto.add_click_task(pos).wait()
 
-            pos = auto.add_check_element_exist_task("login/地图标识").wait()
+            pos = auto.add_check_element_exist_task("public/地图标识").wait()
             if pos:
                 logger.info("检测到地图标识，按H进入主界面")
                 auto.add_key_task("h").wait()
 
-                auto.add_sleep_task(2)
+                auto.add_sleep_task(2).wait()
 
                 # 弹窗处理循环
                 popup_handled = False

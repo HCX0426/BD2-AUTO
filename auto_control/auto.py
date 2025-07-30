@@ -344,6 +344,7 @@ class Auto:
     def add_text_click_task(
         self,
         target_text: str,
+        click: bool = True,
         lang: str = DEFAULT_OCR_LANG,
         roi: Optional[tuple] = None,
         max_retry: int = DEFAULT_MAX_RETRY,
@@ -353,11 +354,11 @@ class Auto:
     ) -> Task:
         """添加点击文本任务并返回Task对象"""
         return self.task_executor.add_task(
-            self._execute_text_click, target_text, lang, roi, max_retry, retry_interval, delay, device_uri,
+            self._execute_text_click, target_text, click, lang, roi, max_retry, retry_interval, delay, device_uri,
             timeout=DEFAULT_TASK_TIMEOUT
         )
 
-    def _execute_text_click(self, target_text, lang, roi, max_retry, retry_interval, delay, device_uri):
+    def _execute_text_click(self, target_text, click, lang, roi, max_retry, retry_interval, delay, device_uri):
         """执行文本点击任务（内部重试）"""
         return self._execute_with_retry(
             func=self._perform_text_click,
@@ -365,13 +366,14 @@ class Auto:
             max_retry=max_retry,
             retry_interval=retry_interval,
             target_text=target_text,
+            click=click,
             lang=lang,
             roi=roi,
             delay=delay,
-            device_uri=device_uri
+            device_uri=device_uri,
         )
 
-    def _perform_text_click(self, target_text, lang, roi, delay, device_uri):
+    def _perform_text_click(self, target_text, click, lang, roi, delay, device_uri):
         """实际执行文本点击操作"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
@@ -401,51 +403,10 @@ class Auto:
             center_x += int(w * roi[0])
             center_y += int(h * roi[1])
 
-        return device.click((int(center_x), int(center_y)))
-
-    @chainable
-    def add_find_text_position_task(
-        self,
-        target_text: str,
-        lang: str = DEFAULT_OCR_LANG,
-        roi: Optional[tuple] = None,
-        fuzzy_match: bool = DEFAULT_TEXT_FUZZY_MATCH,
-        min_confidence: float = DEFAULT_TEXT_MIN_CONFIDENCE,
-        device_uri: Optional[str] = None
-    ) -> Task:
-        """添加文本位置查找任务并返回Task对象
-        :param target_text: 要查找的目标文本
-        :param lang: OCR语言配置
-        :param roi: 感兴趣区域 (相对坐标)
-        :param fuzzy_match: 是否启用模糊匹配
-        :param min_confidence: 最小置信度阈值
-        :param device_uri: 指定设备URI
-        :return: Task对象，结果格式为 (x, y, w, h) 或 None
-        """
-        return self.task_executor.add_task(
-            self._execute_find_text_position, target_text, lang, roi, fuzzy_match, min_confidence, device_uri,
-            timeout=DEFAULT_TASK_TIMEOUT
-        )
-    
-    def _execute_find_text_position(self, target_text, lang, roi, fuzzy_match, min_confidence, device_uri):
-        """执行文本位置查找操作"""
-        device = self._get_device(device_uri)
-        if not device or not device.connected:
-            return None
-    
-        if not (screen := device.capture_screen()):
-            return None
-    
-        if roi:
-            screen = self.image_processor.get_roi_region(screen, roi)
-    
-        return self.ocr_processor.find_text_position(
-            screen, 
-            target_text, 
-            lang=lang, 
-            fuzzy_match=fuzzy_match, 
-            min_confidence=min_confidence
-        )
+        if click:
+            return device.click((int(center_x), int(center_y)))
+        else:
+            return (int(center_x), int(center_y))
 
     @chainable
     def add_ocr_task(
@@ -940,7 +901,6 @@ class Auto:
             ) or False
         return retry_wrapper
 
-
     @chainable
     def add_wait_element_task(
         self,
@@ -951,7 +911,7 @@ class Auto:
     ) -> Task:
         """添加等待元素出现的任务"""
         return self.task_executor.add_task(
-            self._execute_wait_element, 
+            self._execute_wait_element,
             template_name,
             timeout,
             delay,
@@ -965,12 +925,12 @@ class Auto:
         device = self._get_device(device_uri)
         if not device:
             return False
-        
+
         template = self.image_processor.get_template(template_name)
         if not template:
             print(f"模板 {template_name} 未找到")
             return False
-        
+
         return self._execute_with_retry(
             func=device.wait,
             task_name=f"等待元素[{template_name}]",
@@ -979,7 +939,6 @@ class Auto:
             template=template,
             timeout=timeout
         )
-    
 
     @chainable
     def add_swipe_task(
@@ -1003,7 +962,6 @@ class Auto:
         if not device or not device.connected:
             return False
         return device.swipe(start_pos[0], start_pos[1], end_pos[0], end_pos[1], duration)
-    
 
     @chainable
     def add_text_input_task(
@@ -1048,7 +1006,6 @@ class Auto:
         if not device:
             return False
         return device.move_window(x, y)
-    
 
     @chainable
     def add_reset_window_task(
@@ -1069,16 +1026,16 @@ class Auto:
         if not device:
             return False
         return device.reset_window()
-    
+
     @chainable
     def add_sleep_task(
-        self, 
+        self,
         secs: float = 1.0,
         delay: float = 0,
         device_uri: Optional[str] = None
     ) -> Task:
         """添加带日志记录的睡眠任务
-        
+
         Args:
             secs: 睡眠时长（秒）
             delay: 执行前延迟（秒）
@@ -1095,9 +1052,28 @@ class Auto:
     def _execute_sleep(self, secs, delay, device_uri):
         """执行带设备状态的睡眠操作"""
         self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if device and device.connected:
-            device.sleep(secs)
-        else:
-            time.sleep(secs)
-        return True
+        try:
+            device = self._get_device(device_uri)
+            # 添加参数类型转换
+            sleep_time = float(secs)
+
+            if device and device.connected:
+                # 返回设备睡眠操作结果
+                return device.sleep(sleep_time)
+            else:
+                time.sleep(sleep_time)
+                return True  # 必须返回布尔值
+        except Exception as e:
+            print(f"[ERROR] 睡眠任务执行失败: {str(e)}")
+            return False
+
+    @chainable
+    def add_sleep_task(self, seconds: float) -> Task:
+        """添加睡眠任务"""
+        return self.task_executor.add_task(
+            self._execute_sleep,  # 改为调用封装方法
+            seconds,
+            delay=0,
+            device_uri=None,
+            timeout=seconds + 1
+        )

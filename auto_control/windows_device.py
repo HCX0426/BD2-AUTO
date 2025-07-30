@@ -377,6 +377,11 @@ class WindowsDevice(BaseDevice):
             return False
 
     # 睡眠方法
-    def sleep(self, secs: float = 1.0) -> None:
-        """设置睡眠间隔并记录到测试报告中"""
-        air_sleep(secs)
+    def sleep(self, secs: float = 1.0) -> bool:
+        """设置睡眠间隔并返回执行结果"""
+        try:
+            air_sleep(secs)
+            return True
+        except Exception as e:
+            print(f"设备睡眠失败: {str(e)}")
+            return False

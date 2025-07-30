@@ -2,6 +2,7 @@ from typing import List, Dict, Optional, Tuple, Union
 import numpy as np
 from .ocr_core import TesseractOCR, EasyOCRWrapper
 from .config.control__config import get_default_languages
+from airtest.core.helper import logwrap
 
 class OCRProcessor:
     def __init__(self, engine: str = 'easyocr', **kwargs):
@@ -78,6 +79,7 @@ class OCRProcessor:
         self.engine.enable_gpu(enable)
         print(f"GPU acceleration {'enabled' if enable else 'disabled'}")
 
+    @logwrap
     def find_text_position(self,
                           image: np.ndarray,
                           target_text: str,

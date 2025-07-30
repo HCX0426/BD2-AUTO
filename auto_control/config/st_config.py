@@ -16,6 +16,12 @@ os.makedirs(ST_REPORT_DIR, exist_ok=True)
 set_logdir(ST_LOG_DIR)
 ST.LOG_FILE = "log.txt"
 
+__author__ = "Airtest"
+
+import logging
+logger = logging.getLogger("airtest")
+logger.setLevel(logging.ERROR)
+
 DEFAULT_REPORT_PATH = os.path.join(ST_REPORT_DIR, 'log.html')
 
 def generate_report(script_path: str,report_path: str = DEFAULT_REPORT_PATH) -> str:

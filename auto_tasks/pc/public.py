@@ -17,28 +17,29 @@ def back_to_main(auto: Auto, timeout: int = 300):
         pos = auto.add_check_element_exist_task("public/主界面").wait()
         if pos:
             logger.info("检测到主界面，无需返回")
-            auto.add_sleep_task(1)
+            auto.add_sleep_task(1).wait()
             return True
         else:
             # 检测地图标识
             pos = auto.add_check_element_exist_task("public/地图标识").wait()
             if pos:
-                auto.add_key_task("h")
-                auto.add_sleep_task(1)
+                auto.add_key_task("h").wait()
+                auto.add_sleep_task(1).wait()
             else:
                 logger.info("未检测到已知界面")
-                auto.add_key_task("esc")
-                auto.add_sleep_task(1)
+                auto.add_key_task("esc").wait()
+                auto.add_sleep_task(1).wait()
 
                 # 检查是否出现结束游戏弹窗
-                pos = auto.add_find_text_position_task("结束游戏").wait()
+                pos = auto.add_text_click_task("结束游戏",click=False).wait()
                 if pos:
                     logger.info("检测到结束游戏弹窗")
-                    auto.add_key_task("esc")
-                    auto.add_sleep_task(1)
+                    auto.add_key_task("esc").wait()
+                    auto.add_sleep_task(1).wait()
                     if auto.add_check_element_exist_task("public/地图标识").wait():
                         logger.info("检测到地图标识，返回主界面")
-                        return True
+                        auto.add_key_task("h").wait()
+                        auto.add_sleep_task(1).wait()
     except Exception as e:
         logger.error(f"返回主界面失败: {e}")
         return False
