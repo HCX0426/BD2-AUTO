@@ -4,7 +4,7 @@ from auto_control.logger import Logger
 # 公共方法
 
 # 回到主界面
-def back_to_main(auto: Auto, timeout: int = 300):
+def back_to_main(auto: Auto):
     """
     回到主界面
     :param auto: Auto实例
@@ -46,7 +46,7 @@ def back_to_main(auto: Auto, timeout: int = 300):
 
 
 # 等待加载
-def wait_load(auto: Auto, timeout: int = 300):
+def wait_load(auto: Auto):
     """
     等待加载
     :param auto: Auto实例
@@ -64,4 +64,25 @@ def wait_load(auto: Auto, timeout: int = 300):
             return True
     except Exception as e:
         logger.error(f"等待加载失败: {e}")
+        return False
+
+# 点击画面即可返回
+def click_back(auto: Auto):
+    """
+    点击画面即可返回
+    :param auto: Auto实例
+    :return:
+    """
+    logger = Logger("click_back")
+    try:
+        pos = auto.add_text_click_task("点击画面即可返回").wait()
+        if pos:
+            logger.info("点击画面即可返回")
+            auto.add_sleep_task(2).wait()
+            return True
+        else:
+            logger.info("未检测到点击画面即可返回")
+            return False
+    except Exception as e:
+        logger.error(f"点击画面即可返回失败: {e}")
         return False
