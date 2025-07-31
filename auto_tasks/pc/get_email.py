@@ -22,19 +22,19 @@ def get_email(auto: Auto, timeout: int = 300):
             # 检测是否在主界面
             result = back_to_main(auto)
             if result:
-                auto.add_template_click_task("get_email/邮箱").wait()
-                auto.add_sleep_task(2).wait()
+                auto.add_template_click_task("get_email/邮箱")
+                auto.add_sleep_task(2)
 
-            pos = auto.add_check_element_exist_task("get_email/邮件未领数").wait()
+            pos = auto.add_check_element_exist_task("get_email/邮件未领数")
             if pos:
                 logger.info("检测到邮件未领数已完，回到主界面")
-                auto.add_text_click_task("全部领取").wait()
-                pos = auto.add_text_click_task("点击画面即可返回").wait()
+                auto.add_text_click_task("全部领取")
+                pos = auto.add_text_click_task("点击画面即可返回")
                 if pos:
                     logger.info("检测到点击画面即可返回，进行点击")
-                    result = auto.add_click_task(pos).wait()
+                    result = auto.add_click_task(pos)
                     if result:
-                        auto.add_key_task("esc").wait()
+                        auto.add_key_task("esc")
 
                         result = back_to_main(auto)
                         if result:
@@ -44,7 +44,7 @@ def get_email(auto: Auto, timeout: int = 300):
                         return False
 
                 if result:
-                    auto.add_sleep_task(2).wait()
+                    auto.add_sleep_task(2)
                     # 检测是否在主界面
                     pos = auto.add_check_element_exist_task("主界面")
                     if pos:
@@ -52,14 +52,14 @@ def get_email(auto: Auto, timeout: int = 300):
                         return True
             else:
                 logger.info("检测到邮件未领数，点击全部领取")
-                auto.add_text_click_task("全部领取").wait()
+                auto.add_text_click_task("全部领取")
 
-                pos = auto.add_text_click_task("点击画面即可返回").wait()
+                pos = auto.add_text_click_task("点击画面即可返回")
                 if pos:
                     logger.info("检测到点击画面即可返回，进行点击")
-                    result = auto.add_click_task(pos).wait()
+                    result = auto.add_click_task(pos)
                     if result:
-                        auto.add_key_task("esc").wait()
+                        auto.add_key_task("esc")
 
                         result = back_to_main(auto)
                         if result:

@@ -23,23 +23,23 @@ def get_restaurant(auto: Auto, timeout: int = 60):
                 # 是否在主界面
                 result = back_to_main(auto)
                 if result:
-                    pos = auto.add_template_click_task("get_restaurant/餐馆标识").wait()
+                    pos = auto.add_template_click_task("get_restaurant/餐馆标识")
                     if pos:
                         logger.info("点击餐馆标识")
-                        auto.add_sleep_task(1).wait()
+                        auto.add_sleep_task(1)
                         first = True
 
-            pos = auto.add_text_click_task("结算").wait()
+            pos = auto.add_text_click_task("结算")
             if pos:
                 logger.info("点击结算")
-                auto.add_sleep_task(4).wait()
+                auto.add_sleep_task(4)
 
                 pos = click_back(auto)
                 if not pos:
-                    pos = auto.add_template_click_task("get_restaurant/结算X").wait()
+                    pos = auto.add_template_click_task("get_restaurant/结算X")
                     if pos:
                         logger.info("点击结算X成功")
-                        auto.add_sleep_task(1).wait()
+                        auto.add_sleep_task(1)
                         result = back_to_main(auto)
                         if result:
                             logger.info("返回主界面成功")

@@ -16,41 +16,41 @@ def login(auto: Auto, timeout: int = 300):
             if time.time() - start_time > timeout:
                 logger.error("任务总时长超时")
                 return False
-            pos = auto.add_check_element_exist_task("login/开始游戏").wait()
+            pos = auto.add_check_element_exist_task("login/开始游戏")
             if pos:
                 logger.info("检测到开始游戏界面，点击开始游戏")
-                auto.add_click_task(pos).wait()
+                auto.add_click_task(pos)
 
-            pos = auto.add_check_element_exist_task("public/地图标识").wait()
+            pos = auto.add_check_element_exist_task("public/地图标识")
             if pos:
                 logger.info("检测到地图标识，按H进入主界面")
-                auto.add_key_task("h").wait()
+                auto.add_key_task("h")
 
-                auto.add_sleep_task(2).wait()
+                auto.add_sleep_task(2)
 
                 # 弹窗处理循环
                 popup_handled = False
                 for _ in range(5):  # 最多处理5次弹窗
                     # 优先处理登录奖励
-                    if reward_pos := auto.add_check_element_exist_task("login/登录奖励X").wait(3):
+                    if reward_pos := auto.add_check_element_exist_task("login/登录奖励X"):
                         logger.info("检测到登录奖励X2，点击关闭")
-                        auto.add_click_task(reward_pos).wait()
+                        auto.add_click_task(reward_pos)
                         popup_handled = True
                         continue
 
                     # 处理公告弹窗
-                    if notice_pos := auto.add_check_element_exist_task("login/公告X").wait(3):
+                    if notice_pos := auto.add_check_element_exist_task("login/公告X"):
                         logger.info("检测到公告X2，点击关闭")
-                        auto.add_click_task(notice_pos).wait()
+                        auto.add_click_task(notice_pos)
                         popup_handled = True
                         continue
 
                 # 弹窗处理完成后添加短暂等待
                 if popup_handled:
-                    auto.add_wait_task(1).wait()
+                    auto.add_wait_task(1)
 
             # 主界面检测保持最后
-            pos = auto.add_check_element_exist_task("public/主界面").wait()
+            pos = auto.add_check_element_exist_task("public/主界面")
             if pos:
                 logger.info("检测到主界面，登录成功")
                 return True

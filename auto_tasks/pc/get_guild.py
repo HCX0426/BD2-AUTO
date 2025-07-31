@@ -32,16 +32,16 @@ def get_guild(auto: Auto, timeout: int = 60):
             if not flag:
                 result = back_to_main(auto)
                 if result:
-                    auto.add_template_click_task("get_guild/公会标识").wait()
-                    auto.add_sleep_task(2).wait()
+                    auto.add_template_click_task("get_guild/公会标识")
+                    auto.add_sleep_task(2)
             
             pos = auto.add_check_element_exist_task("get_guild/公会商店")
             if pos:
                 logger.info("检测到公会商店")
-                pos = auto.add_template_click_task("public/返回键1").wait()
+                pos = auto.add_template_click_task("public/返回键1")
                 if pos:
                     logger.info("检测到返回键1，点击返回")
-                    auto.add_sleep_task(2).wait()
+                    auto.add_sleep_task(2)
                     flag = True
                     result = back_to_main(auto)
                     if result:
