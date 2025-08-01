@@ -2,6 +2,7 @@ import time
 
 from auto_control.auto import Auto
 from auto_control.logger import Logger
+from auto_tasks.pc.public import back_to_main
 
 
 def login(auto: Auto, timeout: int = 300):
@@ -10,50 +11,47 @@ def login(auto: Auto, timeout: int = 300):
         logger = Logger("Login")
         logger.info("开始登录")
         start_time = time.time()
+        first = True
 
         while time.time() - start_time < timeout:
-
-            if time.time() - start_time > timeout:
-                logger.error("任务总时长超时")
-                return False
-            pos = auto.add_check_element_exist_task("login/开始游戏")
-            if pos:
+            # 检查开始游戏按钮
+            if auto.check_element_exist("login/开始游戏"):
                 logger.info("检测到开始游戏界面，点击开始游戏")
-                auto.add_click_task(pos)
+                auto.template_click("login/开始游戏")
+                auto.sleep(1)
+                continue
 
-            pos = auto.add_check_element_exist_task("public/地图标识")
-            if pos:
-                logger.info("检测到地图标识，按H进入主界面")
-                auto.add_key_task("h")
+            if first:
+                # 回到主界面
+                if back_to_main(auto):
+                    logger.info("返回主界面成功")
+                    first = False
 
-                auto.add_sleep_task(2)
+                    for i in range(3):
+                        # 处理弹窗
+                        if auto.check_element_exist("login/登录奖励X"):
+                            logger.info("检测到登录奖励X2，点击关闭")
+                            auto.template_click("login/登录奖励X")
+                            auto.sleep(1)
+                            continue
 
-                # 弹窗处理循环
-                popup_handled = False
-                for _ in range(5):  # 最多处理5次弹窗
-                    # 优先处理登录奖励
-                    if reward_pos := auto.add_check_element_exist_task("login/登录奖励X"):
-                        logger.info("检测到登录奖励X2，点击关闭")
-                        auto.add_click_task(reward_pos)
-                        popup_handled = True
-                        continue
+                        if auto.check_element_exist("login/公告X"):
+                            logger.info("检测到公告X2，点击关闭")
+                            auto.template_click("login/公告X")
+                            auto.sleep(1)
+                            continue
 
-                    # 处理公告弹窗
-                    if notice_pos := auto.add_check_element_exist_task("login/公告X"):
-                        logger.info("检测到公告X2，点击关闭")
-                        auto.add_click_task(notice_pos)
-                        popup_handled = True
-                        continue
-
-                # 弹窗处理完成后添加短暂等待
-                if popup_handled:
-                    auto.add_wait_task(1)
-
-            # 主界面检测保持最后
-            pos = auto.add_check_element_exist_task("public/主界面")
-            if pos:
-                logger.info("检测到主界面，登录成功")
-                return True
+                        # 短暂等待后继续检查
+                        auto.sleep(0.5)
+                if not first:
+                    result = back_to_main(auto)
+                    if result:
+                        logger.info("返回主界面成功")
+                        return True
+            
+        logger.error("登录超时")
+        return False
+        
     except Exception as e:
         logger.error(f"登录过程中出错: {e}")
         return False

@@ -49,7 +49,7 @@ class BaseDevice(ABC):
         pass
 
     @abstractmethod
-    def click(self, x: int, y: int, duration: float = 0.1) -> bool:
+    def click(self, x: int, y: int, duration: float = 0.1, time: int = 1, right_click: bool = False) -> bool:
         """
         点击指定位置
         :param x: X坐标
@@ -108,6 +108,15 @@ class BaseDevice(ABC):
         检查元素是否存在
         :param template: 要检查的模板
         :return: 元素是否存在
+        """
+        pass
+
+    @abstractmethod
+    def sleep(self, secs: float) -> bool:
+        """
+        设备睡眠
+        :param secs: 睡眠时间(秒)
+        :return: 是否执行成功
         """
         pass
 

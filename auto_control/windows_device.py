@@ -25,9 +25,9 @@ class WindowsDevice(BaseDevice):
         self._window_original_rect: Optional[Tuple[int, int, int, int]] = None
 
     def _update_device_state(self, new_state: DeviceState) -> None:
-        """更新设备状态（内部方法）"""
+        """更新设备状态"""
         self.state = new_state
-        print(f"设备状态更新: {new_state.name}")
+        # print(f"设备状态更新: {new_state.name}")
 
     def _get_window_title(self) -> str:
         """从URI中提取窗口标题"""
@@ -40,7 +40,7 @@ class WindowsDevice(BaseDevice):
         return remaining_part[:next_param_index] if next_param_index != -1 else remaining_part
 
     def _update_window_info(self) -> None:
-        """更新窗口信息（复用方法）"""
+        """更新窗口信息"""
         if not self.window_handle:
             return
 
@@ -138,7 +138,7 @@ class WindowsDevice(BaseDevice):
             self._update_device_state(DeviceState.IDLE)
 
     def set_foreground(self) -> bool:
-        """激活并置前窗口（优化后的复用方法）"""
+        """激活并置前窗口"""
         if not self.window_handle:
             return False
 
@@ -156,14 +156,14 @@ class WindowsDevice(BaseDevice):
             self.last_error = str(e)
             return False
 
-    def click(self, pos_or_template: Union[Tuple[int, int], Template], duration: float = 0.1) -> bool:
+    def click(self, pos_or_template: Union[Tuple[int, int], Template], duration: float = 0.1, time: int = 1, right_click: bool = False) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:
             if not self.set_foreground() or self.minimized:
                 return False
 
             # 使用Airtest的touch方法处理坐标和模板
-            pos = touch(pos_or_template, duration=duration)
+            pos = touch(pos_or_template, duration=duration, time=time, right_click=right_click)
             if pos is None:
                 return False
             self._update_device_state(DeviceState.IDLE)
@@ -210,13 +210,13 @@ class WindowsDevice(BaseDevice):
             self.last_error = str(e)
             return False
 
-    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5) -> bool:
+    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 2, steps: int = 1) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:
             if not self.set_foreground() or self.minimized:
                 return False
 
-            swipe((start_x, start_y), (end_x, end_y), duration=duration)
+            swipe((start_x, start_y), (end_x, end_y), duration=duration, steps=steps)
             self._update_device_state(DeviceState.IDLE)
             return True
         except Exception as e:
@@ -377,8 +377,8 @@ class WindowsDevice(BaseDevice):
             return False
 
     # 睡眠方法
-    def sleep(self, secs: float = 1.0) -> bool:
-        """设置睡眠间隔并返回执行结果"""
+    def sleep(self, secs: float) -> bool:
+        """设备睡眠"""
         try:
             air_sleep(secs)
             return True

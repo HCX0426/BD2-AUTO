@@ -8,38 +8,26 @@ def back_to_main(auto: Auto):
     """
     回到主界面
     :param auto: Auto实例
-    :param timeout: 超时时间
-    :return:
+    :return: 是否成功
     """
     try:
-        logger = Logger("back_to_main")
-        # 检测是否在主界面
-        pos = auto.add_check_element_exist_task("public/主界面")
-        if pos:
-            logger.info("检测到主界面，无需返回")
-            auto.add_sleep_task(1)
-            return True
-        else:
-            # 检测地图标识
-            pos = auto.add_check_element_exist_task("public/地图标识")
-            if pos:
-                auto.add_key_task("h")
-                auto.add_sleep_task(1)
+        while True:
+            logger = Logger("back_to_main")
+            # 检测是否在主界面
+            if auto.check_element_exist("public/主界面"):
+                logger.info("检测到主界面，无需返回")
+                auto.sleep(1)
+                return True
             else:
-                logger.info("未检测到已知界面")
-                auto.add_key_task("esc")
-                auto.add_sleep_task(1)
+                # 检测地图标识
+                if auto.check_element_exist("public/地图标识"):
+                    auto.key_press("h")
+                    auto.sleep(1)
+                else:
+                    logger.info("未检测到地图标识")
+                    auto.key_press("esc")
+                    auto.sleep(1)
 
-                # 检查是否出现结束游戏弹窗
-                pos = auto.add_text_click_task("结束游戏",click=False)
-                if pos:
-                    logger.info("检测到结束游戏弹窗")
-                    auto.add_key_task("esc")
-                    auto.add_sleep_task(1)
-                    if auto.add_check_element_exist_task("public/地图标识"):
-                        logger.info("检测到地图标识，返回主界面")
-                        auto.add_key_task("h")
-                        auto.add_sleep_task(1)
     except Exception as e:
         logger.error(f"返回主界面失败: {e}")
         return False
@@ -50,15 +38,14 @@ def wait_load(auto: Auto):
     """
     等待加载
     :param auto: Auto实例
-    :param timeout: 超时时间
-    :return:
+    :return: 是否成功
     """
     logger = Logger("wait_load")
     try:
-        pos = auto.add_check_element_exist_task("public/加载中")
-        if pos:
+        if auto.check_element_exist("public/加载中"):
             logger.info("检测到加载中，等待加载完成")
-            auto.add_sleep_task(6)
+            auto.sleep(6)
+            return True
         else:
             logger.info("未检测到加载中")
             return True
@@ -71,14 +58,13 @@ def click_back(auto: Auto):
     """
     点击画面即可返回
     :param auto: Auto实例
-    :return:
+    :return: 是否成功
     """
     logger = Logger("click_back")
     try:
-        pos = auto.add_text_click_task("点击画面即可返回")
-        if pos:
+        if auto.text_click("点击画面即可返回"):
             logger.info("点击画面即可返回")
-            auto.add_sleep_task(2)
+            auto.sleep(2)
             return True
         else:
             logger.info("未检测到点击画面即可返回")

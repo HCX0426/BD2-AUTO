@@ -1,9 +1,9 @@
 import logging
 import time
-from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Optional,Tuple
 
 import cv2
+import numpy as np
 
 # 导入配置文件
 from .config.control__config import *
@@ -43,19 +43,8 @@ class Auto:
             resolution or base_resolution or DEFAULT_BASE_RESOLUTION
         )
         
-
-    def chainable(func: Callable) -> Callable:
-        """链式调用装饰器"""
-        @wraps(func)
-        def wrapper(self, *args, **kwargs) -> "Auto":
-            try:
-                # 执行原始方法
-                func(self, *args, **kwargs)
-                return self
-            except Exception as e:
-                print(f"[ERROR] 方法调用失败 {func.__name__}: {str(e)}")
-                return self
-        return wrapper
+        # 存储最后操作结果
+        self.last_result = None
 
     def _get_device(self, device_uri: Optional[str] = None):
         """获取设备实例，使用默认设备URI如果未提供"""
@@ -71,37 +60,16 @@ class Auto:
     def _apply_delay(self, delay: float):
         """应用任务延迟"""
         if delay > 0:
-            time.sleep(delay)
+            self.sleep(delay)
 
-    def _handle_task_exception(self, e: Exception, task_name: str):
-        """统一处理任务异常"""
-        self.last_error = f"{task_name}执行失败: {str(e)}"
-        print(self.last_error)
-        return False
-
-    def _execute_with_retry(
-        self,
-        func: Callable,
-        task_name: str,
-        max_retry: int = DEFAULT_MAX_RETRY,
-        retry_interval: float = DEFAULT_RETRY_INTERVAL,
-        **kwargs
-    ) -> Any:
-        """内部重试机制封装"""
-        for attempt in range(max_retry):
-            try:
-                result = func(**kwargs)
-                if result is not None and result is not False:
-                    return result
-                print(f"[重试 {attempt+1}/{max_retry}] {task_name}")
-            except Exception as e:
-                print(f"[重试 {attempt+1}/{max_retry}] {task_name}异常: {str(e)}")
-
-            if attempt < max_retry - 1:
-                time.sleep(retry_interval)
-
-        print(f"[ERROR] {task_name}超过最大重试次数")
-        return None
+    def sleep(self, secs: float = 1.0) -> bool:
+        """设备睡眠"""
+        device = self._get_device()
+        if device:
+            return device.sleep(secs)
+        else:
+            time.sleep(secs)
+            return True
 
     # ======================== 设备管理方法 ========================
 
@@ -167,37 +135,25 @@ class Auto:
 
     # ======================== 任务执行方法 ========================
 
-    @chainable
-    def add_click_task(
+    def click(
         self,
         pos: tuple,
         is_relative: bool = False,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加点击任务"""
-        self._execute_with_retry(
-            func=self._perform_click,
-            task_name="点击操作",
-            max_retry=DEFAULT_MAX_RETRY,
-            retry_interval=DEFAULT_RETRY_INTERVAL,
-            pos=pos,
-            is_relative=is_relative,
-            delay=delay,
-            device_uri=device_uri
-        )
-
-    def _perform_click(self, pos, is_relative, delay, device_uri):
-        """实际执行点击操作"""
+    ) -> bool:
+        """执行点击操作"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
         if not device or not device.connected:
             print("[ERROR] 点击失败: 设备未连接")
+            self.last_result = False
             return False
 
         resolution = device.get_resolution()
         if not resolution:
             print("[ERROR] 无法获取设备分辨率")
+            self.last_result = False
             return False
 
         # 坐标转换逻辑
@@ -211,109 +167,79 @@ class Auto:
         if (abs_pos[0] < 0 or abs_pos[0] >= resolution[0] or
                 abs_pos[1] < 0 or abs_pos[1] >= resolution[1]):
             print(f"[ERROR] 坐标超出屏幕范围: {abs_pos}, 屏幕分辨率: {resolution}")
+            self.last_result = False
             return False
 
-        return device.click(abs_pos)
+        self.last_result = device.click(abs_pos)
+        return self.last_result
 
-    @chainable
-    def add_key_task(
+    def key_press(
         self,
         key: str,
         duration: float = DEFAULT_KEY_DURATION,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加按键任务"""
-        self._execute_with_retry(
-            func=self._perform_key_press,
-            task_name=f"按键[{key}]",
-            max_retry=DEFAULT_MAX_RETRY,
-            retry_interval=DEFAULT_RETRY_INTERVAL,
-            key=key,
-            duration=duration,
-            delay=delay,
-            device_uri=device_uri
-        )
-
-    def _perform_key_press(self, key, duration, delay, device_uri):
-        """实际执行按键操作"""
+    ) -> bool:
+        """执行按键操作"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
         if not device or not device.connected:
+            self.last_result = False
             return False
-        return device.key_press(key, duration)
+        
+        self.last_result = device.key_press(key, duration)
+        return self.last_result
 
-    @chainable
-    def add_template_click_task(
+    def template_click(
         self,
         template_name: str,
         delay: float = DEFAULT_CLICK_DELAY,
-        max_retry: int = DEFAULT_MAX_RETRY,
-        retry_interval: float = DEFAULT_RETRY_INTERVAL,
-        device_uri: Optional[str] = None
-    ) -> None:
-        """添加模板点击任务"""
-        self._execute_with_retry(
-            func=self._perform_template_click,
-            task_name=f"模板点击[{template_name}]",
-            max_retry=max_retry,
-            retry_interval=retry_interval,
-            template_name=template_name,
-            delay=delay,
-            device_uri=device_uri
-        )
-
-    def _perform_template_click(self, template_name, delay, device_uri):
-        """实际执行模板点击操作"""
+        device_uri: Optional[str] = None,
+        duration: float = 0.1,  # 新增参数
+        time: int = 1,           # 新增参数
+        right_click: bool = False  # 新增参数
+    ) -> bool:
+        """执行模板点击操作"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
         if not device or not device.connected or device.is_minimized():
             print("[ERROR] 模板点击失败: 设备不可用")
+            self.last_result = False
             return False
 
         template = self.image_processor.get_template(template_name)
         if template is None:
+            self.last_result = False
             return False
-        return device.click(template)
+            
+        self.last_result = device.click(template, duration, time, right_click)
+        return self.last_result
 
-    @chainable
-    def add_text_click_task(
+    def text_click(
         self,
         target_text: str,
         click: bool = True,
         lang: str = DEFAULT_OCR_LANG,
         roi: Optional[tuple] = None,
-        max_retry: int = DEFAULT_MAX_RETRY,
-        retry_interval: float = DEFAULT_RETRY_INTERVAL,
         delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None
-    ) -> None:
-        """添加点击文本任务"""
-        self._execute_with_retry(
-            func=self._perform_text_click,
-            task_name=f"文本点击[{target_text}]",
-            max_retry=max_retry,
-            retry_interval=retry_interval,
-            target_text=target_text,
-            click=click,
-            lang=lang,
-            roi=roi,
-            delay=delay,
-            device_uri=device_uri,
-        )
-
-    def _perform_text_click(self, target_text, click, lang, roi, delay, device_uri):
-        """实际执行文本点击操作"""
+        device_uri: Optional[str] = None,
+        duration: float = 0.1,
+        time: int = 1,
+        right_click: bool = False
+    ) -> Optional[Tuple[int, int]]:
+        """执行文本点击操作"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = None
+        
         if not device or not device.connected:
             print("[ERROR] 文本点击失败: 设备未连接")
-            return False
+            return None
 
         screen = device.capture_screen()
         if screen is None:
             print("[WARNING] 屏幕捕获失败")
-            return False
+            return None
 
         roi_screen = self.image_processor.get_roi_region(
             screen, roi) if roi else screen
@@ -322,160 +248,175 @@ class Auto:
         )
 
         if not text_pos:
-            return False
+            return None
 
         x, y, w, h = text_pos
         center_x, center_y = x + w // 2, y + h // 2
 
         if roi and len(roi) >= 4:
-            h, w = screen.shape[:2]
-            center_x += int(w * roi[0])
-            center_y += int(h * roi[1])
+            screen_h, screen_w = screen.shape[:2]
+            roi_x1 = int(screen_w * roi[0])
+            roi_y1 = int(screen_h * roi[1])
+            center_x += roi_x1
+            center_y += roi_y1
 
         if click:
-            return device.click((int(center_x), int(center_y)))
+            self.last_result = device.click((int(center_x), int(center_y)), duration, time, right_click)
+            return self.last_result
         else:
-            return (int(center_x), int(center_y))
+            self.last_result = (int(center_x), int(center_y))
+            return self.last_result
 
-    @chainable
-    def add_ocr_task(
+    def ocr(
         self,
         lang: str = DEFAULT_OCR_LANG,
         roi: Optional[tuple] = None,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加OCR任务"""
+    ) -> Optional[str]:
+        """执行OCR任务"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = None
+        
         if not device or not device.connected:
-            return False
+            return None
 
         if not (screen := device.capture_screen()):
-            return False
+            return None
 
         if roi:
             screen = self.image_processor.get_roi_region(screen, roi)
 
-        return self.ocr_processor.recognize_text(screen, lang=lang)
+        self.last_result = self.ocr_processor.recognize_text(screen, lang=lang)
+        return self.last_result
 
-    @chainable
-    def add_minimize_window_task(
+    def minimize_window(
         self,
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加最小化窗口任务"""
+    ) -> bool:
+        """最小化窗口"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device:
             return False
-        return device.minimize_window()
+            
+        self.last_result = device.minimize_window()
+        return self.last_result
 
-    @chainable
-    def add_maximize_window_task(
+    def maximize_window(
         self,
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加最大化窗口任务"""
+    ) -> bool:
+        """最大化窗口"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device:
             return False
-        return device.maximize_window()
+            
+        self.last_result = device.maximize_window()
+        return self.last_result
 
-    @chainable
-    def add_restore_window_task(
+    def restore_window(
         self,
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加恢复窗口任务"""
+    ) -> bool:
+        """恢复窗口"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device:
             return False
-        return device.restore_window()
+            
+        self.last_result = device.restore_window()
+        return self.last_result
 
-    @chainable
-    def add_resize_window_task(
+    def resize_window(
         self,
         width: int,
         height: int,
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加调整窗口大小任务"""
+    ) -> bool:
+        """调整窗口大小"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device:
             return False
-        return device.resize_window(width, height)
+            
+        self.last_result = device.resize_window(width, height)
+        return self.last_result
 
-    @chainable
-    def add_check_element_exist_task(
+    def check_element_exist(
         self,
         template_name: str,
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
         device_uri: Optional[str] = None
     ) -> bool:
-        """添加检查元素是否存在的任务"""
+        """检查元素是否存在"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device:
             return False
+
         try:
             template = self.image_processor.get_template(template_name)
             if template is None:
                 return False
-            return device.exists(template)
-        except Exception as e:
-            return self._handle_task_exception(e, "检查元素存在")
 
-    @chainable
-    def add_screenshot_task(
+            self.last_result = device.exists(template)
+            return self.last_result
+        except Exception as e:
+            print(f"检查元素存在失败: {str(e)}")
+            return False
+
+    def screenshot(
         self,
         save_path: str = None,
         delay: float = DEFAULT_SCREENSHOT_DELAY,
         device_uri: str = None
-    ) -> None:
-        """添加截图任务"""
+    ) -> Optional[np.ndarray]:
+        """执行截图任务"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = None
+        
         if not device or not device.connected:
             return None
         try:
             screenshot = device.capture_screen()
             if save_path and screenshot is not None:
                 cv2.imwrite(save_path, screenshot)
+            self.last_result = screenshot
             return screenshot
         except Exception as e:
             print(f"截图任务执行失败: {str(e)}")
             return None
 
-    @chainable
-    def add_wait_task(self, seconds: float) -> None:
-        """添加等待任务"""
-        time.sleep(seconds)
-
-    @chainable
-    def add_custom_task(self, func: Callable, *args, **kwargs) -> None:
-        """添加自定义任务"""
-        func(*args, **kwargs)
-
-    # ======================== 高级任务方法 ========================
-
-    def add_wait_element_task(
+    def wait_element(
         self,
         template_name: str,
         timeout: float = DEFAULT_TASK_TIMEOUT,
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
         device_uri: Optional[str] = None
     ) -> bool:
-        """添加等待元素出现的任务"""
+        """等待元素出现"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device:
             return False
 
@@ -484,78 +425,82 @@ class Auto:
             print(f"模板 {template_name} 未找到")
             return False
 
-        return self._execute_with_retry(
-            func=device.wait,
-            task_name=f"等待元素[{template_name}]",
-            max_retry=1,
-            retry_interval=0,
-            template=template,
-            timeout=timeout
-        )
+        self.last_result = device.wait(template, timeout=timeout)
+        return self.last_result
 
-    @chainable
-    def add_swipe_task(
+    def swipe(
         self,
         start_pos: tuple,
         end_pos: tuple,
         duration: float = 0.5,
+        steps: int = 1,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加滑动操作任务"""
+    ) -> bool:
+        """执行滑动操作"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device or not device.connected:
             return False
-        return device.swipe(start_pos[0], start_pos[1], end_pos[0], end_pos[1], duration)
+            
+        self.last_result = device.swipe(
+            start_pos[0], start_pos[1], 
+            end_pos[0], end_pos[1], 
+            duration,
+            steps
+        )
+        return self.last_result
 
-    @chainable
-    def add_text_input_task(
+    def text_input(
         self,
         text: str,
         interval: float = 0.05,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加文本输入任务"""
+    ) -> bool:
+        """执行文本输入"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device or not device.connected:
             return False
-        return device.text_input(text, interval)
+            
+        self.last_result = device.text_input(text, interval)
+        return self.last_result
 
-    @chainable
-    def add_move_window_task(
+    def move_window(
         self,
         x: int,
         y: int,
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加移动窗口任务"""
+    ) -> bool:
+        """移动窗口"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device:
             return False
-        return device.move_window(x, y)
+            
+        self.last_result = device.move_window(x, y)
+        return self.last_result
 
-    @chainable
-    def add_reset_window_task(
+    def reset_window(
         self,
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
-    ) -> None:
-        """添加重置窗口任务"""
+    ) -> bool:
+        """重置窗口"""
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        self.last_result = False
+        
         if not device:
             return False
-        return device.reset_window()
-
-    @chainable
-    def add_sleep_task(
-        self,
-        secs: float = 1.0
-    ) -> None:
-        """添加睡眠任务"""
-        time.sleep(secs)
+            
+        self.last_result = device.reset_window()
+        return self.last_result
