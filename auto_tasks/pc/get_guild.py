@@ -18,7 +18,8 @@ def get_guild(auto: Auto, timeout: int = 60):
             if first:
                 if back_to_main(auto):
                     auto.template_click("get_guild/公会标识")
-                    auto.sleep(2)
+                    auto.sleep(4)
+                    first = False
 
             if not first:
                 if auto.check_element_exist("get_guild/公会商店"):

@@ -5,13 +5,14 @@ from auto_control.logger import Logger
 from auto_tasks.pc.public import back_to_main
 
 
-def lucky_draw(auto: Auto, timeout: int = 60):
+def lucky_draw(auto: Auto, timeout: int = 480, target_count: int = 6):
     """抽抽乐"""
     try:
         logger = Logger("lucky_draw")
         logger.info("开始抽抽乐")
         start_time = time.time()
         first = True
+        last_count = 0
 
         while time.time() - start_time < timeout:
             # 检测是否在主界面
@@ -22,17 +23,45 @@ def lucky_draw(auto: Auto, timeout: int = 60):
                     first = False
 
             if not first:
-                if auto.text_click("免费"):
-                    logger.info("检测到免费")
+                if auto.text_click("免费1次"):
+                    logger.info("检测到免费1次")
                     auto.sleep(2)
-                    if auto.text_click("购买"):
-                        logger.info("点击购买")
-                        auto.sleep(2)
-                        
                 else:
-                    logger.info("未检测到抽抽乐")
-                    first = True
-                    
+                    if last_count != target_count:
+                        last_count = target_count
+                        if auto.swipe((410, 410), (410, 180), duration=6, steps=6):
+                            logger.info("滑动抽抽乐")
+                            auto.sleep(2)
+                    else:
+                        if auto.swipe((410, 310), (410, 185), duration=4, steps=4):
+                            logger.info("滑动抽抽乐")
+                            auto.sleep(2)
+
+                    if auto.click((410, 310), time=2):
+                        logger.info("点击抽抽乐")
+                        auto.sleep(2)
+
+                if auto.text_click("购买"):
+                    logger.info("点击购买")
+                    auto.sleep(2)
+                pos = None
+                if pos := auto.check_element_exist("public/跳过"):
+                    logger.info("点击跳过")
+                    auto.click(pos)
+                    auto.sleep(1)
+                if auto.check_element_exist("lucky_draw/抽完标识"):
+                    logger.info("检测到抽完标识")
+                    auto.sleep(1)
+                    auto.key_press('esc')
+                    auto.sleep(1)
+                    target_count -= 1
+            else:
+                logger.info("进入抽抽乐")
+                first = True
+            if target_count <= 0:
+                logger.info("抽抽乐次数已达上限")
+                return True
+
             auto.sleep(0.5)  # 每次循环添加短暂延迟
 
         logger.info("领取公会奖励超时")

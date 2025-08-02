@@ -138,9 +138,11 @@ class Auto:
     def click(
         self,
         pos: tuple,
+        time: int = 1,
         is_relative: bool = False,
         delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None
+        device_uri: Optional[str] = None,
+        convert_relative: bool = False
     ) -> bool:
         """执行点击操作"""
         self._apply_delay(delay)
@@ -170,7 +172,7 @@ class Auto:
             self.last_result = False
             return False
 
-        self.last_result = device.click(abs_pos)
+        self.last_result = device.click(abs_pos,time=time,convert_relative=convert_relative)
         return self.last_result
 
     def key_press(
@@ -432,10 +434,11 @@ class Auto:
         self,
         start_pos: tuple,
         end_pos: tuple,
-        duration: float = 0.5,
-        steps: int = 1,
+        duration: float = 3,
+        steps: int = 5,
         delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None
+        device_uri: Optional[str] = None,
+        convert_relative: bool = False
     ) -> bool:
         """执行滑动操作"""
         self._apply_delay(delay)
@@ -449,7 +452,8 @@ class Auto:
             start_pos[0], start_pos[1], 
             end_pos[0], end_pos[1], 
             duration,
-            steps
+            steps,
+            convert_relative=convert_relative
         )
         return self.last_result
 

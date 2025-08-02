@@ -26,6 +26,17 @@ def back_to_main(auto: Auto):
                 else:
                     logger.info("未检测到地图标识")
                     auto.key_press("esc")
+
+                    # 防止esc失效
+                    if not auto.check_element_exist("public/主界面"):
+                        pos = auto.check_element_exist("public/返回键1")
+                        if pos:
+                            auto.click(pos)
+                            auto.sleep(2)
+                        pos = auto.check_element_exist("public/返回键2")
+                        if pos:
+                            auto.click(pos)
+                            auto.sleep(2)
                     auto.sleep(1)
 
     except Exception as e:
@@ -71,4 +82,28 @@ def click_back(auto: Auto):
             return False
     except Exception as e:
         logger.error(f"点击画面即可返回失败: {e}")
+        return False
+    
+
+
+# 进入地图选择
+def enter_map_select(auto: Auto):
+    """
+    进入地图选择
+    :param auto: Auto实例
+    :return: 是否成功
+    """
+    logger = Logger("enter_map_select")
+    try:
+        if auto.click((1720,990)):
+            logger.info("点击地图选择")
+            auto.sleep(3)
+            if auto.text_click("游戏卡珍藏集",click=False):
+                logger.info("检测到游戏卡珍藏集")
+                return True
+            else:
+                logger.info("未检测到游戏卡珍藏集")
+                return False
+    except Exception as e:
+        logger.error(f"进入地图选择失败: {e}")
         return False

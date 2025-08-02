@@ -49,7 +49,7 @@ class BaseDevice(ABC):
         pass
 
     @abstractmethod
-    def click(self, x: int, y: int, duration: float = 0.1, time: int = 1, right_click: bool = False) -> bool:
+    def click(self, x: int, y: int, duration: float = 0.1, time: int = 1, right_click: bool = False, is_relative: bool = False) -> bool:
         """
         点击指定位置
         :param x: X坐标

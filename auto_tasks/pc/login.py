@@ -18,10 +18,14 @@ def login(auto: Auto, timeout: int = 300):
             if auto.check_element_exist("login/开始游戏"):
                 logger.info("检测到开始游戏界面，点击开始游戏")
                 auto.template_click("login/开始游戏")
-                auto.sleep(1)
+                auto.sleep(7)
                 continue
 
             if first:
+                pos = auto.check_element_exist("public/每日收集")
+                if pos:
+                    auto.click(pos)
+                    auto.sleep(2)
                 # 回到主界面
                 if back_to_main(auto):
                     logger.info("返回主界面成功")

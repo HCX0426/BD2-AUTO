@@ -4,7 +4,7 @@ DEFAULT_OCR_ENGINE = "easyocr"  # 默认OCR引擎
 
 DEFAULT_DEVICE_URI = "Windows:///?title_re=BrownDust II" # 默认设备URI
 DEFAULT_RESOLUTION_UPDATE = True  # 是否从设备获取分辨率
-DEFAULT_TASK_TIMEOUT = 120  # 默认任务超时时间(秒)
+DEFAULT_TASK_TIMEOUT = 300  # 默认任务超时时间(秒)
 MAX_TASK_TIMEOUT = 600      # 最大允许超时时间
 DEFAULT_OCR_LANG = None  # 默认OCR语言
 DEFAULT_TEXT_FUZZY_MATCH = True  # 默认使用模糊文本匹配

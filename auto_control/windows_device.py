@@ -156,11 +156,19 @@ class WindowsDevice(BaseDevice):
             self.last_error = str(e)
             return False
 
-    def click(self, pos_or_template: Union[Tuple[int, int], Template], duration: float = 0.1, time: int = 1, right_click: bool = False) -> bool:
+    def click(self, pos_or_template: Union[Tuple[int, int], Template], duration: float = 0.1, time: int = 1, right_click: bool = False, convert_relative: bool = False) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:
             if not self.set_foreground() or self.minimized:
                 return False
+            
+            # 绝对转相对坐标转换逻辑
+            if convert_relative and isinstance(pos_or_template, tuple):
+                screen_width, screen_height = self.get_resolution()
+                abs_x, abs_y = pos_or_template  # 接收绝对坐标
+                rel_x = abs_x / screen_width    # 计算相对X坐标 (0.0-1.0)
+                rel_y = abs_y / screen_height   # 计算相对Y坐标 (0.0-1.0)
+                pos_or_template = (rel_x, rel_y)
 
             # 使用Airtest的touch方法处理坐标和模板
             pos = touch(pos_or_template, duration=duration, time=time, right_click=right_click)
@@ -168,7 +176,7 @@ class WindowsDevice(BaseDevice):
                 return False
             self._update_device_state(DeviceState.IDLE)
             log(f"点击坐标 {pos}", snapshot=True)  # 自动记录带截图的日志
-            return pos
+            return True
         except Exception as e:
             print(f"点击操作失败: {str(e)}")
             self._update_device_state(DeviceState.ERROR)
@@ -210,13 +218,28 @@ class WindowsDevice(BaseDevice):
             self.last_error = str(e)
             return False
 
-    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 2, steps: int = 1) -> bool:
+    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 2, steps: int = 1, convert_relative: bool = False) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:
             if not self.set_foreground() or self.minimized:
                 return False
+            
+            # 绝对转相对坐标转换逻辑
+            if convert_relative:
+                screen_width, screen_height = self.get_resolution()
+                # 计算起始点相对坐标
+                start_rel_x = start_x / screen_width
+                start_rel_y = start_y / screen_height
+                # 计算结束点相对坐标
+                end_rel_x = end_x / screen_width
+                end_rel_y = end_y / screen_height
+                start_pos = (start_rel_x, start_rel_y)
+                end_pos = (end_rel_x, end_rel_y)
+            else:
+                start_pos = (start_x, start_y)
+                end_pos = (end_x, end_y)
 
-            swipe((start_x, start_y), (end_x, end_y), duration=duration, steps=steps)
+            swipe(start_pos, end_pos, duration=duration, steps=steps)
             self._update_device_state(DeviceState.IDLE)
             return True
         except Exception as e:
@@ -231,9 +254,9 @@ class WindowsDevice(BaseDevice):
             if not self.set_foreground() or self.minimized:
                 return False
 
-            wait(template, timeout=timeout)
+            pos = wait(template, timeout=timeout)
             self._update_device_state(DeviceState.IDLE)
-            return True
+            return pos
         except Exception as e:
             print(f"等待元素失败: {str(e)}")
             self._update_device_state(DeviceState.ERROR)
