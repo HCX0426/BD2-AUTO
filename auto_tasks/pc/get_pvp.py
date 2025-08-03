@@ -13,7 +13,8 @@ def get_pvp(auto: Auto, timeout: int = 600):
         start_time = time.time()
         first = True
         second = True
-
+        third = False
+        
         while time.time() - start_time < timeout:
             # 检测是否在主界面
             if first:
@@ -35,8 +36,10 @@ def get_pvp(auto: Auto, timeout: int = 600):
                     else:
                         logger.error("进入地图选择失败")
             if not first:
-                    if auto.template_click("get_pvp/进入竞技场"):
+                    pos = auto.check_element_exist("get_pvp/进入竞技场")
+                    if pos:
                         logger.info("点击进入竞技场")
+                        auto.click(pos)
                         auto.sleep(3)
                         if auto.template_click("get_pvp/自动战斗"):
                             logger.info("点击自动战斗")
@@ -66,8 +69,22 @@ def get_pvp(auto: Auto, timeout: int = 600):
                     pos = auto.check_element_exist("get_pvp/离开")
                     if pos:
                         logger.info("点击离开")
-                        auto.click(pos)
-                        auto.sleep(1)
+                        auto.click(pos,time = 3)
+                        auto.sleep(3)
+
+                        pos = auto.check_element_exist("get_pvp/离开")
+                        if pos:
+                            continue
+                        else:
+                            logger.info("离开成功")
+                            third = True
+
+                    if third:
+                        pos = auto.text_click("确定",click=False)
+                        if pos:
+                            logger.info("点击确定")
+                            auto.click(pos)
+                            auto.sleep(2)
 
                         result = back_to_main(auto)
                         if result:
@@ -75,6 +92,7 @@ def get_pvp(auto: Auto, timeout: int = 600):
                             return True
                         else:
                             logger.error("返回主界面失败")
+                        
             auto.sleep(0.5)  # 每次循环添加短暂延迟
 
         logger.info("领取公会奖励超时")

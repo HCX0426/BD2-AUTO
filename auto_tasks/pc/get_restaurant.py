@@ -31,7 +31,9 @@ def get_restaurant(auto: Auto, timeout: int = 60):
                         logger.info("领取成功")
                         return True
                     else:
-                        if auto.template_click("get_restaurant/结算X"):
+                        pos = auto.check_element_exist("get_restaurant/结算X")
+                        if pos:
+                            auto.click(pos)
                             logger.info("点击结算X成功")
                             auto.sleep(1)
                             if back_to_main(auto):
