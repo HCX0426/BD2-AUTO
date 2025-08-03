@@ -37,6 +37,7 @@ def back_to_main(auto: Auto):
                         if pos:
                             auto.click(pos)
                             auto.sleep(2)
+                        auto.text_click("取消")
                     auto.sleep(1)
 
     except Exception as e:
@@ -100,7 +101,7 @@ def enter_map_select(auto: Auto):
             auto.sleep(3)
             if auto.text_click("游戏卡珍藏集",click=False):
                 logger.info("检测到游戏卡珍藏集")
-                if auto.swipe((1800, 700), (1800, 900), duration=6, steps=6):
+                if auto.swipe((1800, 700), (1800, 900), duration=6, steps=4):
                     logger.info("滑动回原位")
                     auto.sleep(2)
                 return True
