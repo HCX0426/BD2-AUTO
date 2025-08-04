@@ -164,11 +164,13 @@ class WindowsDevice(BaseDevice):
             
             # 绝对转相对坐标转换逻辑
             if convert_relative and isinstance(pos_or_template, tuple):
+                x, y = pos_or_template
                 screen_width, screen_height = self.get_resolution()
-                abs_x, abs_y = pos_or_template  # 接收绝对坐标
-                rel_x = abs_x / screen_width    # 计算相对X坐标 (0.0-1.0)
-                rel_y = abs_y / screen_height   # 计算相对Y坐标 (0.0-1.0)
-                pos_or_template = (rel_x, rel_y)
+                scale_x = screen_width / 1920
+                scale_y = screen_height / 1080
+                start_rel_x = x * scale_x
+                start_rel_y = y * scale_y
+                pos_or_template = (start_rel_x, start_rel_y)
 
             # 使用Airtest的touch方法处理坐标和模板
             pos = touch(pos_or_template, duration=duration, time=time, right_click=right_click)
@@ -224,22 +226,33 @@ class WindowsDevice(BaseDevice):
             if not self.set_foreground() or self.minimized:
                 return False
             
-            # 绝对转相对坐标转换逻辑
+            # 坐标转换逻辑
             if convert_relative:
                 screen_width, screen_height = self.get_resolution()
-                # 计算起始点相对坐标
-                start_rel_x = start_x / screen_width
-                start_rel_y = start_y / screen_height
-                # 计算结束点相对坐标
-                end_rel_x = end_x / screen_width
-                end_rel_y = end_y / screen_height
-                start_pos = (start_rel_x, start_rel_y)
-                end_pos = (end_rel_x, end_rel_y)
-            else:
-                start_pos = (start_x, start_y)
-                end_pos = (end_x, end_y)
+                start_x = int(start_x * screen_width)
+                start_y = int(start_y * screen_height)
+                end_x = int(end_x * screen_width)
+                end_y = int(end_y * screen_height)
 
-            swipe(start_pos, end_pos, duration=duration, steps=steps)
+            # 计算每步移动距离和时间间隔
+            step_x = (end_x - start_x) / steps
+            step_y = (end_y - start_y) / steps
+            interval = duration / steps
+
+            # 移动到起始位置并按下鼠标
+            pydirectinput.moveTo(start_x, start_y)
+            pydirectinput.mouseDown(button='left')
+            time.sleep(0.05)  # 按下后短暂延迟
+
+            # 逐步移动鼠标
+            for i in range(1, steps + 1):
+                current_x = int(start_x + step_x * i)
+                current_y = int(start_y + step_y * i)
+                pydirectinput.moveTo(current_x, current_y)
+                time.sleep(interval)
+
+            # 释放鼠标
+            pydirectinput.mouseUp(button='left')
             self._update_device_state(DeviceState.IDLE)
             return True
         except Exception as e:

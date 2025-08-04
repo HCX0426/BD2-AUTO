@@ -21,6 +21,10 @@ def back_to_main(auto: Auto):
             else:
                 # 检测地图标识
                 if auto.check_element_exist("public/地图标识"):
+                    pos = auto.check_element_exist("public/每日收集")
+                    if pos:
+                        auto.click(pos)
+                        auto.sleep(2)
                     auto.key_press("h")
                     auto.sleep(1)
                 else:
@@ -32,11 +36,11 @@ def back_to_main(auto: Auto):
                         pos = auto.check_element_exist("public/返回键1")
                         if pos:
                             auto.click(pos)
-                            auto.sleep(2)
+                            auto.sleep(1)
                         pos = auto.check_element_exist("public/返回键2")
                         if pos:
                             auto.click(pos)
-                            auto.sleep(2)
+                            auto.sleep(1)
                         auto.text_click("取消")
                     auto.sleep(1)
 

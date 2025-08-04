@@ -5,7 +5,7 @@ from auto_control.logger import Logger
 from auto_tasks.pc.public import back_to_main, enter_map_select
 
 
-def get_map_collection(auto: Auto, timeout: int = 600):
+def map_collection(auto: Auto, timeout: int = 600):
     """获取地图奖励"""
     try:
         logger = Logger("get_map_collection")
@@ -16,6 +16,8 @@ def get_map_collection(auto: Auto, timeout: int = 600):
 
         flag1 = False
         flag2 = False
+        flag3 = False
+        flag4 = False
 
         count1 = 0
         count2 = 0
@@ -23,38 +25,31 @@ def get_map_collection(auto: Auto, timeout: int = 600):
         while time.time() - start_time < timeout:
             # 检测是否在主界面
             if first:
-                if back_to_main(auto):
-                    result = enter_map_select(auto)
-                    if result:
-                        pos = auto.check_element_exist("map_collection/第七章1")
-                        pos1 = auto.check_element_exist("map_collection/第七章2")
-                        if pos:
-                            logger.info("点击第七章1")
-                            auto.click(pos)
-                            auto.sleep(5)
-                            first = False
-                        elif pos1:
-                            logger.info("点击第七章2")
-                            auto.click(pos1)
-                            auto.sleep(5)
-                            first = False
-                    else:
-                        if auto.swipe((1666, 266), (833, 266), duration=8, steps=6):
-                            logger.info("向右滑动")
-                            auto.sleep(2)
+                if not flag3:
+                    if back_to_main(auto):
+                        result = enter_map_select(auto)
+                        if result:
+                            flag3 = True
 
-                        pos = auto.check_element_exist("map_collection/第七章1")
-                        pos1 = auto.check_element_exist("map_collection/第七章2")
-                        if pos:
-                            logger.info("点击第七章1")
-                            auto.click(pos)
-                            auto.sleep(5)
-                            first = False
-                        elif pos1:
-                            logger.info("点击第七章2")
-                            auto.click(pos1)
-                            auto.sleep(5)
-                            first = False
+                if flag3:
+                    pos = auto.check_element_exist("map_collection/第七章1")
+                    pos1 = auto.check_element_exist("map_collection/第七章2")
+                    if pos:
+                        logger.info("点击第七章1")
+                        auto.click(pos)
+                        auto.sleep(5)
+                        first = False
+                        flag4 = True
+                    elif pos1:
+                        logger.info("点击第七章2")
+                        auto.click(pos1)
+                        auto.sleep(5)
+                        first = False
+                        flag4 = True
+                if not flag4:
+                    if auto.swipe((1666, 266), (833, 266), duration=5,steps=4):
+                        logger.info("向右滑动")
+                        auto.sleep(2)
 
             if not first:
                 pos = auto.check_element_exist("map_collection/探寻")

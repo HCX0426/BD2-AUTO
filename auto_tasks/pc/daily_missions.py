@@ -30,11 +30,12 @@ def daily_missions(auto: Auto, timeout: int = 60):
                     if auto.text_click("全部获得"):
                         logger.info("点击全部获得")
                         auto.sleep(4)
+                        second = False
 
                 if click_back(auto):
                     logger.info("点击返回")
 
-                second = False
+                
             
             if not second and third:
                 if auto.text_click("每周任务"):

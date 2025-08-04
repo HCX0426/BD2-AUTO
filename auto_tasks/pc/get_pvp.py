@@ -2,7 +2,7 @@ import time
 
 from auto_control.auto import Auto
 from auto_control.logger import Logger
-from auto_tasks.pc.public import back_to_main, enter_map_select
+from auto_tasks.pc.public import back_to_main, click_back, enter_map_select
 
 
 def get_pvp(auto: Auto, timeout: int = 600):
@@ -80,6 +80,8 @@ def get_pvp(auto: Auto, timeout: int = 600):
                             third = True
 
                     if third:
+                        if click_back(auto):
+                            logger.info("点击画面即可返回")
                         pos = auto.text_click("确定",click=False)
                         if pos:
                             logger.info("点击确定")

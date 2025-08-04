@@ -435,7 +435,7 @@ class Auto:
         start_pos: tuple,
         end_pos: tuple,
         duration: float = 3,
-        steps: int = 5,
+        steps: int = 1,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
         convert_relative: bool = False
