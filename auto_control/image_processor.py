@@ -10,12 +10,7 @@ from airtest import aircv
 from airtest.core.cv import Template
 
 # 导入您的配置
-from .config.control__config import (AUTO_LOAD_TEMPLATES, DEFAULT_MATCH_METHOD,
-                                     DEFAULT_RESOLUTION,
-                                     DEFAULT_SCALE_STRATEGY, DEFAULT_THRESHOLD,
-                                     MAX_WORKERS, TEMPLATE_DIR,
-                                     TEMPLATE_EXTENSIONS, TEMPLATE_ROI_CONFIG,
-                                     MatchMethod, ScaleStrategy)
+from .config import *
 
 
 @dataclass

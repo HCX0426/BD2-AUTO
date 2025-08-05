@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import cv2
 import numpy as np
 
-from .config.control__config import (PREPROCESS_CONFIG, convert_lang_code,
+from .config import (PREPROCESS_CONFIG, convert_lang_code,
                                      get_default_languages, get_engine_config,
                                      validate_lang_combination)
 

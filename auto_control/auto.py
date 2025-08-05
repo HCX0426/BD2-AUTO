@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 # 导入配置文件
-from .config.control__config import *
+from .config import *
 from .device_manager import DeviceManager
 from .image_processor import ImageProcessor
 from .logger import Logger
@@ -32,15 +32,14 @@ class Auto:
         self.default_device_uri = device_uri
 
         # 确定最终使用的分辨率
-        resolution = None
-        if base_resolution is None and DEFAULT_RESOLUTION_UPDATE:
+        if base_resolution is None:
             device = self.device_manager.get_device(
                 device_uri) if device_uri else self.device_manager.get_active_device()
             if device and device.connected:
-                resolution = device.get_resolution()
+                base_resolution = device.get_resolution()
 
         self.image_processor = ImageProcessor(
-            resolution or base_resolution or DEFAULT_BASE_RESOLUTION
+            base_resolution or DEFAULT_BASE_RESOLUTION
         )
         
         # 存储最后操作结果
@@ -221,7 +220,7 @@ class Auto:
         self,
         target_text: str,
         click: bool = True,
-        lang: str = DEFAULT_OCR_LANG,
+        lang: str = None,
         roi: Optional[tuple] = None,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
@@ -271,7 +270,7 @@ class Auto:
 
     def ocr(
         self,
-        lang: str = DEFAULT_OCR_LANG,
+        lang: str = None,
         roi: Optional[tuple] = None,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None

@@ -6,7 +6,7 @@ from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from .config.log_config import LOG_CONFIG, get_log_dir  # 集中导入日志配置
+from .config import LOG_CONFIG, get_log_dir  # 集中导入日志配置
 
 class CompressedTimedRotatingFileHandler(TimedRotatingFileHandler):
     """支持压缩旧日志 + 自动清理超期日志的 Handler"""

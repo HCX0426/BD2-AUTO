@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, Tuple, Union
 import numpy as np
 from .ocr_core import TesseractOCR, EasyOCRWrapper
-from .config.control__config import get_default_languages
+from .config import get_default_languages
 from airtest.core.helper import logwrap
 
 class OCRProcessor:

@@ -1,1 +1,0 @@
-DEFAULT_MAX_WORKERS = 12  # 默认工作线程数
