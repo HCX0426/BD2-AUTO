@@ -35,7 +35,7 @@ def get_pvp(auto: Auto, timeout: int = 600):
                             first = False
                     else:
                         logger.error("进入地图选择失败")
-            if not first:
+            if not first and second:
                     pos = auto.check_element_exist("get_pvp/进入竞技场")
                     if pos:
                         logger.info("点击进入竞技场")
@@ -60,26 +60,25 @@ def get_pvp(auto: Auto, timeout: int = 600):
                         if pos:
                             second = True
                             continue
-                    pos = auto.text_click("反复战斗结果",click=False)
-                    if pos:
-                        pos = auto.check_element_exist("get_pvp/X")
+                        pos = auto.text_click("反复战斗结果",click=False)
                         if pos:
-                            logger.info("点击关闭")
-                            auto.sleep(1)
-                    pos = auto.check_element_exist("get_pvp/离开")
-                    if pos:
-                        logger.info("点击离开")
-                        auto.click(pos,time = 3)
-                        auto.sleep(3)
-
-                        pos = auto.check_element_exist("get_pvp/离开")
+                            pos = auto.check_element_exist("get_pvp/X")
+                            if pos:
+                                logger.info("点击关闭")
+                                auto.sleep(1)
+                        pos = auto.text_click("离开")
                         if pos:
-                            continue
-                        else:
-                            logger.info("离开成功")
+                            logger.info("点击离开")
+                            auto.click(pos,time = 3)
+                            auto.sleep(3)
                             third = True
 
                     if third:
+                        pos = auto.text_click("离开",click=False)
+                        if pos:
+                            third = False
+                            logger.info("点击离开未成功")
+                            continue
                         if click_back(auto):
                             logger.info("点击画面即可返回")
                         pos = auto.text_click("确定",click=False)
@@ -97,8 +96,8 @@ def get_pvp(auto: Auto, timeout: int = 600):
                         
             auto.sleep(0.5)  # 每次循环添加短暂延迟
 
-        logger.info("领取公会奖励超时")
+        logger.info("领取PVP奖励超时")
         return False
     except Exception as e:
-        logger.error(f"领取公会奖励过程中出错: {e}")
+        logger.error(f"领取PVP奖励过程中出错: {e}")
         return False

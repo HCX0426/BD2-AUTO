@@ -220,6 +220,7 @@ class WindowsDevice(BaseDevice):
             self.last_error = str(e)
             return False
 
+    @logwrap
     def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 2, steps: int = 1, convert_relative: bool = False) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:

@@ -28,19 +28,27 @@ def get_restaurant(auto: Auto, timeout: int = 600):
             if not first and second:
                 if auto.text_click("结算"):
                     logger.info("点击结算")
-                    auto.sleep(6)
+                    auto.sleep(3)
 
                     if click_back(auto):
                         logger.info("领取成功")
-                        first = True
                     else:
-                        logger.info("领取失败")
-                        second = False
+                        logger.info("无需结算")
+                        auto.key_press("esc")
+                    first = True
+                    second = False
+
                 else:
                     logger.info("未检测到结算按钮")
                     first = True
 
             if not second and thrid:
+                if click_back(auto):
+                    logger.info("领取成功")
+                    first = True
+                else:
+                    logger.info("领取失败")
+                    second = False
                 pos = auto.check_element_exist("get_restaurant/进入餐厅")
                 if pos:
                     logger.info("点击进入餐厅")
@@ -54,6 +62,11 @@ def get_restaurant(auto: Auto, timeout: int = 600):
                     auto.click(pos)
                     auto.sleep(1)
                     fourth = False
+
+                    if auto.text_click("下一阶段",click=False):
+                        logger.info("点击下一阶段")
+                        auto.click(pos)
+                        auto.sleep(1)
 
                     if back_to_main(auto):
                         logger.info("返回主界面成功")

@@ -20,7 +20,9 @@ def back_to_main(auto: Auto):
                 return True
             else:
                 # 检测地图标识
-                if auto.check_element_exist("public/地图标识"):
+                pos = auto.check_element_exist("public/地图标识")
+                pos1 = auto.check_element_exist("public/地图标识2")
+                if pos or pos1:
                     pos = auto.check_element_exist("public/每日收集")
                     if pos:
                         auto.click(pos)

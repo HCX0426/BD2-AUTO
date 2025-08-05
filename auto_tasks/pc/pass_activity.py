@@ -36,6 +36,11 @@ def pass_activity(auto: Auto, timeout: int = 600):
                     second = False
 
             if not second and third:
+                if auto.text_click("挑战战斗",click=False):
+                    logger.info("检测到挑战战斗")
+                    second = True
+                    continue
+
                 pos = auto.check_element_exist("pass_activity/困难第15关")
                 if pos:
                     auto.click(pos,time=2)

@@ -5,7 +5,7 @@ from auto_control.logger import Logger
 from auto_tasks.pc.public import back_to_main
 
 
-def lucky_draw(auto: Auto, timeout: int = 480, target_count: int = 6):
+def lucky_draw(auto: Auto, timeout: int = 900, target_count: int = 6):
     """抽抽乐"""
     try:
         logger = Logger("lucky_draw")
