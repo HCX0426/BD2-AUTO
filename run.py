@@ -2,7 +2,7 @@ import io
 import sys
 
 from auto_control.auto import Auto
-from auto_control.config.control__config import *
+from auto_control.config import *
 from auto_tasks.pc.daily_missions import daily_missions
 from auto_tasks.pc.get_email import get_email
 from auto_tasks.pc.get_guild import get_guild

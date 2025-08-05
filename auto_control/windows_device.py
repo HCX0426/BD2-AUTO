@@ -96,6 +96,14 @@ class WindowsDevice(BaseDevice):
             self.last_error = str(e)
             print(f"断开Windows设备连接失败: {str(e)}")
             return False
+    
+    def convert_to_actual_coords(self, x, y):
+        """将1920*1080基准坐标转换为实际屏幕坐标"""
+        base_width, base_height = 1920, 1080
+        screen_width, screen_height = self.get_resolution()
+        actual_x = int(x * (screen_width / base_width))
+        actual_y = int(y * (screen_height / base_height))
+        return actual_x, actual_y
 
     def capture_screen(self) -> Optional[np.ndarray]:
         self._update_device_state(DeviceState.BUSY)
@@ -161,19 +169,13 @@ class WindowsDevice(BaseDevice):
         try:
             if not self.set_foreground() or self.minimized:
                 return False
-            
-            # 绝对转相对坐标转换逻辑
-            if convert_relative and isinstance(pos_or_template, tuple):
-                x, y = pos_or_template
-                screen_width, screen_height = self.get_resolution()
-                scale_x = screen_width / 1920
-                scale_y = screen_height / 1080
-                start_rel_x = x * scale_x
-                start_rel_y = y * scale_y
-                pos_or_template = (start_rel_x, start_rel_y)
+            x, y = pos_or_template
+            actual_x, actual_y = self.convert_to_actual_coords(x, y)
+            pos_or_template = (actual_x, actual_y)
 
             # 使用Airtest的touch方法处理坐标和模板
-            pos = touch(pos_or_template, duration=duration, time=time, right_click=right_click)
+            pos = touch(pos_or_template, duration=duration,
+                        time=time, right_click=right_click)
             if pos is None:
                 return False
             self._update_device_state(DeviceState.IDLE)
@@ -227,17 +229,12 @@ class WindowsDevice(BaseDevice):
             if not self.set_foreground() or self.minimized:
                 return False
             
-            # 坐标转换逻辑
-            if convert_relative:
-                screen_width, screen_height = self.get_resolution()
-                start_x = int(start_x * screen_width)
-                start_y = int(start_y * screen_height)
-                end_x = int(end_x * screen_width)
-                end_y = int(end_y * screen_height)
+            start_actual_x, start_actual_y = self.convert_to_actual_coords(start_x, start_y)
+            end_actual_x, end_actual_y = self.convert_to_actual_coords(end_x, end_y)
 
             # 计算每步移动距离和时间间隔
-            step_x = (end_x - start_x) / steps
-            step_y = (end_y - start_y) / steps
+            step_x = (end_actual_x - start_actual_x) / steps
+            step_y = (end_actual_y - start_actual_y) / steps
             interval = duration / steps
 
             # 移动到起始位置并按下鼠标
@@ -247,8 +244,8 @@ class WindowsDevice(BaseDevice):
 
             # 逐步移动鼠标
             for i in range(1, steps + 1):
-                current_x = int(start_x + step_x * i)
-                current_y = int(start_y + step_y * i)
+                current_x = int(start_actual_x + step_x * i)
+                current_y = int(start_actual_y + step_y * i)
                 pydirectinput.moveTo(current_x, current_y)
                 time.sleep(interval)
 
