@@ -19,89 +19,58 @@ from auto_tasks.pc.sweep_daily import sweep_daily
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 
-def run():
+# 移除原有的run()函数和主程序入口
+
+# 保留任务函数导入和定义
+
+# 添加一个新的执行函数供界面调用
+def execute_selected_tasks(task_ids, task_manager):
     auto = Auto()
     try:
-        # 添加设备并启动
-        auto.add_device()
+        # 检查设备添加是否成功
+        if not auto.add_device():
+            print(f"设备添加失败: {auto.last_error}")
+            return False
         auto.start()
 
         # 登录游戏
-        if login(auto):
-            print("登录成功")
-            auto.sleep(2)
-
-            if map_collection(auto):
-                print("地图采集成功")
-            else:
-                print("地图采集失败")
-
-            if sweep_daily(auto):
-                print("扫荡成功")
-            else:
-                print("扫荡失败")
-
-            if pass_activity(auto):
-                print("通过活动成功")
-            else:
-                print("通过活动失败")
-
-            if intensive_decomposition(auto):
-                print(" 强化分解成功")
-            else:
-                print(" 强化分解失败")
-
-            # 领取公会奖励
-            if get_guild(auto):
-                print("领取公会奖励成功")
-            else:
-                print("领取公会奖励失败")
-
-            # 领取餐馆奖励
-            if get_restaurant(auto):
-                print("领取餐馆奖励成功")
-            else:
-                print("领取餐馆奖励失败")
-
-            if lucky_draw(auto):
-                print("抽抽乐成功")
-            else:
-                print("抽抽乐失败")
-
-            # 领取PVP奖励
-            if get_pvp(auto):
-                print("领取PVP奖励成功")
-            else:
-                print("领取PVP奖励失败")
-
-            if pass_rewards(auto):
-                print("通行证成功")
-            else:
-                print("通行证失败")
-
-            # 领取邮件
-            if get_email(auto):
-                print("领取邮件成功")
-            else:
-                print("领取邮件失败")
-
-            if daily_missions(auto):
-                print("领取每日任务成功")
-            else:
-                print("领取每日任务失败")
-
-        else:
+        if not login(auto):
             print("登录失败")
-            raise Exception("登录失败")
+            return False
 
+        # 执行选中的任务
+        for task_id in task_ids:
+            task_info = task_manager.tasks.get(task_id)
+            if not task_info:
+                continue
+
+            task_func = globals().get(task_info['function'])
+            if not task_func:
+                continue
+
+            params = task_info['params'].copy()
+            success = task_func(auto, **params)
+            print(f"{task_info['name']} {'成功' if success else '失败'}")
+
+        return True
     except Exception as e:
         print(f"运行失败: {e}")
-        sys.exit(1)
+        return False
     finally:
-        auto.stop()
         generate_report(__file__)
-        sys.exit(0)
+        auto.stop()
 
 
+
+# 保留原有的main入口但修改为调用新界面
 if __name__ == "__main__":
-    run()
+    import sys
+
+    from PyQt6.QtWidgets import QApplication
+
+    from main_window import MainWindow
+
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
