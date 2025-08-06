@@ -164,7 +164,7 @@ class WindowsDevice(BaseDevice):
             self.last_error = str(e)
             return False
 
-    def click(self, pos_or_template: Union[Tuple[int, int], Template], duration: float = 0.1, time: int = 1, right_click: bool = False, convert_relative: bool = False) -> bool:
+    def click(self, pos_or_template: Union[Tuple[int, int], Template], duration: float = 0.1, time: int = 1, right_click: bool = False) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:
             if not self.set_foreground() or self.minimized:
@@ -228,7 +228,7 @@ class WindowsDevice(BaseDevice):
             return False
 
     @logwrap
-    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 2, steps: int = 1, convert_relative: bool = False) -> bool:
+    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 2, steps: int = 1) -> bool:
         self._update_device_state(DeviceState.BUSY)
         try:
             if not self.set_foreground() or self.minimized:
