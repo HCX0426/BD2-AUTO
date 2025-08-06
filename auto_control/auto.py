@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from typing import Optional,Tuple
 
@@ -19,6 +20,9 @@ class Auto:
         ocr_engine: str = DEFAULT_OCR_ENGINE,
         device_uri: str = DEFAULT_DEVICE_URI
     ):
+        # 添加线程锁
+        self.lock = threading.Lock()
+        self.should_stop = False  # 任务中断标志
         self.device_manager = DeviceManager()
         self.ocr_processor = OCRProcessor(engine=ocr_engine)
         self.running = False
@@ -44,6 +48,17 @@ class Auto:
         
         # 存储最后操作结果
         self.last_result = None
+
+        # 添加任务中断检查方法
+    def check_should_stop(self) -> bool:
+        """检查是否需要停止任务"""
+        with self.lock:
+            return self.should_stop
+    
+    def set_should_stop(self, value: bool) -> None:
+        """设置任务中断标志"""
+        with self.lock:
+            self.should_stop = value
 
     def _get_device(self, device_uri: Optional[str] = None):
         """获取设备实例，使用默认设备URI如果未提供"""

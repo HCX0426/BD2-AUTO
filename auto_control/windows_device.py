@@ -96,7 +96,7 @@ class WindowsDevice(BaseDevice):
             self.last_error = str(e)
             print(f"断开Windows设备连接失败: {str(e)}")
             return False
-    
+
     def convert_to_actual_coords(self, x, y):
         """将1920*1080基准坐标转换为实际屏幕坐标"""
         base_width, base_height = 1920, 1080
@@ -169,13 +169,18 @@ class WindowsDevice(BaseDevice):
         try:
             if not self.set_foreground() or self.minimized:
                 return False
-            x, y = pos_or_template
-            actual_x, actual_y = self.convert_to_actual_coords(x, y)
-            pos_or_template = (actual_x, actual_y)
 
-            # 使用Airtest的touch方法处理坐标和模板
-            pos = touch(pos_or_template, duration=duration,
-                        time=time, right_click=right_click)
+            # Handle Template objects directly
+            if isinstance(pos_or_template, Template):
+                pos = touch(pos_or_template, duration=duration,
+                            time=time, right_click=right_click)
+            else:
+                # Handle coordinate tuples
+                x, y = pos_or_template
+                actual_x, actual_y = self.convert_to_actual_coords(x, y)
+                pos = touch((actual_x, actual_y), duration=duration,
+                            time=time, right_click=right_click)
+
             if pos is None:
                 return False
             self._update_device_state(DeviceState.IDLE)
@@ -228,9 +233,11 @@ class WindowsDevice(BaseDevice):
         try:
             if not self.set_foreground() or self.minimized:
                 return False
-            
-            start_actual_x, start_actual_y = self.convert_to_actual_coords(start_x, start_y)
-            end_actual_x, end_actual_y = self.convert_to_actual_coords(end_x, end_y)
+
+            start_actual_x, start_actual_y = self.convert_to_actual_coords(
+                start_x, start_y)
+            end_actual_x, end_actual_y = self.convert_to_actual_coords(
+                end_x, end_y)
 
             # 计算每步移动距离和时间间隔
             step_x = (end_actual_x - start_actual_x) / steps

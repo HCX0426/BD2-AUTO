@@ -102,6 +102,10 @@ def intensive_decomposition(auto: Auto, timeout: int = 600):
                         else:
                             logger.info("返回主界面失败")
                             return False
+                    else:
+                        logger.info("点击返回失败")
+                        fifth = True
+
 
             if two and not one:
                 # 强化流程
