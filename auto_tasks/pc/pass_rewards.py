@@ -8,7 +8,7 @@ from auto_tasks.pc.public import back_to_main, click_back
 def pass_rewards(auto: Auto, timeout: int = 600):
     """通行证奖励"""
     try:
-        logger = Logger("pass_rewards")
+        logger = auto.get_task_logger("pass_rewards")
         logger.info("开始领取奖励")
         start_time = time.time()
         first = True
@@ -16,9 +16,11 @@ def pass_rewards(auto: Auto, timeout: int = 600):
         third = True
         fourth = True
         fifth = True
-        sixth = True
 
         while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             # 检测是否在主界面
             if first:
                 if back_to_main(auto):

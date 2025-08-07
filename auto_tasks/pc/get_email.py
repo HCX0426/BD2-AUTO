@@ -8,12 +8,15 @@ from auto_tasks.pc.public import back_to_main, click_back
 def get_email(auto: Auto, timeout: int = 300):
     """领取邮箱"""
     try:
-        logger = Logger("get_email")
+        logger = auto.get_task_logger("get_email")
         logger.info("开始领取邮件")
         start_time = time.time()
         first = True
 
         while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             if first:
                 # 检测是否在主界面
                 if back_to_main(auto):

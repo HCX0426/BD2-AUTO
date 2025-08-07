@@ -8,12 +8,15 @@ from auto_tasks.pc.public import back_to_main
 def get_guild(auto: Auto, timeout: int = 60):
     """公会领取"""
     try:
-        logger = Logger("get_guild")
+        logger = auto.get_task_logger("get_guild")
         logger.info("开始领取公会奖励")
         start_time = time.time()
         first = True
 
         while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             # 检测是否在主界面
             if first:
                 if back_to_main(auto):

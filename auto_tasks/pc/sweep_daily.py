@@ -8,7 +8,7 @@ from auto_tasks.pc.public import back_to_main, click_back
 def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torch: str = '火之洞穴'):
     """每日扫荡"""
     try:
-        logger = Logger("sweep_daily")
+        logger = auto.get_task_logger("sweep_daily")
         logger.info("开始每日扫荡")
         start_time = time.time()
         first = True
@@ -19,6 +19,9 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
         sixth = True
 
         while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             # 检测是否在主界面
             if first:
                 if back_to_main(auto):
@@ -69,7 +72,10 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
                             logger.info("米饭已用完")
 
                         fourth = False
-            
+                else:
+                    third = True
+                    continue
+
             if not fourth and fifth:
                 # 使用火把
                 pos = auto.check_element_exist("sweep_daily/天赋本")

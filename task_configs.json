@@ -1,0 +1,35 @@
+{
+    "task_order": [
+        "login",
+        "get_guild",
+        "get_pvp",
+        "get_restaurant",
+        "intensive_decomposition",
+        "lucky_draw",
+        "map_collection",
+        "pass_activity",
+        "sweep_daily",
+        "pass_rewards",
+        "get_email",
+        "daily_missions"
+    ],
+    "task_states": {
+        "login": true,
+        "get_guild": true,
+        "get_pvp": true,
+        "get_restaurant": true,
+        "intensive_decomposition": true,
+        "lucky_draw": true,
+        "map_collection": true,
+        "pass_activity": true,
+        "sweep_daily": true,
+        "pass_rewards": true,
+        "get_email": true,
+        "daily_missions": true
+    },
+    "task_configs": {
+        "get_email": {
+            "timeout": 500
+        }
+    }
+}

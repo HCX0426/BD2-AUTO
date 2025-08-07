@@ -12,7 +12,7 @@ def back_to_main(auto: Auto):
     """
     try:
         while True:
-            logger = Logger("back_to_main")
+            logger = auto.get_task_logger("back_to_main")
             # 检测是否在主界面
             if auto.check_element_exist("public/主界面"):
                 logger.info("检测到主界面，无需返回")
@@ -58,7 +58,7 @@ def wait_load(auto: Auto):
     :param auto: Auto实例
     :return: 是否成功
     """
-    logger = Logger("wait_load")
+    logger = auto.get_task_logger("wait_load")
     try:
         if auto.check_element_exist("public/加载中"):
             logger.info("检测到加载中，等待加载完成")
@@ -78,7 +78,7 @@ def click_back(auto: Auto):
     :param auto: Auto实例
     :return: 是否成功
     """
-    logger = Logger("click_back")
+    logger = auto.get_task_logger("click_back")
     try:
         if auto.text_click("点击画面即可返回"):
             logger.info("点击画面即可返回")
@@ -100,7 +100,7 @@ def enter_map_select(auto: Auto):
     :param auto: Auto实例
     :return: 是否成功
     """
-    logger = Logger("enter_map_select")
+    logger = auto.get_task_logger("enter_map_select")
     try:
         if auto.click((1720,990)):
             logger.info("点击地图选择")

@@ -8,7 +8,7 @@ from auto_tasks.pc.public import back_to_main, click_back
 def pass_activity(auto: Auto, timeout: int = 600):
     """扫荡活动关"""
     try:
-        logger = Logger("pass_activity")
+        logger = auto.get_task_logger("pass_activity")
         logger.info("开始扫荡活动")
         start_time = time.time()
         first = True
@@ -19,6 +19,9 @@ def pass_activity(auto: Auto, timeout: int = 600):
         sixth = True
 
         while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             # 检测是否在主界面
             if first:
                 if back_to_main(auto):

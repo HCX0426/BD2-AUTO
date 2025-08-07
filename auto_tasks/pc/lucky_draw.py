@@ -8,13 +8,16 @@ from auto_tasks.pc.public import back_to_main
 def lucky_draw(auto: Auto, timeout: int = 900, target_count: int = 6):
     """抽抽乐"""
     try:
-        logger = Logger("lucky_draw")
+        logger = auto.get_task_logger("lucky_draw")
         logger.info("开始抽抽乐")
         start_time = time.time()
         first = True
         last_count = 0
 
         while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             # 检测是否在主界面
             if first:
                 if back_to_main(auto):

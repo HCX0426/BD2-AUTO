@@ -8,12 +8,15 @@ from auto_tasks.pc.public import back_to_main
 def login(auto: Auto, timeout: int = 300):
     """登录到主界面"""
     try:
-        logger = Logger("Login")
+        logger = auto.get_task_logger("Login")
         logger.info("开始登录")
         start_time = time.time()
         first = True
 
         while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             # 检查开始游戏按钮
             if auto.check_element_exist("login/开始游戏"):
                 logger.info("检测到开始游戏界面，点击开始游戏")

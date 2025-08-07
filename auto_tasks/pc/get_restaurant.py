@@ -8,7 +8,7 @@ from auto_tasks.pc.public import back_to_main, click_back
 def get_restaurant(auto: Auto, timeout: int = 600):
     """餐厅领取"""
     try:
-        logger = Logger("get_restaurant")
+        logger = auto.get_task_logger("get_restaurant")
         logger.info("开始领取餐厅奖励")
         start_time = time.time()
         first = True
@@ -17,6 +17,9 @@ def get_restaurant(auto: Auto, timeout: int = 600):
         fourth = True
 
         while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             if first:
                 # 是否在主界面
                 if back_to_main(auto):
@@ -63,10 +66,11 @@ def get_restaurant(auto: Auto, timeout: int = 600):
                     auto.sleep(1)
                     fourth = False
 
-                    if auto.text_click("下一阶段",click=False):
+                    if pos := auto.check_element_exist("下一阶段"):
                         logger.info("点击下一阶段")
-                        auto.click(pos)
+                        auto.click(pos,time=2)
                         auto.sleep(1)
+                        continue
 
                     if back_to_main(auto):
                         logger.info("返回主界面成功")

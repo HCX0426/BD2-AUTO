@@ -8,7 +8,7 @@ from auto_tasks.pc.public import back_to_main, click_back
 def intensive_decomposition(auto: Auto, timeout: int = 600):
     """强化分解"""
     try:
-        logger = Logger("intensive_decomposition")
+        logger = auto.get_task_logger("intensive_decomposition")
         logger.info("开始强化分解")
         start_time = time.time()
 
@@ -25,7 +25,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600):
         eighth = True
 
         while time.time() - start_time < timeout:
-
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             if one:
                 # 分解流程
                 # 检测是否在主界面
@@ -62,9 +64,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600):
                         fourth = False
 
                 if not fourth and fifth:
-                    # 防止确认失效
-                    if auto.text_click("确认"):
-                        auto.sleep(3)
+                    if auto.text_click("确认",click=False):
+                        fourth = True
+                        continue
 
                     if auto.text_click("一键分解"):
                         auto.sleep(2)

@@ -8,7 +8,7 @@ from auto_tasks.pc.public import back_to_main, click_back
 def daily_missions(auto: Auto, timeout: int = 60):
     """每日任务"""
     try:
-        logger = Logger("daily_missions")
+        logger = auto.get_task_logger("daily_missions")
         logger.info("开始领取每日任务")
         start_time = time.time()
         first = True
@@ -17,6 +17,11 @@ def daily_missions(auto: Auto, timeout: int = 60):
 
 
         while time.time() - start_time < timeout:
+
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
+
             # 检测是否在主界面
             if first:
                 if back_to_main(auto):
