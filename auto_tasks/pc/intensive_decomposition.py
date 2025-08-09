@@ -34,6 +34,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600):
                 if first:
                     if back_to_main(auto):
                         auto.text_click("背包")
+                        logger.info("点击背包")
                         auto.sleep(3)
                         first = False
 
@@ -41,6 +42,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600):
                     pos = auto.check_element_exist(
                         "intensive_decomposition/装备标识")
                     if pos:
+                        logger.info("点击装备标识")
                         auto.click(pos, time=2)
                         auto.sleep(3)
                         second = False
@@ -50,6 +52,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600):
                         "intensive_decomposition/筛选标识")
                     if pos:
                         auto.click(pos)
+                        logger.info("点击筛选标识")
                         auto.sleep(2)
                         third = False
 
@@ -58,29 +61,39 @@ def intensive_decomposition(auto: Auto, timeout: int = 600):
                         "intensive_decomposition/SR")
                     if pos:
                         auto.click(pos)
+                        logger.info("点击SR")
+
                         auto.sleep(2)
                         auto.text_click("确认")
+                        logger.info("点击确认")
                         auto.sleep(3)
                         fourth = False
 
                 if not fourth and fifth:
                     if auto.text_click("确认",click=False):
                         fourth = True
+                        logger.info("未点击确认")
                         continue
 
                     if auto.text_click("一键分解"):
+                        logger.info("点击一键分解")
+
                         auto.sleep(2)
                         if auto.click((785, 200)):
+                            logger.info("点击装备")
                             auto.sleep(1)
                             pos = auto.check_element_exist(
                                 "intensive_decomposition/确认")
                             if pos:
                                 auto.click(pos)
+                                logger.info("点击确认")
                                 auto.sleep(2)
                                 pos = auto.check_element_exist("intensive_decomposition/分解按钮")
                                 if pos:
                                     logger.info("点击分解")
                                     auto.click(pos)
+                                    logger.info("点击分解按钮")
+
                                     auto.sleep(3)
                                     fifth = False
 

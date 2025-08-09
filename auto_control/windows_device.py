@@ -100,7 +100,7 @@ class WindowsDevice(BaseDevice):
     def convert_to_actual_coords(self, x, y):
         """将1920*1080基准坐标转换为实际屏幕坐标"""
         base_width, base_height = 1920, 1080
-        screen_width, screen_height = self.get_resolution()
+        screen_width, screen_height = self.resolution
         actual_x = int(x * (screen_width / base_width))
         actual_y = int(y * (screen_height / base_height))
         return actual_x, actual_y
@@ -426,3 +426,19 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             print(f"设备睡眠失败: {str(e)}")
             return False
+
+    def get_window_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        """获取窗口位置和大小
+        返回: (left, top, width, height) 或 None
+        """
+        try:
+            if not self.window_handle:
+                return None
+                
+            left, top, right, bottom = win32gui.GetWindowRect(self.window_handle)
+            return (left, top, right - left, bottom - top)
+        except Exception as e:
+            print(f"获取窗口矩形失败: {str(e)}")
+            self._update_device_state(DeviceState.ERROR)
+            self.last_error = str(e)
+            return None

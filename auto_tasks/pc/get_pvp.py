@@ -44,8 +44,14 @@ def get_pvp(auto: Auto, timeout: int = 600):
                 if pos:
                     logger.info("点击进入竞技场")
                     auto.click(pos)
-                    auto.sleep(3)
-                if pos := auto.template_click("get_pvp/自动战斗",click=False):
+                    auto.sleep(5)
+                pos = auto.text_click("确定", click=False)
+                if pos:
+                    logger.info("点击确定")
+                    auto.click(pos)
+                    auto.sleep(1)
+
+                if pos := auto.check_element_exist("get_pvp/自动战斗"):
                     logger.info("点击自动战斗")
                     auto.click(pos)
                     auto.sleep(1)
@@ -76,18 +82,19 @@ def get_pvp(auto: Auto, timeout: int = 600):
                     auto.click(pos, time=3)
                     auto.sleep(3)
                     third = False
+                
 
             if not third and fourth:
                 pos = auto.text_click("离开", click=False)
                 if pos:
-                    third = False
+                    third = True
                     logger.info("点击离开未成功")
                     continue
                 if click_back(auto):
                     logger.info("点击画面即可返回")
-                pos = auto.text_click("确定", click=False)
+                pos = auto.text_click("确认", click=False)
                 if pos:
-                    logger.info("点击确定")
+                    logger.info("点击确认")
                     auto.click(pos)
                     auto.sleep(2)
 

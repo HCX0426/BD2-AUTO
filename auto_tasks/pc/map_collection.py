@@ -55,6 +55,18 @@ def map_collection(auto: Auto, timeout: int = 600):
                         auto.sleep(2)
 
             if not first:
+                pos = auto.check_element_exist("map_collection/第七章1")
+                pos1 = auto.check_element_exist("map_collection/第七章2")
+                if pos or pos1:
+                    if pos:
+                        logger.info("点击第七章1")
+                        auto.click(pos)
+                        auto.sleep(5)
+                    elif pos1:
+                        logger.info("点击第七章2")
+                        auto.click(pos1)
+                        auto.sleep(5)
+
                 pos = auto.check_element_exist("map_collection/探寻")
                 if pos:
                     logger.info("点击探寻")

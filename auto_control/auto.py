@@ -153,7 +153,6 @@ class Auto:
         self,
         pos: tuple,
         time: int = 1,
-        is_relative: bool = False,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None
     ) -> bool:
@@ -171,12 +170,8 @@ class Auto:
             self.last_result = False
             return False
 
-        # 坐标转换逻辑
-        if is_relative:
-            abs_pos = (int(pos[0] * resolution[0]),
-                       int(pos[1] * resolution[1]))
-        else:
-            abs_pos = (round(pos[0]), round(pos[1]))
+
+        abs_pos = (round(pos[0]), round(pos[1]))
 
         # 坐标边界检查
         if (abs_pos[0] < 0 or abs_pos[0] >= resolution[0] or
@@ -210,9 +205,9 @@ class Auto:
         template_name: str,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
-        duration: float = 0.1,  # 新增参数
-        time: int = 1,           # 新增参数
-        right_click: bool = False  # 新增参数
+        duration: float = 0.1,
+        time: int = 1,
+        right_click: bool = False 
     ) -> bool:
         """执行模板点击操作"""
         self._apply_delay(delay)
@@ -242,7 +237,22 @@ class Auto:
         time: int = 1,
         right_click: bool = False
     ) -> Optional[Tuple[int, int]]:
-        """执行文本点击操作"""
+        """执行文本点击操作，自动适应窗口大小变化
+        
+        Args:
+            target_text: 要点击的文本内容
+            click: 是否执行点击操作，False则只返回坐标
+            lang: OCR语言设置
+            roi: 相对区域(x1,y1,x2,y2) 0-1之间的比例
+            delay: 操作前延迟
+            device_uri: 设备URI
+            duration: 点击持续时间
+            time: 点击次数
+            right_click: 是否右键点击
+        
+        Returns:
+            点击的坐标(x,y)或None
+        """
         self._apply_delay(delay)
         device = self._get_device(device_uri)
         self.last_result = None
@@ -251,10 +261,23 @@ class Auto:
             print("[ERROR] 文本点击失败: 设备未连接")
             return None
 
+        # 获取窗口实际大小
+        window_w, window_h = device.resolution
+        if window_w == 0 or window_h == 0:
+            print("[ERROR] 无法获取窗口分辨率")
+            return None
+
         screen = device.capture_screen()
         if screen is None:
             print("[WARNING] 屏幕捕获失败")
             return None
+
+        # 获取截图尺寸
+        screen_h, screen_w = screen.shape[:2]
+        
+        # 计算窗口缩放比例
+        scale_x = window_w / screen_w
+        scale_y = window_h / screen_h
 
         roi_screen = self.image_processor.get_roi_region(
             screen, roi) if roi else screen
@@ -268,18 +291,28 @@ class Auto:
         x, y, w, h = text_pos
         center_x, center_y = x + w // 2, y + h // 2
 
+        # 处理ROI偏移
         if roi and len(roi) >= 4:
-            screen_h, screen_w = screen.shape[:2]
             roi_x1 = int(screen_w * roi[0])
             roi_y1 = int(screen_h * roi[1])
             center_x += roi_x1
             center_y += roi_y1
 
+        # 转换为相对于窗口的坐标
+        relative_x = int(center_x * scale_x)
+        relative_y = int(center_y * scale_y)
+
         if click:
-            self.last_result = device.click((int(center_x), int(center_y)), duration, time, right_click)
-            return self.last_result
+            # 使用设备的click方法
+            self.last_result = device.click(
+                (relative_x, relative_y), 
+                duration=duration, 
+                time=time, 
+                right_click=right_click
+            )
+            return (relative_x, relative_y) if self.last_result else None
         else:
-            self.last_result = (int(center_x), int(center_y))
+            self.last_result = (relative_x, relative_y)
             return self.last_result
 
     def ocr(

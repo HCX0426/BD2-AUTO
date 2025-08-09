@@ -60,18 +60,25 @@ def get_restaurant(auto: Auto, timeout: int = 600):
                     thrid = False
 
             if not thrid and fourth:
-                if auto.text_click("常客"):
-                    logger.info("点击常客")
-                    auto.click(pos)
-                    auto.sleep(1)
-                    fourth = False
-
-                    if pos := auto.check_element_exist("下一阶段"):
+                if pos := auto.check_element_exist("get_restaurant/下一阶段"):
                         logger.info("点击下一阶段")
                         auto.click(pos,time=2)
                         auto.sleep(1)
                         continue
+                if pos := auto.check_element_exist("get_restaurant/升级"):
+                        logger.info("点击升级")
+                        auto.click(pos,time=2)
+                        auto.sleep(1)
+                        continue
+                if click_back(auto):
+                    logger.info("点击返回")
+                    auto.sleep(1)
+                    continue
 
+                if auto.text_click("常客"):
+                    logger.info("点击常客")
+                    auto.sleep(1)
+                    
                     if back_to_main(auto):
                         logger.info("返回主界面成功")
                         return True

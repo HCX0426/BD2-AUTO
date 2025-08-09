@@ -63,6 +63,10 @@ def lucky_draw(auto: Auto, timeout: int = 900, target_count: int = 6):
                 first = True
             if target_count <= 0:
                 logger.info("抽抽乐次数已达上限")
+                if back_to_main(auto):
+                    logger.info("返回主界面成功")
+                else:
+                    logger.info("返回主界面失败")
                 return True
 
             auto.sleep(0.5)  # 每次循环添加短暂延迟

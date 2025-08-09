@@ -11,8 +11,11 @@ def back_to_main(auto: Auto):
     :return: 是否成功
     """
     try:
+        logger = auto.get_task_logger("back_to_main")
         while True:
-            logger = auto.get_task_logger("back_to_main")
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
             # 检测是否在主界面
             if auto.check_element_exist("public/主界面"):
                 logger.info("检测到主界面，无需返回")
@@ -31,6 +34,11 @@ def back_to_main(auto: Auto):
                     auto.sleep(1)
                 else:
                     logger.info("未检测到地图标识")
+                    pos = auto.text_click("确认",click=False)
+                    if pos:
+                        auto.click(pos)
+                        auto.sleep(2)
+
                     auto.key_press("esc")
 
                     # 防止esc失效
@@ -43,7 +51,20 @@ def back_to_main(auto: Auto):
                         if pos:
                             auto.click(pos)
                             auto.sleep(1)
-                        auto.text_click("取消")
+                        pos = auto.text_click("结束游戏",click=False)
+                        if pos:
+                           pos = auto.text_click("取消",click=False)
+                           if pos:
+                               auto.click(pos)
+                               auto.sleep(1)
+                               auto.key_press("h")
+                        else:
+                            auto.text_click("取消")
+                    else:
+                        logger.info("检测到主界面，无需返回")
+                        auto.sleep(1)
+                        return True
+
                     auto.sleep(1)
 
     except Exception as e:
@@ -80,7 +101,8 @@ def click_back(auto: Auto):
     """
     logger = auto.get_task_logger("click_back")
     try:
-        if auto.text_click("点击画面即可返回"):
+        pos = auto.text_click("点击画面即可返回")
+        if pos:
             logger.info("点击画面即可返回")
             auto.sleep(2)
             return True
@@ -91,7 +113,6 @@ def click_back(auto: Auto):
         logger.error(f"点击画面即可返回失败: {e}")
         return False
     
-
 
 # 进入地图选择
 def enter_map_select(auto: Auto):
