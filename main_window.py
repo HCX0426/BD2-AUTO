@@ -148,6 +148,7 @@ class MainWindow(QMainWindow):
         self.log_signal.log_updated.connect(self.update_log)  # 连接日志更新信号
         self.config_manager = TaskConfigManager()  # 配置管理器
         self.current_task_id = None  # 当前选中的任务ID
+        self.param_widgets = {}    # 参数控件字典
         
         self.init_ui()
         
@@ -262,9 +263,7 @@ class MainWindow(QMainWindow):
         control_layout = QHBoxLayout()
         control_layout.setSpacing(10)
         
-        self.start_btn = QPushButton("开始任务")
-        self.stop_btn = QPushButton("停止任务")
-        self.stop_btn.setEnabled(False)  # 初始禁用
+        self.start_stop_btn = QPushButton("开始任务")
         self.clear_log_btn = QPushButton("清空日志")
         
         # 保存顺序按钮
@@ -274,20 +273,29 @@ class MainWindow(QMainWindow):
         self.save_order_btn.setMinimumWidth(120)
         
         # 设置按钮大小
-        for btn in [self.start_btn, self.stop_btn, self.clear_log_btn]:
+        for btn in [self.start_stop_btn, self.clear_log_btn]:
             btn.setMinimumHeight(30)
             btn.setMinimumWidth(90)
         
         # 绑定按钮事件
-        self.start_btn.clicked.connect(self.start_task)
-        self.stop_btn.clicked.connect(self.stop_task)
+        self.start_stop_btn.clicked.connect(self.toggle_task)
         self.clear_log_btn.clicked.connect(self.clear_log)
         
-        control_layout.addWidget(self.start_btn)
-        control_layout.addWidget(self.stop_btn)
+        control_layout.addWidget(self.start_stop_btn)
         control_layout.addWidget(self.clear_log_btn)
-        control_layout.addWidget(self.save_order_btn)  # 添加保存顺序按钮
+        control_layout.addWidget(self.save_order_btn)
         main_layout.addLayout(control_layout)
+    
+    def toggle_task(self):
+        """切换开始/停止任务状态"""
+        if self.task_running:
+            self.stop_task()
+        else:
+            # 立即更新按钮状态
+            self.start_stop_btn.setText("停止任务")
+            self.start_stop_btn.setEnabled(True)  # 确保按钮保持可用
+            # 然后开始任务
+            self.start_task()
     
     def populate_task_list(self):
         """填充任务列表，按照上次保存的顺序和勾选状态"""
@@ -301,6 +309,8 @@ class MainWindow(QMainWindow):
         # 添加不在顺序列表中的新任务
         for task_id in all_task_ids - set(ordered_tasks):
             ordered_tasks.append(task_id)
+        
+        self.task_list.clear()  # 清空列表以确保不会重复添加
         
         for task_id in ordered_tasks:
             task_info = TASK_MAPPING.get(task_id)
@@ -362,7 +372,7 @@ class MainWindow(QMainWindow):
         """清空参数表单"""
         while self.param_form.rowCount() > 0:
             self.param_form.removeRow(0)
-        self.param_widgets = {}  # 存储参数控件
+        self.param_widgets = {}  # 清空参数控件字典
     
     def load_task_parameters(self, task_id):
         """加载任务参数到表单"""
@@ -460,54 +470,59 @@ class MainWindow(QMainWindow):
     
     def start_task(self):
         """开始执行选中的任务"""
-        # 获取选中的任务
-        selected_tasks = []
-        for i in range(self.task_list.count()):
-            item = self.task_list.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
-                selected_tasks.append(item.data(Qt.ItemDataRole.UserRole))
-        
-        if not selected_tasks:
-            QMessageBox.warning(self, "警告", "请至少选择一个任务")
-            return
-        
-        # 更新UI状态
-        self.task_running = True
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
-        self.task_list.setEnabled(False)
-        self.select_all_btn.setEnabled(False)
-        self.deselect_all_btn.setEnabled(False)
-        self.save_param_btn.setEnabled(False)
-        self.save_order_btn.setEnabled(False)  # 禁用保存顺序按钮
-        
-        # 禁用所有参数控件
-        for widget in self.param_widgets.values():
-            widget.setEnabled(False)
-        
-        self.log(f"开始执行任务，共 {len(selected_tasks)} 个任务")
-        
-        # 创建全局Auto实例
-        self.auto_instance = Auto()
-        if not self.auto_instance.add_device():
-            error_msg = f"设备添加失败: {self.auto_instance.last_error}"
-            self.log(error_msg)
-            QMessageBox.critical(self, "设备错误", error_msg)
+        try:
+            # 获取选中的任务
+            selected_tasks = []
+            for i in range(self.task_list.count()):
+                item = self.task_list.item(i)
+                if item.checkState() == Qt.CheckState.Checked:
+                    selected_tasks.append(item.data(Qt.ItemDataRole.UserRole))
+            
+            if not selected_tasks:
+                QMessageBox.warning(self, "警告", "请至少选择一个任务")
+                return
+            
+            # 立即更新UI状态 - 这是关键修改点
+            self.task_running = True
+            self.start_stop_btn.setText("停止任务")
+            self.task_list.setEnabled(False)
+            self.select_all_btn.setEnabled(False)
+            self.deselect_all_btn.setEnabled(False)
+            self.save_param_btn.setEnabled(False)
+            self.save_order_btn.setEnabled(False)
+            
+            # 禁用所有参数控件
+            for widget in self.param_widgets.values():
+                widget.setEnabled(False)
+            
+            self.log(f"开始执行任务，共 {len(selected_tasks)} 个任务")
+            
+            # 创建全局Auto实例
+            self.auto_instance = Auto()
+            if not self.auto_instance.add_device():
+                error_msg = f"设备添加失败: {self.auto_instance.last_error}"
+                self.log(error_msg)
+                QMessageBox.critical(self, "设备错误", error_msg)
+                self.reset_task_state()
+                return
+            
+            self.auto_instance.start()
+            self.log("设备连接成功，准备执行任务")
+            
+            # 启动任务线程
+            self.task_thread = QThread()
+            self.task_worker = TaskWorker(self.auto_instance, selected_tasks, self.config_manager)
+            self.task_worker.moveToThread(self.task_thread)
+            self.task_worker.log_signal.connect(self.log)
+            self.task_worker.progress_signal.connect(self.update_progress)
+            self.task_worker.finished.connect(self.on_task_finished)
+            self.task_thread.started.connect(self.task_worker.run)
+            self.task_thread.start()
+            
+        except Exception as e:
+            self.log(f"启动任务时发生错误: {str(e)}")
             self.reset_task_state()
-            return
-        
-        self.auto_instance.start()
-        self.log("设备连接成功，准备执行任务")
-        
-        # 启动任务线程
-        self.task_thread = QThread()
-        self.task_worker = TaskWorker(self.auto_instance, selected_tasks, self.config_manager)
-        self.task_worker.moveToThread(self.task_thread)
-        self.task_worker.log_signal.connect(self.log)
-        self.task_worker.progress_signal.connect(self.update_progress)
-        self.task_worker.finished.connect(self.reset_task_state)
-        self.task_thread.started.connect(self.task_worker.run)
-        self.task_thread.start()
+            QMessageBox.critical(self, "错误", f"启动任务时发生错误: {str(e)}")
     
     def stop_task(self):
         """停止当前任务"""
@@ -515,21 +530,29 @@ class MainWindow(QMainWindow):
             return
             
         self.log("收到停止指令，正在终止任务...")
+        # 立即禁用按钮
+        self.start_stop_btn.setEnabled(False)
         if self.auto_instance:
             self.auto_instance.set_should_stop(True)
-        
-        # 禁用停止按钮防止重复点击
-        self.stop_btn.setEnabled(False)
+    
+    def on_task_finished(self):
+        """任务完成后的处理"""
+        self.reset_task_state()
+        # 确保Auto实例被正确释放
+        if self.auto_instance:
+            self.auto_instance.stop()
+            self.auto_instance = None
+        self.log("所有任务执行完毕")
     
     def reset_task_state(self):
         """重置任务状态和UI"""
         self.task_running = False
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self.start_stop_btn.setText("开始任务")
+        self.start_stop_btn.setEnabled(True)
         self.task_list.setEnabled(True)
         self.select_all_btn.setEnabled(True)
         self.deselect_all_btn.setEnabled(True)
-        self.save_order_btn.setEnabled(True)  # 启用保存顺序按钮
+        self.save_order_btn.setEnabled(True)
         self.progress_bar.setValue(0)
         
         # 启用参数保存按钮和控件
@@ -622,8 +645,6 @@ class TaskWorker(QThread):
         finally:
             # 确保资源释放
             generate_report(__file__)
-            if self.auto_instance:
-                self.auto_instance.stop()
             self.finished.emit()
             
 if __name__ == "__main__":

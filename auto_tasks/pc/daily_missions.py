@@ -30,12 +30,10 @@ def daily_missions(auto: Auto, timeout: int = 60):
                         first = False
 
             if not first and second:
-                if auto.text_click("每日任务"):
-                    logger.info("点击每日任务")
-                    if auto.text_click("全部获得"):
-                        logger.info("点击全部获得")
-                        auto.sleep(4)
-                        second = False
+                if auto.text_click("全部获得"):
+                    logger.info("点击全部获得")
+                    auto.sleep(4)
+                    second = False
                 else:
                     logger.info("点击每日任务失败")
                     first = True
