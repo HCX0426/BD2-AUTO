@@ -1,7 +1,7 @@
 from enum import Enum
 import os
 
-import cv2
+from auto_control.config.auto_config import PROJECT_ROOT
 
 # 基础配置
 class ScaleStrategy(Enum):
@@ -13,7 +13,7 @@ class MatchMethod(Enum):
     AIRTEST = 'airtest'
 
 # 路径配置
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+
 TEMPLATE_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'images') # 默认模板路径
 AUTO_LOAD_TEMPLATES = True  # 是否自动加载模板
 TEMPLATE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp')  # 支持的图片格式

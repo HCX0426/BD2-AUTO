@@ -1,5 +1,5 @@
 import time
-from auto_control.auto import Auto
+from auto_control import Auto
 from auto_tasks.pc.public import back_to_main
 
 

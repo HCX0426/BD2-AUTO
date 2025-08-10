@@ -1,20 +1,9 @@
 import io
 import sys
 
-from auto_control.auto import Auto
+from auto_control import Auto
 from auto_control.config import *
-from auto_tasks.pc.daily_missions import daily_missions
-from auto_tasks.pc.get_email import get_email
-from auto_tasks.pc.get_guild import get_guild
-from auto_tasks.pc.get_pvp import get_pvp
-from auto_tasks.pc.get_restaurant import get_restaurant
-from auto_tasks.pc.intensive_decomposition import intensive_decomposition
-from auto_tasks.pc.login import login
-from auto_tasks.pc.lucky_draw import lucky_draw
-from auto_tasks.pc.map_collection import map_collection
-from auto_tasks.pc.pass_activity import pass_activity
-from auto_tasks.pc.pass_rewards import pass_rewards
-from auto_tasks.pc.sweep_daily import sweep_daily
+from auto_tasks.pc import *
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 

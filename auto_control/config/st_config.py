@@ -2,7 +2,7 @@ import os
 from airtest.core.settings import Settings as ST
 from airtest.core.helper import set_logdir
 from airtest.report.report import simple_report
-from .image_config import PROJECT_ROOT  # 使用工程统一配置
+from auto_control.config.auto_config import PROJECT_ROOT
 
 # 统一日志路径常量
 ST_LOG_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'log', 'st_log')

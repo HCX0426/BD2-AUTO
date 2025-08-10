@@ -2,24 +2,21 @@ import sys
 import os
 import json
 import inspect
-from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QLabel, QSplitter, QGroupBox, QListWidget, QListWidgetItem, 
                             QPushButton, QTextEdit, QProgressBar, QMessageBox, QFormLayout,
-                            QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QMetaObject, pyqtSlot
+                            QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QTextCursor
 
-# 假设其他必要的导入保持不变
 from auto_control.auto import Auto
+from auto_control.config.auto_config import PROJECT_ROOT
 from auto_control.config.st_config import generate_report
-from auto_control.logger import Logger
-from auto_control.config.log_config import LOG_CONFIG
 
 # 任务模块路径
-TASKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auto_tasks', 'pc')
+TASKS_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc')
 # 配置文件路径
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'task_configs.json')
+CONFIG_FILE = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'task_configs.json')
 
 # 动态导入任务模块并构建任务映射
 def load_task_modules():
@@ -174,7 +171,7 @@ class MainWindow(QMainWindow):
             font-weight: bold;
             border: 1px solid #ddd;
         """)
-        top_info.setMaximumHeight(28)  # 进一步压缩高度
+        top_info.setMaximumHeight(28)
         main_layout.addWidget(top_info)
         
         # 创建水平分割器 - 主要内容区域

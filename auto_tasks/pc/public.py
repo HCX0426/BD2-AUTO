@@ -1,5 +1,5 @@
 import time
-from auto_control.auto import Auto
+from auto_control import Auto
 
 def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
     """

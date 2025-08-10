@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
-from .image_config import PROJECT_ROOT  # 使用工程统一配置
+
+from auto_control.config.auto_config import PROJECT_ROOT
+
 
 
 TASK_LOG_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'log', 'task_log')
