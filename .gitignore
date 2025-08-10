@@ -211,3 +211,5 @@ __marimo__/
 
 # Airtest log
 auto_tasks/pc/log/*
+
+task_configs.json

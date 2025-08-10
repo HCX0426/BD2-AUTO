@@ -1,12 +1,19 @@
 import time
 
 from auto_control.auto import Auto
-from auto_control.logger import Logger
 from auto_tasks.pc.public import back_to_main
 
 
 def lucky_draw(auto: Auto, timeout: int = 900, target_count: int = 6):
-    """抽抽乐"""
+    """抽抽乐
+    
+    Args:
+        timeout: 任务超时时间(秒)
+        target_count: 目标抽奖次数
+    
+    Returns:
+        bool: 是否成功完成抽抽乐流程
+    """
     try:
         logger = auto.get_task_logger("lucky_draw")
         logger.info("开始抽抽乐")

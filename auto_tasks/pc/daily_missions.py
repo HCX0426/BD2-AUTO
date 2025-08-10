@@ -1,71 +1,83 @@
 import time
-
 from auto_control.auto import Auto
 from auto_tasks.pc.public import back_to_main, click_back
 
 
-def daily_missions(auto: Auto, timeout: int = 60):
-    """每日任务"""
+def daily_missions(auto: Auto, timeout: int = 60) -> bool:
+    """每日任务领取
+    
+    Args:
+        auto: Auto控制对象
+        timeout: 超时时间(秒)
+        
+    Returns:
+        bool: 任务是否成功完成
+    """
+    logger = auto.get_task_logger("daily_missions")
+    logger.info("开始领取每日任务")
+    
+    start_time = time.time()
+    state = "init"  # init -> main_checked -> daily_received -> weekly_received -> completed
+    
     try:
-        logger = auto.get_task_logger("daily_missions")
-        logger.info("开始领取每日任务")
-        start_time = time.time()
-        first = True
-        second = True
-        third = True
-
-
         while time.time() - start_time < timeout:
-
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
-
-            # 检测是否在主界面
-            if first:
-                if back_to_main(auto):
-                    if pos := auto.text_click("任务",click=False):
-                        logger.info(f"点击任务,pos:{pos}")
-                        auto.click(pos)
-                        first = False
-
-            if not first and second:
-                if auto.text_click("全部获得"):
-                    logger.info("点击全部获得")
-                    auto.sleep(4)
-                    second = False
-                else:
-                    logger.info("点击每日任务失败")
-                    first = True
-
-                if click_back(auto):
-                    logger.info("点击返回")
-                else:
-                    logger.info("点击返回失败")
-                    second = True
-
                 
-            
-            if not second and third:
-                if auto.text_click("每周任务"):
-                    logger.info("点击每周任务")
-                    if auto.text_click("全部获得"):
-                        logger.info("点击全部获得")
-                        auto.sleep(4)
-                    if click_back(auto):
-                        logger.info("点击返回")
-                        third = False
+            # 初始状态：检查主界面
+            if state == "init":
+                if back_to_main(auto):
+                    if pos := auto.text_click("任务", click=False):
+                        logger.info(f"进入任务界面, 位置: {pos}")
+                        auto.click(pos)
+                        state = "main_checked"
+                continue
+                
+            # 领取每日任务奖励
+            if state == "main_checked":
+                if auto.text_click("全部获得"):
+                    logger.info("成功领取每日任务奖励")
+                    auto.sleep(4)
+                    state = "daily_received"
+                else:
+                    logger.warning("领取每日任务奖励失败，尝试重新进入")
+                    state = "init"
                     
-                    result = back_to_main(auto)
-                    if result:
-                        logger.info("返回主界面成功")
-                        return True
+                if not click_back(auto):
+                    logger.warning("返回失败")
+                    state = "main_checked"
+                continue
+                
+            # 领取每周任务奖励
+            if state == "daily_received":
+                if auto.text_click("每周任务"):
+                    logger.info("进入每周任务界面")
+                    if auto.text_click("全部获得"):
+                        logger.info("成功领取每周任务奖励")
+                        auto.sleep(4)
+                    
+                    if not click_back(auto):
+                        logger.warning("领取成功")
                     else:
-                        logger.info("返回主界面失败")
-            auto.sleep(0.5)  # 每次循环添加短暂延迟
+                        logger.info("无奖励可领取")
 
-        logger.info("领取每日任务超时")
+                    state = "weekly_received"
+                continue
+                
+            # 返回主界面
+            if state == "weekly_received":
+                if back_to_main(auto):
+                    logger.info("成功返回主界面")
+                    return True
+                logger.warning("返回主界面失败，重试中...")
+                continue
+                
+            auto.sleep(0.5)
+
+        logger.warning("领取每日任务超时")
         return False
+        
     except Exception as e:
         logger.error(f"领取每日任务过程中出错: {e}")
         return False

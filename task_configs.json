@@ -14,22 +14,27 @@
         "daily_missions"
     ],
     "task_states": {
-        "login": true,
-        "get_guild": true,
-        "get_pvp": true,
+        "login": false,
+        "get_guild": false,
+        "get_pvp": false,
         "get_restaurant": true,
-        "intensive_decomposition": true,
-        "lucky_draw": true,
-        "map_collection": true,
-        "pass_activity": true,
-        "sweep_daily": true,
+        "intensive_decomposition": false,
+        "lucky_draw": false,
+        "map_collection": false,
+        "pass_activity": false,
+        "sweep_daily": false,
         "pass_rewards": true,
-        "get_email": true,
-        "daily_missions": true
+        "get_email": false,
+        "daily_missions": false
     },
     "task_configs": {
         "get_email": {
             "timeout": 500
+        },
+        "sweep_daily": {
+            "timeout": 600,
+            "onigiri": "第九关",
+            "torch": "水之洞穴"
         }
     }
 }
