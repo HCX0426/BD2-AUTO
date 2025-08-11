@@ -41,7 +41,13 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                         if auto.click(pos):
                             logger.info("进入通行证界面")
                             auto.sleep(2)
-                            state = "entered"
+
+                            # 检测是否进入成功
+                            if auto.text_click("基础",click=False):
+                                logger.info("已进入通行证界面")
+                                state = "entered"
+                            else:
+                                logger.error("未成功进入通行证界面")
                 continue
                 
             # 领取奖励状态

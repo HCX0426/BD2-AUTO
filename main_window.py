@@ -80,17 +80,7 @@ class TaskConfigManager:
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config_data = json.load(f)
-                    
-                    # 兼容旧配置文件格式
-                    if "task_order" in config_data and "task_states" in config_data:
-                        return config_data
-                    else:
-                        # 旧配置文件格式，转换为新格式
-                        return {
-                            "task_order": list(TASK_MAPPING.keys()),
-                            "task_states": {task_id: False for task_id in TASK_MAPPING},
-                            "task_configs": config_data
-                        }
+                    return config_data
         except Exception as e:
             print(f"加载配置文件失败: {str(e)}")
         # 默认配置

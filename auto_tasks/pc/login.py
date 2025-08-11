@@ -27,9 +27,9 @@ def login(auto: Auto, timeout: int = 300) -> bool:
             
             # 处理开始游戏界面
             if state == "start_screen":
-                if auto.check_element_exist("login/开始游戏"):
+                if pos := auto.check_element_exist("login/开始游戏"):
                     logger.info("检测到开始游戏按钮，点击进入")
-                    auto.template_click("login/开始游戏")
+                    auto.click(pos,time=3)
                     auto.sleep(7)
                 state = "main_check"
                 continue
