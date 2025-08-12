@@ -44,6 +44,10 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                 
             # 进入竞技场
             if state == "arena_entered":
+                if auto.text_click("游戏卡珍藏集",click=False):
+                    logger.debug("未进入PVP地图")
+                    state == "init"
+                    continue
                 if click_back(auto):
                     logger.info("领取赛季奖励")
                     auto.sleep(2)
@@ -102,9 +106,9 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
             if state == "battle_completed":
                 # 处理可能未点击到离开战斗的情况
                 if pos := auto.text_click("离开", click=False):
-                    logger.info("离开战斗界面")
-                    auto.click(pos, time=3)
-                    auto.sleep(3)
+                    logger.info("未离开战斗界面")
+                    state == "battle_prepared"
+                    continue
                 # 处理可能的确认弹窗
                 if pos := auto.text_click("确认", click=False):
                     logger.info("确认返回")

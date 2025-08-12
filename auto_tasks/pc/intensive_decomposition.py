@@ -129,7 +129,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         if auto.text_click("精炼",time=3):
                             logger.info("进入精炼界面")
                             auto.sleep(2)
-                            state = "execute"
+                    if auto.text_click("连续精炼"):
+                        logger.info("进入连续精炼界面")
+                        state = "execute"
                     continue
                 
                 if state == "execute":

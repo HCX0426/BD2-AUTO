@@ -57,6 +57,8 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                     
                     # 点击奖励位置
                     if auto.click((x, y), time=2):
+                        auto.sleep(1)
+                        auto.click((x, y))
                         # 点击领取按钮位置
                         if auto.click((1590, 680)):
                             if auto.text_click("全部获得"):

@@ -50,6 +50,7 @@ def pass_activity(auto: Auto, timeout: int = 600) -> bool:
                 # 检查是否仍在挑战战斗界面
                 if auto.text_click("行程", click=False):
                     logger.info("仍在挑战战斗界面")
+                    state == "entered"
                     continue
                 
                 if pos := auto.check_element_exist("pass_activity/困难第15关"):

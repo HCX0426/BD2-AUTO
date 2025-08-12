@@ -39,25 +39,25 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
                 if auto.text_click("全部获得"):
                     logger.info("成功领取每日任务奖励")
                     auto.sleep(4)
-                    state = "daily_received"
+                    if click_back(auto):
+                        logger.info("领取成功")
                 else:
-                    logger.warning("领取每日任务奖励失败，尝试重新进入")
-                    state = "init"
-                    
-                if not click_back(auto):
-                    logger.warning("返回失败")
-                    state = "main_checked"
+                    logger.warning("无奖励可以领取")
+                
+                state = "daily_received"
                 continue
                 
             # 领取每周任务奖励
             if state == "daily_received":
+                if click_back(auto):
+                    logger.info("领取成功")
                 if auto.text_click("每周任务"):
                     logger.info("进入每周任务界面")
                     if auto.text_click("全部获得"):
                         logger.info("成功领取每周任务奖励")
                         auto.sleep(4)
                     
-                    if not click_back(auto):
+                    if click_back(auto):
                         logger.warning("领取成功")
                     else:
                         logger.info("无奖励可领取")

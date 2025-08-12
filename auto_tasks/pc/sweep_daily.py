@@ -87,10 +87,11 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
                     logger.info("点击天赋本")
                     auto.click(pos)
                     auto.sleep(1)
-                    if auto.text_click(f"{torch}") and auto.template_click("sweep_daily/快速狩猎"):
-                        logger.info(f"点击{torch}并选择快速狩猎")
-                        auto.sleep(1)
-                        state['torch_selected'] = True
+                    if auto.text_click(f"{torch}"):
+                        if auto.template_click("sweep_daily/快速狩猎"):
+                            logger.info(f"点击快速狩猎")
+                            auto.sleep(1)
+                            state['torch_selected'] = True
                     else:
                         logger.info(f"未检测到{torch}")
                 continue
