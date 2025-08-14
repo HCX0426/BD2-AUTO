@@ -107,7 +107,7 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                 # 处理可能未点击到离开战斗的情况
                 if pos := auto.text_click("离开", click=False):
                     logger.info("未离开战斗界面")
-                    state == "battle_prepared"
+                    state = "battle_prepared"
                     continue
                 # 处理可能的确认弹窗
                 if pos := auto.text_click("确认", click=False):

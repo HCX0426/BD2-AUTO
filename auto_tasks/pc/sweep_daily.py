@@ -35,11 +35,7 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
             # 检查主界面
             if not state['main_checked']:
                 if back_to_main(auto):
-                    auto.key_press('esc')
-                    auto.sleep(1)
-                    if auto.check_element_exist("public/闪避标识"):
-                        logger.info("检测到闪避标识")
-                        state['main_checked'] = True
+                    state['main_checked'] = True
                 continue
             
             # 进入扫荡界面

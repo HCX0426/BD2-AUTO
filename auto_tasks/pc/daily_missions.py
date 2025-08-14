@@ -31,13 +31,14 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
                     if pos := auto.text_click("任务", click=False):
                         logger.info(f"进入任务界面, 位置: {pos}")
                         auto.click(pos)
+                        auto.sleep(2)
                         state = "main_checked"
                 continue
                 
             # 领取每日任务奖励
             if state == "main_checked":
                 if auto.text_click("全部获得"):
-                    logger.info("成功领取每日任务奖励")
+                    logger.info("领取每日任务奖励")
                     auto.sleep(4)
                     if click_back(auto):
                         logger.info("领取成功")

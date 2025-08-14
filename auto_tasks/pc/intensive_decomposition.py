@@ -49,9 +49,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         logger.info("打开筛选界面")
                         auto.click(pos)
                         auto.sleep(2)
-                        if pos := auto.check_element_exist("intensive_decomposition/SR"):
+                        if pos := auto.check_element_exist("intensive_decomposition/R"):
                             auto.click(pos)
-                            logger.info("选择SR装备")
+                            logger.info("选择R装备")
                             auto.sleep(2)
                             if auto.text_click("确认"):
                                 logger.info("确认筛选条件")
@@ -65,14 +65,16 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         auto.sleep(2)
                         if auto.click((785, 200)):  # 选择装备位置
                             auto.sleep(1)
-                            if pos := auto.check_element_exist("intensive_decomposition/确认"):
-                                auto.click(pos)
-                                auto.sleep(2)
-                                if pos := auto.check_element_exist("intensive_decomposition/分解按钮"):
-                                    auto.click(pos)
-                                    logger.info("确认分解")
-                                    auto.sleep(3)
-                                    state = "complete"
+                    if pos := auto.check_element_exist("intensive_decomposition/确认"):
+                        auto.click(pos)
+                        auto.sleep(2)
+                        if pos := auto.check_element_exist("intensive_decomposition/分解按钮"):
+                            auto.click(pos)
+                            logger.info("确认分解")
+                            auto.sleep(3)
+                            state = "complete"
+                        else:
+                            logger.error("分解按钮不存在")
                     continue
                 
                 if state == "complete":

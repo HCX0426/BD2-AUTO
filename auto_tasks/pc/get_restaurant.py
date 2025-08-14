@@ -31,6 +31,7 @@ def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
                         logger.info("点击餐馆标识")
                         auto.sleep(1)
                         state = "second"
+                        continue
             
             elif state == "second":
                 if auto.text_click("结算"):
@@ -40,20 +41,24 @@ def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
                         logger.info("领取成功")
                     else:
                         logger.info("无需结算")
-                        auto.key_press("esc")
                     state = "third"
+                    continue
                 else:
                     logger.info("未检测到结算按钮")
                     state = "first"  # 回到初始状态
+                    continue
             
             elif state == "third":
-                if auto.template_click("get_restaurant/餐馆标识"):
-                        logger.info("点击餐馆标识")
-                        auto.sleep(1)
-                        if auto.template_click("get_restaurant/进入餐厅"):
-                            logger.info("点击进入餐厅")
-                            auto.sleep(12)
-                            state = "fourth"
+                if pos := auto.check_element_exist("get_restaurant/进入餐厅"):
+                    logger.info("点击进入餐厅")
+                    auto.click(pos, time=2)
+                    auto.sleep(3)
+                    state = "fourth"
+                    continue
+                if pos := auto.check_element_exist("get_restaurant/餐馆标识"):
+                    logger.info("点击餐馆标识")
+                    auto.click(pos)
+                    auto.sleep(1)
 
             elif state == "fourth":
                 if pos := auto.check_element_exist("get_restaurant/下一阶段"):
@@ -76,7 +81,6 @@ def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
                 if pos := auto.text_click("常客",click=False):
                     logger.info("点击常客")
                     auto.click(pos,time=2)
-                    auto.sleep(1)
                     return back_to_main(auto)
             
             auto.sleep(0.5)
