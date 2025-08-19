@@ -29,7 +29,7 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
             if state == "init":
                 if back_to_main(auto):
                     if pos := auto.text_click("任务", click=False):
-                        logger.info(f"进入任务界面, 位置: {pos}")
+                        logger.info(f"进入任务界面")
                         auto.click(pos)
                         auto.sleep(2)
                         state = "main_checked"
@@ -37,11 +37,13 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
                 
             # 领取每日任务奖励
             if state == "main_checked":
-                if auto.text_click("全部获得"):
+                if auto.text_click("全部获得",time=2):
                     logger.info("领取每日任务奖励")
                     auto.sleep(4)
                     if click_back(auto):
-                        logger.info("领取成功")
+                        logger.info("每日任务奖励领取成功")
+                    else:
+                        logger.info("每日任务奖励领取失败")
                 else:
                     logger.warning("无奖励可以领取")
                 
@@ -52,9 +54,9 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
             if state == "daily_received":
                 if click_back(auto):
                     logger.info("领取成功")
-                if auto.text_click("每周任务"):
+                if auto.text_click("每周任务",time=2):
                     logger.info("进入每周任务界面")
-                    if auto.text_click("全部获得"):
+                    if auto.text_click("全部获得",time=2):
                         logger.info("成功领取每周任务奖励")
                         auto.sleep(4)
                     

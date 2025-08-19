@@ -1,159 +1,200 @@
 import sys
-import os
-import json
-import inspect
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                            QLabel, QSplitter, QGroupBox, QListWidget, QListWidgetItem, 
-                            QPushButton, QTextEdit, QProgressBar, QMessageBox, QFormLayout,
-                            QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QTextCursor
-
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QSplitter, QGroupBox, QListWidget, QListWidgetItem,
+    QPushButton, QTextEdit, QProgressBar, QMessageBox, QFormLayout,
+    QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QFrame,
+    QStackedWidget, QSizePolicy, QButtonGroup, QRadioButton, QSlider
+)
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QThread
+from PyQt6.QtGui import QFont, QTextCursor, QIcon
 from auto_control.auto import Auto
-from auto_control.config.auto_config import PROJECT_ROOT
-from auto_control.config.st_config import generate_report
+from task_manager import AppSettingsManager, TaskConfigManager, load_task_modules
 
-# 任务模块路径
-TASKS_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc')
-# 配置文件路径
-CONFIG_FILE = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'task_configs.json')
-
-# 动态导入任务模块并构建任务映射
-def load_task_modules():
-    task_mapping = {}
-    # 遍历任务目录
-    for filename in os.listdir(TASKS_DIR):
-        if filename.endswith('.py') and not filename.startswith('__'):
-            module_name = filename[:-3]
-            try:
-                # 动态导入模块
-                module = __import__(f'auto_tasks.pc.{module_name}', fromlist=[module_name])
-                # 查找主任务函数（假设每个模块有一个与模块名相同的函数）
-                if hasattr(module, module_name):
-                    task_func = getattr(module, module_name)
-                    # 获取函数文档字符串作为描述
-                    doc = inspect.getdoc(task_func) or ""
-                    # 获取函数参数
-                    sig = inspect.signature(task_func)
-                    params = []
-                    for param_name, param in sig.parameters.items():
-                        if param_name != 'auto':  # 排除auto参数
-                            # 获取参数默认值
-                            default = param.default if param.default != inspect.Parameter.empty else None
-                            # 获取参数注释
-                            annotation = param.annotation if param.annotation != inspect.Parameter.empty else ""
-                            params.append({
-                                'name': param_name,
-                                'default': default,
-                                'annotation': str(annotation),
-                                'type': type(default).__name__ if default is not None else 'str'
-                            })
-                    task_mapping[module_name] = {
-                        'name': module_name.replace('_', ' ').title(),
-                        'function': task_func,
-                        'description': doc,
-                        'parameters': params
-                    }
-            except Exception as e:
-                print(f"加载任务模块 {module_name} 失败: {str(e)}")
-    return task_mapping
-
-# 加载任务映射
-TASK_MAPPING = load_task_modules()
-
-# 日志信号类
 class LogSignal(QWidget):
     log_updated = pyqtSignal(str)
     
     def __init__(self):
         super().__init__()
 
-# 任务配置管理类
-class TaskConfigManager:
-    def __init__(self, config_file=CONFIG_FILE):
-        self.config_file = config_file
-        self.configs = self.load_configs()
-        
-    def load_configs(self):
-        """加载配置文件"""
-        try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    config_data = json.load(f)
-                    return config_data
-        except Exception as e:
-            print(f"加载配置文件失败: {str(e)}")
-        # 默认配置
-        return {
-            "task_order": list(TASK_MAPPING.keys()),
-            "task_states": {task_id: False for task_id in TASK_MAPPING},
-            "task_configs": {}
-        }
-    
-    def save_configs(self):
-        """保存配置文件"""
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.configs, f, ensure_ascii=False, indent=4)
-            return True
-        except Exception as e:
-            print(f"保存配置文件失败: {str(e)}")
-            return False
-    
-    def get_task_config(self, task_id):
-        """获取任务配置"""
-        return self.configs.get("task_configs", {}).get(task_id, {})
-    
-    def save_task_config(self, task_id, config):
-        """保存任务配置"""
-        if "task_configs" not in self.configs:
-            self.configs["task_configs"] = {}
-        self.configs["task_configs"][task_id] = config
-        return self.save_configs()
-    
-    def save_task_order_and_states(self, task_ids, task_states):
-        """保存任务顺序和状态"""
-        self.configs["task_order"] = task_ids
-        self.configs["task_states"] = task_states
-        return self.save_configs()
-    
-    def get_task_order(self):
-        """获取任务顺序"""
-        return self.configs.get("task_order", list(TASK_MAPPING.keys()))
-    
-    def get_task_states(self):
-        """获取任务状态（勾选状态）"""
-        return self.configs.get("task_states", {task_id: False for task_id in TASK_MAPPING})
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.auto_instance = None  # 全局唯一的Auto实例
-        self.task_thread = None    # 任务执行线程
-        self.task_running = False  # 任务运行状态
-        self.log_signal = LogSignal()  # 日志信号
-        self.log_signal.log_updated.connect(self.update_log)  # 连接日志更新信号
-        self.config_manager = TaskConfigManager()  # 配置管理器
-        self.current_task_id = None  # 当前选中的任务ID
-        self.param_widgets = {}    # 参数控件字典
+        # 初始化管理器
+        self.config_manager = TaskConfigManager()
+        self.settings_manager = AppSettingsManager()
+        self.task_mapping = load_task_modules()
         
+        # UI状态变量
+        self.auto_instance = Auto()
+        self.task_thread = None
+        self.task_running = False
+        self.current_task_id = None
+        self.param_widgets = {}
+        self.sidebar_hidden = False
+        self.sidebar_dragging = False
+        self.sidebar_hovered = False
+        
+        # 初始化UI
         self.init_ui()
+        self.load_settings()
         
+        # 日志信号
+        self.log_signal = LogSignal()
+        self.log_signal.log_updated.connect(self.update_log)
+
     def init_ui(self):
-        """初始化UI界面"""
-        # 设置窗口基本属性 - 调整为1280*720
+        """初始化主窗口UI"""
         self.setWindowTitle("自动任务控制系统")
-        self.setGeometry(100, 100, 1280, 720)
-        self.setMinimumSize(1024, 600)  # 保持合理的最小尺寸
-        
-        # 创建中心部件
+        self.resize(*self.settings_manager.get_setting("window_size", [1280, 720]))
+        self.setMinimumSize(1024, 600)
+
+        # 主窗口布局
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-        main_layout.setSpacing(5)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # 侧边栏
+        self.init_sidebar()
+        main_layout.addWidget(self.sidebar)
+
+        # 主内容区域
+        self.stacked_widget = QStackedWidget()
+        self.init_main_interface()
+        self.init_settings_interface()
+        main_layout.addWidget(self.stacked_widget, 1)
+
+        # 根据设置初始化侧边栏状态
+        sidebar_visible = self.settings_manager.get_setting("sidebar_visible", True)
+        if not sidebar_visible:
+            self.collapse_sidebar()
+        else:
+            self.sidebar_hidden = False
+
+    def init_sidebar(self):
+        """初始化侧边栏"""
+        self.sidebar = QFrame()
+        self.sidebar.setFrameShape(QFrame.Shape.StyledPanel)
+        self.sidebar.setMinimumWidth(50)
+        self.sidebar.setMaximumWidth(300)
+        self.sidebar.setFixedWidth(self.settings_manager.get_setting("sidebar_width", 200))
         
-        # 创建顶部信息栏 - 保持紧凑
+        # 启用鼠标跟踪
+        self.sidebar.setMouseTracking(True)
+        self.sidebar.installEventFilter(self)
+
+        # 侧边栏布局 - 使用垂直布局
+        sidebar_layout = QVBoxLayout(self.sidebar)
+        sidebar_layout.setContentsMargins(5, 5, 5, 5)
+        sidebar_layout.setSpacing(5)
+
+        # 1. 主界面按钮 (放在顶部)
+        self.main_btn = QPushButton()
+        self.main_btn.setCheckable(True)
+        self.main_btn.setChecked(True)
+        self.main_btn.setIcon(QIcon.fromTheme("go-home"))
+        self.main_btn.setToolTip("主界面")
+        self.main_btn.setStyleSheet("padding: 8px;")
+        
+        # 2. 添加弹性空间 (将设置按钮推到最下面)
+        sidebar_layout.addWidget(self.main_btn)
+        sidebar_layout.addStretch(1)  # 这是关键，把下面的内容推到最底
+
+        # 3. 设置按钮 (放在最底部)
+        self.settings_btn = QPushButton()
+        self.settings_btn.setCheckable(True)
+        
+        # 确保使用齿轮图标（如果系统主题没有，使用内置图标）
+        if QIcon.hasThemeIcon("preferences-system"):
+            self.settings_btn.setIcon(QIcon.fromTheme("preferences-system"))  # 系统齿轮图标
+        else:
+            # 如果没有系统图标，可以使用内置资源或自定义图标
+            self.settings_btn.setIcon(QIcon(":/icons/settings.png"))  # 需要提供资源文件
+            # 或者使用文本替代
+            # self.settings_btn.setText("⚙")  # 齿轮符号
+        
+        self.settings_btn.setToolTip("设置")
+        self.settings_btn.setStyleSheet("padding: 8px;")
+
+        # 按钮组
+        self.button_group = QButtonGroup()
+        self.button_group.addButton(self.main_btn, 0)
+        self.button_group.addButton(self.settings_btn, 1)
+        self.button_group.buttonClicked.connect(self.on_sidebar_button_clicked)
+
+        # 添加到布局 (设置按钮已经在最下面)
+        sidebar_layout.addWidget(self.settings_btn)
+
+    def eventFilter(self, obj, event):
+        """处理侧边栏的事件"""
+        if obj == self.sidebar:
+            if event.type() == QEvent.Type.Enter:
+                self.sidebar_hovered = True
+                if self.sidebar.width() <= 50:
+                    self.expand_sidebar()
+                return True
+            elif event.type() == QEvent.Type.Leave:
+                self.sidebar_hovered = False
+                if not self.sidebar_dragging and self.stacked_widget.currentIndex() == 0:
+                    self.collapse_sidebar()
+                return True
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self.sidebar_dragging = True
+                return True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self.sidebar_dragging = False
+                    if not self.sidebar_hovered and self.stacked_widget.currentIndex() == 0:
+                        self.collapse_sidebar()
+                return True
+            elif event.type() == QEvent.Type.MouseMove and self.sidebar_dragging:
+                # 处理拖动调整宽度
+                pos = event.pos()
+                new_width = pos.x()
+                if new_width >= 50 and new_width <= 300:
+                    self.sidebar.setFixedWidth(new_width)
+                    self.settings_manager.set_setting("sidebar_width", new_width)
+                return True
+        return super().eventFilter(obj, event)
+
+    def expand_sidebar(self):
+        """展开侧边栏"""
+        width = self.settings_manager.get_setting("sidebar_width", 200)
+        self.sidebar.setFixedWidth(width)
+        self.main_btn.setText("主界面")
+        self.settings_btn.setText("设置")
+        self.sidebar_hidden = False
+
+    def collapse_sidebar(self):
+        """收缩侧边栏"""
+        if self.sidebar.width() > 50:  # 只有当前是展开状态时才保存宽度
+            self.settings_manager.set_setting("sidebar_width", self.sidebar.width())
+        self.sidebar.setFixedWidth(50)
+        self.main_btn.setText("")
+        self.settings_btn.setText("")
+        self.sidebar_hidden = True
+
+    def on_sidebar_button_clicked(self, button):
+        """侧边栏按钮点击事件"""
+        if button == self.main_btn:
+            self.stacked_widget.setCurrentIndex(0)
+            if not self.sidebar_hovered:
+                self.collapse_sidebar()
+        elif button == self.settings_btn:
+            self.stacked_widget.setCurrentIndex(1)
+            self.expand_sidebar()
+
+    def init_main_interface(self):
+        """初始化主界面"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # 顶部信息栏
         top_info = QLabel("任务控制系统 - 就绪状态")
         top_info.setStyleSheet("""
             background-color: #f0f0f0; 
@@ -162,21 +203,21 @@ class MainWindow(QMainWindow):
             border: 1px solid #ddd;
         """)
         top_info.setMaximumHeight(28)
-        main_layout.addWidget(top_info)
-        
-        # 创建水平分割器 - 主要内容区域
+        layout.addWidget(top_info)
+
+        # 主内容区域 (任务列表、参数配置、日志)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # 左侧任务列表区域
+        # 左侧 - 任务列表
         task_group = QGroupBox("可选任务 (勾选要执行的任务，可拖动排序)")
         task_layout = QVBoxLayout()
         
         self.task_list = QListWidget()
         self.task_list.setAlternatingRowColors(True)
-        self.task_list.itemClicked.connect(self.on_task_item_clicked)  # 任务点击事件
-        self.task_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)  # 允许内部拖动排序
-        self.task_list.itemChanged.connect(self.on_task_state_changed)  # 勾选状态变化
-        self.populate_task_list()  # 填充任务列表
+        self.task_list.itemClicked.connect(self.on_task_item_clicked)
+        self.task_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.task_list.itemChanged.connect(self.on_task_state_changed)
+        self.populate_task_list()
         
         # 全选/取消全选按钮
         select_layout = QHBoxLayout()
@@ -191,125 +232,348 @@ class MainWindow(QMainWindow):
         task_layout.addLayout(select_layout)
         task_layout.addWidget(self.task_list)
         task_group.setLayout(task_layout)
-        
-        # 中间参数配置区域
+
+        # 中间 - 参数配置
         self.param_group = QGroupBox("任务参数配置")
         self.param_layout = QVBoxLayout()
         
-        # 参数表单区域
         self.param_form = QFormLayout()
         self.param_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
         self.param_form.setSpacing(10)
         
-        # 参数描述
         self.param_desc = QLabel("请选择一个任务查看参数配置")
         self.param_desc.setWordWrap(True)
         self.param_desc.setStyleSheet("color: #666; font-style: italic; padding: 5px 0;")
         
-        # 保存按钮
         self.save_param_btn = QPushButton("保存参数")
         self.save_param_btn.clicked.connect(self.save_task_parameters)
         self.save_param_btn.setEnabled(False)
         
-        # 添加到参数布局
         self.param_layout.addWidget(self.param_desc)
         self.param_layout.addLayout(self.param_form)
         self.param_layout.addSpacing(10)
         self.param_layout.addWidget(self.save_param_btn)
         self.param_layout.addStretch(1)
         self.param_group.setLayout(self.param_layout)
-        
-        # 右侧日志区域
+
+        # 右侧 - 日志区域
         log_group = QGroupBox("执行日志")
         log_layout = QVBoxLayout()
         
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.log_display.setFont(QFont("SimHei", 9))  # 设置中文字体
+        self.log_display.setFont(QFont("SimHei", 9))
         log_layout.addWidget(self.log_display)
         log_group.setLayout(log_layout)
-        
-        # 添加到分割器 - 三栏1:1:1比例
+
+        # 添加三栏到分割器
         splitter.addWidget(task_group)
         splitter.addWidget(self.param_group)
         splitter.addWidget(log_group)
-        # 计算1:1:1的宽度分配 (1280减去边距约1280-30=1250，每栏约417)
         splitter.setSizes([417, 417, 417])
         
-        main_layout.addWidget(splitter, 1)  # 让中间区域占主要空间
-        
+        layout.addWidget(splitter, 1)
+
         # 进度条
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setMinimumHeight(25)
-        main_layout.addWidget(self.progress_bar)
-        
+        layout.addWidget(self.progress_bar)
+
         # 底部控制按钮
         control_layout = QHBoxLayout()
         control_layout.setSpacing(10)
         
         self.start_stop_btn = QPushButton("开始任务")
         self.clear_log_btn = QPushButton("清空日志")
-        
-        # 保存顺序按钮
-        self.save_order_btn = QPushButton("保存任务顺序")
-        self.save_order_btn.clicked.connect(self.save_task_order)
-        self.save_order_btn.setMinimumHeight(30)
-        self.save_order_btn.setMinimumWidth(120)
+        self.launch_game_btn = QPushButton("启动游戏")
         
         # 设置按钮大小
-        for btn in [self.start_stop_btn, self.clear_log_btn]:
+        for btn in [self.start_stop_btn, self.clear_log_btn, self.launch_game_btn]:
             btn.setMinimumHeight(30)
             btn.setMinimumWidth(90)
         
-        # 绑定按钮事件
+        # 连接信号
         self.start_stop_btn.clicked.connect(self.toggle_task)
         self.clear_log_btn.clicked.connect(self.clear_log)
+        self.launch_game_btn.clicked.connect(self.launch_game)
         
         control_layout.addWidget(self.start_stop_btn)
         control_layout.addWidget(self.clear_log_btn)
-        control_layout.addWidget(self.save_order_btn)
-        main_layout.addLayout(control_layout)
-    
-    def toggle_task(self):
-        """切换开始/停止任务状态"""
-        if self.task_running:
-            self.stop_task()
+        control_layout.addWidget(self.launch_game_btn)
+        layout.addLayout(control_layout)
+
+        # 添加到堆叠窗口
+        self.stacked_widget.addWidget(widget)
+
+    def launch_game(self):
+        """启动游戏"""
+        pc_game_path = self.settings_manager.get_setting("pc_game_path", "")
+        if not pc_game_path:
+            QMessageBox.warning(self, "警告", "请先在设置中配置PC游戏路径")
+            return
+        
+        try:
+            import subprocess
+            import os
+            
+            # 检查路径是否存在
+            if not os.path.exists(pc_game_path):
+                QMessageBox.critical(self, "错误", f"游戏路径不存在: {pc_game_path}")
+                return
+            
+            # 启动游戏
+            subprocess.Popen(pc_game_path)
+            self.log(f"已启动游戏: {pc_game_path}")
+            
+        except Exception as e:
+            self.log(f"启动游戏失败: {str(e)}")
+            QMessageBox.critical(self, "错误", f"启动游戏失败: {str(e)}")
+
+    def init_settings_interface(self):
+        """初始化设置界面 实时生效"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # 设置标题
+        title = QLabel("应用设置")
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title)
+
+        # 主题设置
+        theme_group = QGroupBox("主题设置")
+        theme_layout = QVBoxLayout()
+        
+        self.theme_light = QRadioButton("浅色主题")
+        self.theme_dark = QRadioButton("深色主题")
+        
+        theme = self.settings_manager.get_setting("theme", "light")
+        if theme == "dark":
+            self.theme_dark.setChecked(True)
         else:
-            # 立即更新按钮状态
-            self.start_stop_btn.setText("停止任务")
-            self.start_stop_btn.setEnabled(True)  # 确保按钮保持可用
-            # 然后开始任务
-            self.start_task()
-    
+            self.theme_light.setChecked(True)
+        
+        # 连接信号，实时生效
+        self.theme_light.toggled.connect(self.on_theme_changed)
+        self.theme_dark.toggled.connect(self.on_theme_changed)
+        
+        theme_layout.addWidget(self.theme_light)
+        theme_layout.addWidget(self.theme_dark)
+        theme_group.setLayout(theme_layout)
+
+        # 侧边栏设置
+        sidebar_group = QGroupBox("侧边栏设置")
+        sidebar_layout = QFormLayout()
+        
+        self.sidebar_width_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sidebar_width_slider.setMinimum(100)
+        self.sidebar_width_slider.setMaximum(300)
+        self.sidebar_width_slider.setValue(self.settings_manager.get_setting("sidebar_width", 200))
+        self.sidebar_width_slider.valueChanged.connect(self.on_sidebar_width_changed)
+        
+        sidebar_layout.addRow("侧边栏宽度:", self.sidebar_width_slider)
+        sidebar_group.setLayout(sidebar_layout)
+
+        # 新增游戏启动配置
+        game_group = QGroupBox("游戏启动配置")
+        game_layout = QFormLayout()
+        
+        # PC游戏路径设置
+        self.pc_game_path_edit = QLineEdit()
+        self.pc_game_path_edit.setText(self.settings_manager.get_setting("pc_game_path", ""))
+        self.pc_game_path_edit.textChanged.connect(lambda: self.settings_manager.set_setting("pc_game_path", self.pc_game_path_edit.text()))
+        
+        pc_game_path_btn = QPushButton("浏览...")
+        pc_game_path_btn.clicked.connect(self.browse_pc_game_path)
+        
+        pc_path_layout = QHBoxLayout()
+        pc_path_layout.addWidget(self.pc_game_path_edit)
+        pc_path_layout.addWidget(pc_game_path_btn)
+        game_layout.addRow("PC游戏路径:", pc_path_layout)
+        
+        # 模拟器路径设置
+        self.emulator_path_edit = QLineEdit()
+        self.emulator_path_edit.setText(self.settings_manager.get_setting("emulator_path", ""))
+        self.emulator_path_edit.textChanged.connect(lambda: self.settings_manager.set_setting("emulator_path", self.emulator_path_edit.text()))
+        
+        emulator_path_btn = QPushButton("浏览...")
+        emulator_path_btn.clicked.connect(self.browse_emulator_path)
+        
+        emulator_path_layout = QHBoxLayout()
+        emulator_path_layout.addWidget(self.emulator_path_edit)
+        emulator_path_layout.addWidget(emulator_path_btn)
+        game_layout.addRow("模拟器路径:", emulator_path_layout)
+        
+        game_group.setLayout(game_layout)
+
+        # 添加到主布局
+        layout.addWidget(theme_group)
+        layout.addWidget(sidebar_group)
+        layout.addWidget(game_group)
+        layout.addStretch(1)
+
+        # 添加到堆叠窗口
+        self.stacked_widget.addWidget(widget)
+
+    def browse_pc_game_path(self):
+        """浏览选择PC游戏路径"""
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择PC游戏可执行文件",
+            "",
+            "可执行文件 (*.exe);;所有文件 (*)"
+        )
+        if path:
+            self.pc_game_path_edit.setText(path)
+
+    def browse_emulator_path(self):
+        """浏览选择模拟器路径"""
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择模拟器可执行文件",
+            "",
+            "可执行文件 (*.exe);;所有文件 (*)"
+        )
+        if path:
+            self.emulator_path_edit.setText(path)
+
+    def on_theme_changed(self):
+        """主题变更实时处理"""
+        theme = "dark" if self.theme_dark.isChecked() else "light"
+        self.settings_manager.set_setting("theme", theme)
+        self.apply_theme(theme)
+
+    def on_sidebar_width_changed(self, width):
+        """侧边栏宽度变更实时处理"""
+        if not self.sidebar_hidden:  # 只有在侧边栏展开时才更新宽度
+            self.sidebar.setFixedWidth(width)
+        self.settings_manager.set_setting("sidebar_width", width)
+
+    def update_sidebar_width(self, width):
+        """更新侧边栏宽度"""
+        if not self.sidebar_hidden:  # 只有在侧边栏展开时才更新宽度
+            self.sidebar.setFixedWidth(width)
+        self.settings_manager.set_setting("sidebar_width", width)
+
+    def on_task_item_clicked(self, item):
+        """处理任务项点击事件"""
+        task_id = item.data(Qt.ItemDataRole.UserRole)
+        self.current_task_id = task_id
+        self.load_task_parameters(task_id)
+
+    def on_task_state_changed(self, item):
+        """当任务勾选状态变化时，自动保存状态"""
+        task_ids, task_states = self.get_current_task_order_and_states()
+        self.config_manager.save_task_order_and_states(task_ids, task_states)
+
     def populate_task_list(self):
-        """填充任务列表，按照上次保存的顺序和勾选状态"""
-        # 获取保存的任务顺序和状态
-        task_order = self.config_manager.get_task_order()
-        task_states = self.config_manager.get_task_states()
+        """填充任务列表"""
+        task_order = self.config_manager.get_task_order() or list(self.task_mapping.keys())
+        task_states = self.config_manager.get_task_states() or {task_id: False for task_id in self.task_mapping}
         
-        # 确保所有任务都在列表中
-        all_task_ids = set(TASK_MAPPING.keys())
+        all_task_ids = set(self.task_mapping.keys())
         ordered_tasks = [tid for tid in task_order if tid in all_task_ids]
-        # 添加不在顺序列表中的新任务
-        for task_id in all_task_ids - set(ordered_tasks):
-            ordered_tasks.append(task_id)
+        ordered_tasks += [tid for tid in all_task_ids - set(ordered_tasks)]
         
-        self.task_list.clear()  # 清空列表以确保不会重复添加
-        
+        self.task_list.clear()
         for task_id in ordered_tasks:
-            task_info = TASK_MAPPING.get(task_id)
+            task_info = self.task_mapping.get(task_id)
             if task_info:
                 item = QListWidgetItem(task_info["name"])
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDragEnabled)
-                # 设置上次保存的勾选状态
                 checked_state = Qt.CheckState.Checked if task_states.get(task_id, False) else Qt.CheckState.Unchecked
                 item.setCheckState(checked_state)
-                item.setData(Qt.ItemDataRole.UserRole, task_id)  # 存储任务ID
+                item.setData(Qt.ItemDataRole.UserRole, task_id)
                 self.task_list.addItem(item)
-    
+
+    def load_task_parameters(self, task_id):
+        """加载任务参数到表单"""
+        self.clear_param_form()
+        task_info = self.task_mapping.get(task_id)
+        if not task_info or not task_info.get('parameters'):
+            self.param_desc.setText("该任务没有可配置的参数")
+            self.save_param_btn.setEnabled(False)
+            return
+        
+        self.param_desc.setText(f"任务描述: {task_info.get('description', '无描述')}")
+        saved_params = self.config_manager.get_task_config(task_id)
+        self.param_widgets = {}
+        
+        for param in task_info['parameters']:
+            param_name = param['name']
+            param_type = param['type']
+            param_default = param['default']
+            
+            label = QLabel(f"{param_name}:")
+            label.setToolTip(param['annotation'])
+            
+            if param_type == 'int':
+                widget = QSpinBox()
+                widget.setMinimum(-1000000)
+                widget.setMaximum(1000000)
+                widget.setValue(saved_params.get(param_name, param_default) if param_default is not None else 0)
+            elif param_type == 'float':
+                widget = QDoubleSpinBox()
+                widget.setMinimum(-1000000.0)
+                widget.setMaximum(1000000.0)
+                widget.setDecimals(2)
+                widget.setValue(saved_params.get(param_name, param_default) if param_default is not None else 0.0)
+            elif param_type == 'bool':
+                widget = QCheckBox()
+                widget.setChecked(saved_params.get(param_name, param_default) if param_default is not None else False)
+            else:
+                widget = QLineEdit()
+                widget.setText(str(saved_params.get(param_name, param_default)) if param_default is not None else "")
+            
+            widget.setEnabled(not self.task_running)
+            self.param_form.addRow(label, widget)
+            self.param_widgets[param_name] = widget
+        
+        self.save_param_btn.setEnabled(True)
+
+    def clear_param_form(self):
+        """清空参数表单"""
+        while self.param_form.rowCount() > 0:
+            self.param_form.removeRow(0)
+        self.param_widgets = {}
+
+    def save_task_parameters(self):
+        """保存任务参数配置"""
+        if not self.current_task_id or not self.param_widgets:
+            return
+        
+        task_info = self.task_mapping.get(self.current_task_id)
+        if not task_info:
+            return
+        
+        params = {}
+        for param in task_info['parameters']:
+            param_name = param['name']
+            widget = self.param_widgets.get(param_name)
+            
+            if widget is None:
+                continue
+                
+            if isinstance(widget, QSpinBox):
+                params[param_name] = widget.value()
+            elif isinstance(widget, QDoubleSpinBox):
+                params[param_name] = widget.value()
+            elif isinstance(widget, QCheckBox):
+                params[param_name] = widget.isChecked()
+            elif isinstance(widget, QLineEdit):
+                params[param_name] = widget.text()
+        
+        if self.config_manager.save_task_config(self.current_task_id, params):
+            self.log(f"任务 '{task_info['name']}' 的参数已保存")
+        else:
+            self.log(f"任务 '{task_info['name']}' 的参数保存失败")
+
     def get_current_task_order_and_states(self):
         """获取当前任务顺序和勾选状态"""
         task_ids = []
@@ -322,143 +586,29 @@ class MainWindow(QMainWindow):
             task_states[task_id] = item.checkState() == Qt.CheckState.Checked
             
         return task_ids, task_states
-    
-    def save_task_order(self):
-        """保存任务顺序和勾选状态到配置文件"""
-        task_ids, task_states = self.get_current_task_order_and_states()
-        if self.config_manager.save_task_order_and_states(task_ids, task_states):
-            self.log("任务顺序和状态已保存")
-        else:
-            self.log("保存任务顺序和状态失败")
-    
+
     def select_all_tasks(self):
         """全选任务"""
         for i in range(self.task_list.count()):
             item = self.task_list.item(i)
             item.setCheckState(Qt.CheckState.Checked)
-    
+
     def deselect_all_tasks(self):
         """取消全选任务"""
         for i in range(self.task_list.count()):
             item = self.task_list.item(i)
             item.setCheckState(Qt.CheckState.Unchecked)
-    
-    def on_task_item_clicked(self, item):
-        """处理任务项点击事件，显示参数配置"""
-        task_id = item.data(Qt.ItemDataRole.UserRole)
-        self.current_task_id = task_id
-        self.load_task_parameters(task_id)
-    
-    def on_task_state_changed(self, item):
-        """当任务勾选状态变化时，保存状态"""
-        # 只在有任务ID时保存
-        if self.current_task_id:
-            self.save_task_order()
-    
-    def clear_param_form(self):
-        """清空参数表单"""
-        while self.param_form.rowCount() > 0:
-            self.param_form.removeRow(0)
-        self.param_widgets = {}  # 清空参数控件字典
-    
-    def load_task_parameters(self, task_id):
-        """加载任务参数到表单"""
-        self.clear_param_form()
-        
-        task_info = TASK_MAPPING.get(task_id)
-        if not task_info or not task_info.get('parameters'):
-            self.param_desc.setText("该任务没有可配置的参数")
-            self.save_param_btn.setEnabled(False)
-            return
-        
-        # 显示任务描述
-        self.param_desc.setText(f"任务描述: {task_info.get('description', '无描述')}")
-        
-        # 获取保存的参数配置
-        saved_params = self.config_manager.get_task_config(task_id)
-        
-        self.param_widgets = {}
-        
-        # 添加参数控件
-        for param in task_info['parameters']:
-            param_name = param['name']
-            param_type = param['type']
-            param_default = param['default']
-            param_annotation = param['annotation']
-            
-            # 创建对应的输入控件
-            label = QLabel(f"{param_name}:")
-            label.setToolTip(param_annotation)
-            
-            # 根据参数类型创建不同的控件
-            if param_type == 'int':
-                widget = QSpinBox()
-                if param_default is not None:
-                    widget.setMinimum(-1000000)
-                    widget.setMaximum(1000000)
-                    widget.setValue(saved_params.get(param_name, param_default))
-            elif param_type == 'float':
-                widget = QDoubleSpinBox()
-                if param_default is not None:
-                    widget.setMinimum(-1000000.0)
-                    widget.setMaximum(1000000.0)
-                    widget.setDecimals(2)
-                    widget.setValue(saved_params.get(param_name, param_default))
-            elif param_type == 'bool':
-                widget = QCheckBox()
-                widget.setChecked(saved_params.get(param_name, param_default))
-            else:  # 默认为字符串
-                widget = QLineEdit()
-                if param_default is not None:
-                    widget.setText(str(saved_params.get(param_name, param_default)))
-            
-            # 根据任务运行状态设置是否可编辑
-            widget.setEnabled(not self.task_running)
-            
-            self.param_form.addRow(label, widget)
-            self.param_widgets[param_name] = widget
-        
-        self.save_param_btn.setEnabled(True)
-    
-    def save_task_parameters(self):
-        """保存任务参数配置"""
-        if not self.current_task_id or not self.param_widgets:
-            return
-        
-        task_info = TASK_MAPPING.get(self.current_task_id)
-        if not task_info:
-            return
-        
-        # 收集参数值
-        params = {}
-        for param in task_info['parameters']:
-            param_name = param['name']
-            param_type = param['type']
-            widget = self.param_widgets.get(param_name)
-            
-            if widget is None:
-                continue
-                
-            # 根据控件类型获取值
-            if isinstance(widget, QSpinBox):
-                params[param_name] = widget.value()
-            elif isinstance(widget, QDoubleSpinBox):
-                params[param_name] = widget.value()
-            elif isinstance(widget, QCheckBox):
-                params[param_name] = widget.isChecked()
-            elif isinstance(widget, QLineEdit):
-                params[param_name] = widget.text()
-        
-        # 保存参数
-        if self.config_manager.save_task_config(self.current_task_id, params):
-            self.log(f"任务 '{task_info['name']}' 的参数已保存")
+
+    def toggle_task(self):
+        """切换开始/停止任务状态"""
+        if self.task_running:
+            self.stop_task()
         else:
-            self.log(f"任务 '{task_info['name']}' 的参数保存失败")
-    
+            self.start_task()
+
     def start_task(self):
         """开始执行选中的任务"""
         try:
-            # 获取选中的任务
             selected_tasks = []
             for i in range(self.task_list.count()):
                 item = self.task_list.item(i)
@@ -469,36 +619,24 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "警告", "请至少选择一个任务")
                 return
             
-            # 立即更新UI状态 - 这是关键修改点
-            self.task_running = True
-            self.start_stop_btn.setText("停止任务")
-            self.task_list.setEnabled(False)
-            self.select_all_btn.setEnabled(False)
-            self.deselect_all_btn.setEnabled(False)
-            self.save_param_btn.setEnabled(False)
-            self.save_order_btn.setEnabled(False)
-            
-            # 禁用所有参数控件
-            for widget in self.param_widgets.values():
-                widget.setEnabled(False)
-            
+            self.set_task_running_state(True)
             self.log(f"开始执行任务，共 {len(selected_tasks)} 个任务")
             
-            # 创建全局Auto实例
-            self.auto_instance = Auto()
             if not self.auto_instance.add_device():
-                error_msg = f"设备添加失败: {self.auto_instance.last_error}"
-                self.log(error_msg)
-                QMessageBox.critical(self, "设备错误", error_msg)
-                self.reset_task_state()
-                return
+                raise Exception(f"设备添加失败: {self.auto_instance.last_error}")
             
             self.auto_instance.start()
             self.log("设备连接成功，准备执行任务")
             
-            # 启动任务线程
+            # 创建并启动任务线程
+            from task_manager import TaskWorker
             self.task_thread = QThread()
-            self.task_worker = TaskWorker(self.auto_instance, selected_tasks, self.config_manager)
+            self.task_worker = TaskWorker(
+                self.auto_instance, 
+                selected_tasks, 
+                self.config_manager,
+                self.task_mapping
+            )
             self.task_worker.moveToThread(self.task_thread)
             self.task_worker.log_signal.connect(self.log)
             self.task_worker.progress_signal.connect(self.update_progress)
@@ -510,130 +648,133 @@ class MainWindow(QMainWindow):
             self.log(f"启动任务时发生错误: {str(e)}")
             self.reset_task_state()
             QMessageBox.critical(self, "错误", f"启动任务时发生错误: {str(e)}")
-    
+
     def stop_task(self):
         """停止当前任务"""
         if not self.task_running:
             return
             
         self.log("收到停止指令，正在终止任务...")
-        # 立即禁用按钮
         self.start_stop_btn.setEnabled(False)
         if self.auto_instance:
             self.auto_instance.set_should_stop(True)
-    
+
     def on_task_finished(self):
         """任务完成后的处理"""
         self.reset_task_state()
-        # 确保Auto实例被正确释放
-        if self.auto_instance:
-            self.auto_instance.stop()
-            self.auto_instance = None
         self.log("所有任务执行完毕")
-    
+
     def reset_task_state(self):
         """重置任务状态和UI"""
-        self.task_running = False
-        self.start_stop_btn.setText("开始任务")
-        self.start_stop_btn.setEnabled(True)
-        self.task_list.setEnabled(True)
-        self.select_all_btn.setEnabled(True)
-        self.deselect_all_btn.setEnabled(True)
-        self.save_order_btn.setEnabled(True)
+        self.set_task_running_state(False)
         self.progress_bar.setValue(0)
         
-        # 启用参数保存按钮和控件
-        self.save_param_btn.setEnabled(self.current_task_id is not None)
-        for widget in self.param_widgets.values():
-            widget.setEnabled(True)
+        if self.auto_instance:
+            self.auto_instance.stop()
         
-        self.log("任务执行已停止")
-        
-        # 清理线程
         if self.task_thread and self.task_thread.isRunning():
             self.task_thread.quit()
             self.task_thread.wait()
-    
+        
+        self.start_stop_btn.setEnabled(True)
+
+    def set_task_running_state(self, running):
+        """设置任务运行状态"""
+        self.task_running = running
+        self.start_stop_btn.setText("停止任务" if running else "开始任务")
+        self.task_list.setEnabled(not running)
+        self.select_all_btn.setEnabled(not running)
+        self.deselect_all_btn.setEnabled(not running)
+        self.save_param_btn.setEnabled(not running and self.current_task_id is not None)
+        self.launch_game_btn.setEnabled(not running)
+        
+        for widget in self.param_widgets.values():
+            widget.setEnabled(not running)
+
+    def apply_theme(self, theme):
+        """应用主题"""
+        if theme == "dark":
+            dark_style = """
+                QWidget {
+                    background-color: #333;
+                    color: #EEE;
+                }
+                QGroupBox {
+                    border: 1px solid #555;
+                    border-radius: 5px;
+                    margin-top: 10px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 3px;
+                }
+                QPushButton {
+                    background-color: #555;
+                    border: 1px solid #666;
+                    padding: 5px;
+                    border-radius: 3px;
+                }
+                QPushButton:hover {
+                    background-color: #666;
+                }
+                QPushButton:pressed {
+                    background-color: #777;
+                }
+                QListWidget {
+                    background-color: #444;
+                    border: 1px solid #555;
+                }
+                QTextEdit {
+                    background-color: #444;
+                    border: 1px solid #555;
+                }
+            """
+            self.setStyleSheet(dark_style)
+        else:
+            self.setStyleSheet("")
+
+    def load_settings(self):
+        """加载设置并应用"""
+        theme = self.settings_manager.get_setting("theme", "light")
+        self.apply_theme(theme)
+
     def log(self, message):
         """添加日志信息"""
         self.log_display.append(message)
-        # 滚动到最新日志
         self.log_display.moveCursor(QTextCursor.MoveOperation.End)
-    
+
     def update_log(self, message):
-        """通过信号槽更新日志（线程安全）"""
+        """通过信号槽更新日志"""
         self.log(message)
-    
-    def update_progress(self, value):
-        """更新进度条"""
-        self.progress_bar.setValue(value)
-    
+
     def clear_log(self):
         """清空日志显示"""
         self.log_display.clear()
 
-class TaskWorker(QThread):
-    log_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int)
-    finished = pyqtSignal()
-    
-    def __init__(self, auto_instance, selected_tasks, config_manager):
-        super().__init__()
-        self.auto_instance = auto_instance
-        self.selected_tasks = selected_tasks
-        self.config_manager = config_manager
-        self.should_stop = False
-    
-    def run(self):
-        try:
-            # 登录游戏（如果未包含在选中任务中，则自动执行）
-            if "login" not in self.selected_tasks:
-                self.log_signal.emit("执行登录流程...")
-                from auto_tasks.pc.login import login
-                if not login(self.auto_instance):
-                    self.log_signal.emit("登录失败，终止任务执行")
-                    self.finished.emit()
-                    return
-            
-            total_tasks = len(self.selected_tasks)
-            for index, task_id in enumerate(self.selected_tasks):
-                # 检查是否需要停止
-                if self.auto_instance.check_should_stop():
-                    self.log_signal.emit("任务被用户中断")
-                    break
-                
-                # 更新进度
-                progress = int((index / total_tasks) * 100)
-                self.progress_signal.emit(progress)
-                
-                # 执行任务
-                task_info = TASK_MAPPING.get(task_id)
-                if not task_info:
-                    self.log_signal.emit(f"未知任务: {task_id}")
-                    continue
-                
-                self.log_signal.emit(f"===== 开始执行: {task_info['name']} =====")
-                try:
-                    task_func = task_info["function"]
-                    # 获取任务参数
-                    task_params = self.config_manager.get_task_config(task_id)
-                    # 执行任务，传入参数
-                    success = task_func(self.auto_instance, **task_params)
-                    result = "成功" if success else "失败"
-                    self.log_signal.emit(f"{task_info['name']} 执行{result}")
-                except Exception as e:
-                    self.log_signal.emit(f"{task_info['name']} 执行出错: {str(e)}")
-            
-            self.log_signal.emit("所有任务执行完毕")
-            self.progress_signal.emit(100)
-            
-        except Exception as e:
-            self.log_signal.emit(f"任务执行框架错误: {str(e)}")
-        finally:
-            # 确保资源释放
-            generate_report(__file__)
-            self.finished.emit()
-            
+    def update_progress(self, value):
+        """更新进度条"""
+        self.progress_bar.setValue(value)
+
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        # 保存窗口大小
+        self.settings_manager.set_setting("window_size", [self.width(), self.height()])
+        
+        # 停止正在运行的任务
+        if self.task_running:
+            self.stop_task()
+        
+        # 确保auto_instance被正确清理
+        if self.auto_instance:
+            self.auto_instance.stop()
+            self.auto_instance = None
+        
+        # 保存其他设置
+        self.settings_manager.save_settings()
+        
+        super().closeEvent(event)
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()

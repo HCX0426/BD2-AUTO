@@ -1,6 +1,6 @@
 import time
 from auto_control import Auto
-from auto_tasks.pc.public import back_to_main
+from auto_tasks.pc.public import back_to_main, back_to_map
 
 
 def login(auto: Auto, timeout: int = 300) -> bool:
@@ -30,7 +30,7 @@ def login(auto: Auto, timeout: int = 300) -> bool:
                 if pos := auto.check_element_exist("login/开始游戏"):
                     logger.info("检测到开始游戏按钮，点击进入")
                     auto.click(pos,time=3)
-                    auto.sleep(7)
+                    auto.sleep(3)
                 state = "main_check"
                 continue
                 
@@ -43,43 +43,21 @@ def login(auto: Auto, timeout: int = 300) -> bool:
                 
             # 处理各种弹窗
             if state == "popup_handling":
-                popup_handled = False
-                
-                # 检查并关闭各种弹窗
-                if auto.check_element_exist("login/登录奖励X"):
-                    logger.info("关闭登录奖励弹窗")
-                    auto.template_click("login/登录奖励X")
-                    popup_handled = True
-                    
-                if auto.check_element_exist("login/公告X"):
-                    logger.info("关闭公告弹窗")
-                    auto.template_click("login/公告X")
-                    popup_handled = True
-                    
-                # 每日收集处理
-                if auto.check_element_exist("public/每日收集"):
-                    logger.info("处理每日收集")
-                    auto.template_click("public/每日收集")
-                    popup_handled = True
-                
-                if popup_handled:
-                    auto.sleep(1)
+                if back_to_map(auto):
+                    logger.info("成功返回地图")
+                    state = "completed"
                     continue
-                
-                # 没有弹窗需要处理，确认主界面状态
+
+            if state == "completed":
                 if back_to_main(auto):
                     logger.info("所有弹窗处理完成，返回主界面成功")
                     return True
-                
-                logger.warning("弹窗处理后未能确认主界面状态")
-                state = "main_check"
-                continue
-                
+                else:
+                    logger.warning("返回主界面失败")
+                    return False
             auto.sleep(0.5)
-
         logger.error("登录流程超时")
         return False
-        
     except Exception as e:
         logger.error(f"登录过程中发生错误: {e}")
         return False

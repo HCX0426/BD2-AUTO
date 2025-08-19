@@ -76,15 +76,22 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     if pos := auto.check_element_exist("get_pvp/选项完成"):
                         logger.info("开始战斗")
                         auto.click(pos, time=2)
-                        auto.sleep(10)
+                        auto.click(pos, time=2)
                         state = "battle_prepared"
                 continue
                 
             # 战斗处理
             if state == "battle_prepared":
                 # 检查是否仍在战斗中
-                if pos := auto.check_element_exist("get_pvp/选项完成"):
-                    logger.info("战斗仍在进行中")
+                # 设置MAX次数
+                if pos := auto.text_click("MAX", click=False):
+                    logger.info("设置MAX战斗次数")
+                    auto.click(pos)
+                    auto.sleep(1)
+                    if pos := auto.check_element_exist("get_pvp/选项完成"):
+                        logger.info("开始战斗")
+                        auto.click(pos, time=2)
+                        auto.click(pos, time=2)
                     continue
                 
                 # 处理战斗结果
@@ -100,6 +107,9 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     auto.click(pos, time=3)
                     auto.sleep(3)
                     state = "battle_completed"
+                else:
+                    logger.info("战斗进行中")
+                    auto.sleep(10)
                 continue
                 
             # 返回主界面

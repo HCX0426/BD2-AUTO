@@ -87,6 +87,35 @@ class Auto:
 
     # ======================== 设备管理方法 ========================
 
+    def start_program(
+        self,
+        program_path: str,
+        args: str = "",
+        connect_timeout: float = 15.0,
+        device_uri: Optional[str] = None
+    ) -> bool:
+        """启动程序并自动连接设备
+        
+        Args:
+            program_path: 程序路径
+            args: 启动参数
+            connect_timeout: 连接超时时间
+            device_uri: 设备URI
+        
+        Returns:
+            是否成功
+        """
+        device = self._get_device(device_uri)
+        if not device:
+            self.last_error = "设备未找到"
+            return False
+            
+        try:
+            return device.start_program(program_path, args, connect_timeout)
+        except Exception as e:
+            self.last_error = str(e)
+            return False
+
     def add_device(self, device_uri: str = DEFAULT_DEVICE_URI, timeout: float = 10.0) -> bool:
         """添加设备并自动更新分辨率"""
         try:

@@ -3,13 +3,13 @@ from auto_control import Auto
 from auto_tasks.pc.public import back_to_main, click_back
 
 
-def pass_activity(auto: Auto, timeout: int = 600) -> bool:
+def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") -> bool:
     """活动关卡扫荡
     
     Args:
         auto: Auto控制对象
         timeout: 超时时间(秒)
-        
+        level_name: 活动关卡名称
     Returns:
         bool: 是否成功完成活动关卡扫荡
     """
@@ -53,8 +53,8 @@ def pass_activity(auto: Auto, timeout: int = 600) -> bool:
                     state == "entered"
                     continue
                 
-                if pos := auto.check_element_exist("pass_activity/困难第15关"):
-                    logger.info("选择困难第15关")
+                if pos := auto.check_element_exist(f"pass_activity/{level_name}"):
+                    logger.info(f"选择{level_name}")
                     auto.click(pos, time=2)
                     auto.sleep(1)
                     

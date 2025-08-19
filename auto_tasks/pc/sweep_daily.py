@@ -35,16 +35,18 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
             # 检查主界面
             if not state['main_checked']:
                 if back_to_main(auto):
+                    logger.info("成功返回主界面")
                     state['main_checked'] = True
                 continue
             
             # 进入扫荡界面
             if not state['sweep_entered']:
-                if pos := auto.check_element_exist("sweep_daily/扫荡标识"):
-                    logger.info("检测到扫荡标识")
-                    auto.click(pos)
+                logger.info("开始检测扫荡标识")
+                if pos := auto.text_click("快速狩猎",click=False):
+                    logger.info("检测到快速狩猎标识")
+                    auto.click(pos,time=3)
                     auto.sleep(5)
-                    if auto.check_element_exist("sweep_daily/快速狩猎"):
+                    if auto.text_click("野猪洞穴",click=False):
                         logger.info("进入到扫荡界面")
                         auto.sleep(1)
                         state['sweep_entered'] = True

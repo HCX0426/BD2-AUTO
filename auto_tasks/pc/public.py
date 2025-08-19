@@ -32,10 +32,6 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
                 
             if _handle_confirmation_dialogs(auto):
                 continue
-                
-            # 默认返回方式
-            auto.key_press("esc")
-            auto.sleep(1)
             
             # 检查返回是否成功
             if auto.check_element_exist("public/主界面"):
@@ -43,6 +39,17 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
                 
             # 备用返回方式
             _try_alternative_back_methods(auto)
+
+            end_game_pos = auto.text_click("结束游戏", click=False)
+            if end_game_pos:
+                cancel_pos = auto.text_click("取消", click=False)
+                if cancel_pos:
+                    auto.click(cancel_pos)
+                    auto.sleep(1)
+                    auto.key_press("h")
+                    # 检查返回是否成功
+                    if auto.check_element_exist("public/主界面"):
+                        return True
             
             attempt += 1
             auto.sleep(1)
@@ -62,18 +69,22 @@ def _handle_return_identifiers(auto: Auto) -> bool:
     if dodge_pos or map_pos:
         if daily_pos := auto.check_element_exist("public/每日收集"):
             auto.click(daily_pos)
-            auto.sleep(2)
+            auto.sleep(1)
         auto.key_press("h")
         auto.sleep(1)
         return True
-    return False
+    else:
+        auto.key_press("esc")
+        auto.sleep(1)
+        return False
 
 def _handle_confirmation_dialogs(auto: Auto) -> bool:
     """处理确认对话框"""
     confirm_pos = auto.text_click("确认", click=False)
-    if confirm_pos:
+    end_game_pos = auto.text_click("结束游戏", click=False)
+    if confirm_pos and not end_game_pos:
         auto.click(confirm_pos)
-        auto.sleep(2)
+        auto.sleep(1)
         return True
     return False
 
@@ -87,13 +98,40 @@ def _try_alternative_back_methods(auto: Auto):
     elif back_btn2:
         auto.click(back_btn2)
         
-    end_game_pos = auto.text_click("结束游戏", click=False)
-    if end_game_pos:
-        cancel_pos = auto.text_click("取消", click=False)
-        if cancel_pos:
-            auto.click(cancel_pos)
-            auto.sleep(1)
-            auto.key_press("h")
+
+def back_to_map(auto: Auto, timeout: int = 30) -> bool:
+    """
+    返回地图
+    
+    Args:
+        auto: Auto控制实例
+        timeout: 超时时间(秒)
+    Returns:
+        bool: 是否成功返回地图
+    """
+    logger = auto.get_task_logger("back_to_map")
+    start_time = time.time()
+    try:
+        while time.time() - start_time < timeout:
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
+            
+            dodge_pos = auto.check_element_exist("public/闪避标识")
+            map_pos = auto.check_element_exist("public/地图标识")
+
+            if dodge_pos or map_pos:
+                logger.info("已在地图")
+                return True
+            else:
+                auto.key_press("esc")
+                
+            logger.debug("未检测到地图标识或地图按钮")
+            return False
+    except Exception as e:
+        logger.error(f"返回地图时发生错误: {e}")
+        return False
+
 
 def wait_load(auto: Auto, timeout: int = 10) -> bool:
     """
@@ -135,9 +173,9 @@ def click_back(auto: Auto) -> bool:
     logger = auto.get_task_logger("click_back")
     
     try:
-        if pos := auto.text_click("点击画面即可返回"):
+        if auto.text_click("点击画面即可返回"):
             logger.debug("点击画面返回成功")
-            auto.sleep(2)
+            auto.sleep(1)
             return True
             
         logger.debug("未检测到点击画面返回提示")

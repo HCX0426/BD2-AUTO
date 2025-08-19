@@ -10,7 +10,7 @@ import win32gui
 import win32ui
 from airtest.core.api import Template, connect_device, exists, paste
 from airtest.core.api import sleep as air_sleep
-from airtest.core.api import swipe, touch, wait
+from airtest.core.api import touch, wait
 from airtest.core.helper import log, logwrap
 from PIL import Image
 

@@ -42,6 +42,11 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         auto.click(pos, time=2)
                         auto.sleep(3)
                         state = "filter_set"
+                    else:
+                        logger.error("装备标识不存在")
+                        if auto.text_click("背包",click=False):
+                            logger.error("未进入背包界面")
+                            state = "init"
                     continue
                 
                 if state == "filter_set":
@@ -53,7 +58,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                             auto.click(pos)
                             logger.info("选择R装备")
                             auto.sleep(2)
-                            if auto.text_click("确认"):
+                            if auto.text_click("确认",time=3):
                                 logger.info("确认筛选条件")
                                 auto.sleep(3)
                                 state = "confirm"
@@ -109,18 +114,18 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if pos := auto.check_element_exist("intensive_decomposition/筛选标识"):
                         logger.info("打开筛选界面")
                         auto.click(pos)
-                        auto.sleep(2)
+                        auto.sleep(1)
                         if pos := auto.check_element_exist("intensive_decomposition/UR"):
                             auto.click(pos)
-                            auto.sleep(2)
+                            auto.sleep(1)
                             if pos := auto.check_element_exist("intensive_decomposition/满等级"):
                                 auto.click(pos)
-                                auto.sleep(2)
+                                auto.sleep(1)
                                 if pos := auto.check_element_exist("intensive_decomposition/制作"):
                                     auto.click(pos)
-                                    auto.sleep(2)
-                                    if auto.text_click("确认"):
-                                        auto.sleep(3)
+                                    auto.sleep(1)
+                                    if auto.text_click("确认",time=3):
+                                        auto.sleep(1)
                                         state = "confirm"
                     continue
                 
@@ -150,7 +155,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                             auto.click(pos)
                             auto.sleep(5)
                         if auto.text_click("确认"):
-                            auto.sleep(3)
+                            auto.sleep(2)
                             state = "complete"
                     continue
                 
