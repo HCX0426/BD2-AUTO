@@ -62,6 +62,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                                 logger.info("确认筛选条件")
                                 auto.sleep(3)
                                 state = "confirm"
+                    else:
+                        logger.error("筛选标识不存在")
+                        state = "bag_opened"
                     continue
                 
                 if state == "confirm":

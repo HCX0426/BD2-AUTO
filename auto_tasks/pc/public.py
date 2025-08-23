@@ -68,6 +68,7 @@ def _handle_return_identifiers(auto: Auto) -> bool:
     
     if dodge_pos or map_pos:
         if daily_pos := auto.check_element_exist("public/每日收集"):
+            auto.key_press("a",1)
             auto.click(daily_pos)
             auto.sleep(1)
         auto.key_press("h")
