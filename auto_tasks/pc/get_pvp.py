@@ -71,7 +71,7 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                 # 设置MAX次数
                 if pos := auto.text_click("MAX", click=False):
                     logger.info("设置MAX战斗次数")
-                    auto.click(pos)
+                    auto.click(pos,time=2)
                     auto.sleep(1)
                     if pos := auto.check_element_exist("get_pvp/选项完成"):
                         logger.info("开始战斗")

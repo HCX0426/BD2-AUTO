@@ -72,6 +72,11 @@ def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
                     auto.click(pos, time=2)
                     auto.sleep(1)
                     continue
+
+                if pos := auto.text_click("点击画面关闭",click=False):
+                    logger.info("点击画面关闭")
+                    auto.click(pos,time=2)
+                    continue
                 
                 if click_back(auto):
                     logger.info("点击返回")
