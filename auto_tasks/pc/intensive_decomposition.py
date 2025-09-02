@@ -147,12 +147,12 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                 if state == "execute":
                     if auto.text_click("连续精炼"):
                         logger.info("开始连续精炼")
-                        auto.sleep(1)
+                        auto.sleep(3)
                         if pos := auto.check_element_exist("intensive_decomposition/加十"):
                             auto.click(pos)
                             auto.sleep(1)
                             if pos := auto.check_element_exist("intensive_decomposition/精炼"):
-                                auto.click(pos)
+                                auto.click(pos,time=2)
                                 auto.sleep(1)
                         if pos := auto.check_element_exist("public/跳过"):
                             auto.click(pos,time=2)

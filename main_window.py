@@ -1,12 +1,14 @@
 import sys
+import time
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QSplitter, QGroupBox, QListWidget, QListWidgetItem,
     QPushButton, QTextEdit, QProgressBar, QMessageBox, QFormLayout,
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QFrame,
-    QStackedWidget, QSizePolicy, QButtonGroup, QRadioButton, QSlider
+    QStackedWidget, QSizePolicy, QButtonGroup, QRadioButton, QSlider,
+    QFileDialog
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QThread
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QThread, QTimer, pyqtSlot
 from PyQt6.QtGui import QFont, QTextCursor, QIcon
 from auto_control.auto import Auto
 from task_manager import AppSettingsManager, TaskConfigManager, load_task_modules
@@ -16,6 +18,87 @@ class LogSignal(QWidget):
     
     def __init__(self):
         super().__init__()
+
+class TaskWorker(QThread):
+    """任务工作线程，实现优雅退出机制"""
+    log_signal = pyqtSignal(str)
+    progress_signal = pyqtSignal(int)
+    finished = pyqtSignal()
+    
+    def __init__(self, auto_instance, task_ids, config_manager, task_mapping):
+        super().__init__()
+        self.auto_instance = auto_instance
+        self.task_ids = task_ids
+        self.config_manager = config_manager
+        self.task_mapping = task_mapping
+        self.is_running = False
+        self.should_stop = False
+        
+    def run(self):
+        """执行任务主逻辑，包含可中断点"""
+        self.is_running = True
+        self.should_stop = False
+        total_tasks = len(self.task_ids)
+        
+        try:
+            for i, task_id in enumerate(self.task_ids):
+                # 检查是否需要停止（使用正确的check_should_stop方法）
+                if self.should_stop or self.auto_instance.check_should_stop():
+                    self.log_signal.emit(f"任务执行已被中断，已完成 {i}/{total_tasks} 个任务")
+                    break
+                    
+                task_info = self.task_mapping.get(task_id)
+                if not task_info:
+                    self.log_signal.emit(f"警告：任务 {task_id} 不存在，已跳过")
+                    continue
+                    
+                # 更新进度
+                progress = int((i / total_tasks) * 100)
+                self.progress_signal.emit(progress)
+                self.log_signal.emit(f"开始执行任务：{task_info['name']}")
+                
+                # 获取任务参数
+                task_params = self.config_manager.get_task_config(task_id) or {}
+                
+                # 执行任务（移除多余的stop_checker参数）
+                task_func = task_info.get('function')
+                if task_func:
+                    try:
+                        # 只传递函数定义中声明的参数（auto和task_params）
+                        task_func(self.auto_instance, **task_params)
+                        self.log_signal.emit(f"任务 {task_info['name']} 执行完成")
+                    except Exception as e:
+                        self.log_signal.emit(f"任务 {task_info['name']} 执行出错: {str(e)}")
+                        if self.check_stop():  # 如果是因为停止指令导致的错误，直接退出
+                            break
+                else:
+                    self.log_signal.emit(f"警告：任务 {task_info['name']} 没有执行函数，已跳过")
+                
+                # 再次检查是否需要停止
+                if self.check_stop():
+                    self.log_signal.emit(f"任务执行已被中断，已完成 {i+1}/{total_tasks} 个任务")
+                    break
+            
+            # 全部完成或中途停止，更新进度为100%
+            self.progress_signal.emit(100)
+            
+        except Exception as e:
+            self.log_signal.emit(f"任务线程发生未捕获异常: {str(e)}")
+        finally:
+            self.is_running = False
+            self.finished.emit()
+    
+    def check_stop(self):
+        """检查是否需要停止任务"""
+        return self.should_stop or self.auto_instance.check_should_stop()
+    
+    def stop(self):
+        """请求任务停止"""
+        self.should_stop = True
+        # 等待线程结束，最多等2秒
+        if self.is_running and not self.wait(2000):
+            self.log_signal.emit("任务线程未能正常停止，将强制终止")
+    
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -28,12 +111,16 @@ class MainWindow(QMainWindow):
         # UI状态变量
         self.auto_instance = Auto()
         self.task_thread = None
+        self.task_worker = None
         self.task_running = False
         self.current_task_id = None
         self.param_widgets = {}
         self.sidebar_hidden = False
         self.sidebar_dragging = False
         self.sidebar_hovered = False
+        self.stop_timer = None
+        self.stop_attempts = 0  # 记录停止尝试次数
+        self.max_stop_attempts = 20  # 最大停止尝试次数(约10秒)
         
         # 初始化UI
         self.init_ui()
@@ -100,20 +187,17 @@ class MainWindow(QMainWindow):
         
         # 2. 添加弹性空间 (将设置按钮推到最下面)
         sidebar_layout.addWidget(self.main_btn)
-        sidebar_layout.addStretch(1)  # 这是关键，把下面的内容推到最底
+        sidebar_layout.addStretch(1)
 
         # 3. 设置按钮 (放在最底部)
         self.settings_btn = QPushButton()
         self.settings_btn.setCheckable(True)
         
-        # 确保使用齿轮图标（如果系统主题没有，使用内置图标）
+        # 使用齿轮符号作为备选
         if QIcon.hasThemeIcon("preferences-system"):
-            self.settings_btn.setIcon(QIcon.fromTheme("preferences-system"))  # 系统齿轮图标
+            self.settings_btn.setIcon(QIcon.fromTheme("preferences-system"))
         else:
-            # 如果没有系统图标，可以使用内置资源或自定义图标
-            self.settings_btn.setIcon(QIcon(":/icons/settings.png"))  # 需要提供资源文件
-            # 或者使用文本替代
-            # self.settings_btn.setText("⚙")  # 齿轮符号
+            self.settings_btn.setText("⚙")
         
         self.settings_btn.setToolTip("设置")
         self.settings_btn.setStyleSheet("padding: 8px;")
@@ -124,7 +208,6 @@ class MainWindow(QMainWindow):
         self.button_group.addButton(self.settings_btn, 1)
         self.button_group.buttonClicked.connect(self.on_sidebar_button_clicked)
 
-        # 添加到布局 (设置按钮已经在最下面)
         sidebar_layout.addWidget(self.settings_btn)
 
     def eventFilter(self, obj, event):
@@ -170,7 +253,7 @@ class MainWindow(QMainWindow):
 
     def collapse_sidebar(self):
         """收缩侧边栏"""
-        if self.sidebar.width() > 50:  # 只有当前是展开状态时才保存宽度
+        if self.sidebar.width() > 50:
             self.settings_manager.set_setting("sidebar_width", self.sidebar.width())
         self.sidebar.setFixedWidth(50)
         self.main_btn.setText("")
@@ -378,7 +461,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addRow("侧边栏宽度:", self.sidebar_width_slider)
         sidebar_group.setLayout(sidebar_layout)
 
-        # 新增游戏启动配置
+        # 游戏启动配置
         game_group = QGroupBox("游戏启动配置")
         game_layout = QFormLayout()
         
@@ -421,7 +504,6 @@ class MainWindow(QMainWindow):
 
     def browse_pc_game_path(self):
         """浏览选择PC游戏路径"""
-        from PyQt6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(
             self,
             "选择PC游戏可执行文件",
@@ -433,7 +515,6 @@ class MainWindow(QMainWindow):
 
     def browse_emulator_path(self):
         """浏览选择模拟器路径"""
-        from PyQt6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(
             self,
             "选择模拟器可执行文件",
@@ -451,13 +532,13 @@ class MainWindow(QMainWindow):
 
     def on_sidebar_width_changed(self, width):
         """侧边栏宽度变更实时处理"""
-        if not self.sidebar_hidden:  # 只有在侧边栏展开时才更新宽度
+        if not self.sidebar_hidden:
             self.sidebar.setFixedWidth(width)
         self.settings_manager.set_setting("sidebar_width", width)
 
     def update_sidebar_width(self, width):
         """更新侧边栏宽度"""
-        if not self.sidebar_hidden:  # 只有在侧边栏展开时才更新宽度
+        if not self.sidebar_hidden:
             self.sidebar.setFixedWidth(width)
         self.settings_manager.set_setting("sidebar_width", width)
 
@@ -607,7 +688,19 @@ class MainWindow(QMainWindow):
             self.start_task()
 
     def start_task(self):
-        """开始执行选中的任务"""
+        """开始执行选中的任务，添加前置状态校验"""
+        # 前置校验：确保任务未在运行、线程已释放
+        if self.task_running:
+            self.log("无法启动任务：已有任务正在运行")
+            QMessageBox.information(self, "提示", "已有任务正在运行，请等待其终止或点击\"停止任务\"")
+            return
+        
+        if self.task_thread and self.task_thread.isRunning():
+            self.log("检测到未释放的任务线程，正在强制清理...")
+            self.reset_task_state()
+            QMessageBox.information(self, "提示", "检测到未释放的任务资源，已自动清理，请重试")
+            return
+        
         try:
             selected_tasks = []
             for i in range(self.task_list.count()):
@@ -619,64 +712,155 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "警告", "请至少选择一个任务")
                 return
             
+            # 关键修复：启动任务前，强制重置所有停止标志
+            self.auto_instance.set_should_stop(False)  # 重置Auto实例的停止标志
+            if self.task_worker:
+                self.task_worker.should_stop = False    # 重置worker的停止标志
+            
             self.set_task_running_state(True)
             self.log(f"开始执行任务，共 {len(selected_tasks)} 个任务")
             
             if not self.auto_instance.add_device():
-                raise Exception(f"设备添加失败: {self.auto_instance.last_error}")
+                raise Exception(f"设备添加失败: {getattr(self.auto_instance, 'last_error', '未知错误')}")
             
             self.auto_instance.start()
             self.log("设备连接成功，准备执行任务")
             
             # 创建并启动任务线程
-            from task_manager import TaskWorker
-            self.task_thread = QThread()
             self.task_worker = TaskWorker(
                 self.auto_instance, 
                 selected_tasks, 
                 self.config_manager,
                 self.task_mapping
             )
-            self.task_worker.moveToThread(self.task_thread)
+            
+            # 连接信号槽
             self.task_worker.log_signal.connect(self.log)
             self.task_worker.progress_signal.connect(self.update_progress)
             self.task_worker.finished.connect(self.on_task_finished)
-            self.task_thread.started.connect(self.task_worker.run)
-            self.task_thread.start()
+            
+            # 启动线程
+            self.task_worker.start()
             
         except Exception as e:
             self.log(f"启动任务时发生错误: {str(e)}")
             self.reset_task_state()
             QMessageBox.critical(self, "错误", f"启动任务时发生错误: {str(e)}")
 
+
     def stop_task(self):
-        """停止当前任务"""
+        """停止当前任务，优化终止流程"""
         if not self.task_running:
             return
             
         self.log("收到停止指令，正在终止任务...")
         self.start_stop_btn.setEnabled(False)
+        self.stop_attempts = 0  # 重置尝试次数
+        
+        # 通知任务停止
         if self.auto_instance:
             self.auto_instance.set_should_stop(True)
+        
+        # 通知worker停止
+        if self.task_worker and self.task_worker.isRunning():
+            self.task_worker.stop()
+        
+        # 启动定时器，轮询检查任务是否已终止
+        if self.stop_timer:
+            self.stop_timer.stop()
+            
+        self.stop_timer = QTimer()
+        self.stop_timer.setInterval(500)  # 每500ms检查一次
+        self.stop_timer.timeout.connect(self.check_task_stopped)
+        self.stop_timer.start()
 
+    def check_task_stopped(self):
+        """轮询检查任务是否已停止，增加更可靠的超时处理"""
+        self.stop_attempts += 1
+        
+        # 检查条件：worker已停止
+        worker_stopped = not (self.task_worker and self.task_worker.isRunning())
+        
+        if worker_stopped:
+            self.stop_timer.stop()
+            self.reset_task_state()
+            self.log("任务已完全终止")
+            self.start_stop_btn.setEnabled(True)
+        else:
+            # 显示剩余等待时间，让用户了解进度
+            remaining_seconds = (self.max_stop_attempts - self.stop_attempts) * 0.5
+            self.log(f"等待任务终止中... (剩余约 {remaining_seconds:.1f} 秒)")
+            
+            # 达到最大尝试次数，强制终止
+            if self.stop_attempts >= self.max_stop_attempts:
+                self.log(f"超过最大等待次数 ({self.max_stop_attempts}次)，将强制终止任务")
+                self.stop_timer.stop()
+                
+                # 显示确认对话框
+                reply = QMessageBox.warning(
+                    self, 
+                    "任务终止超时", 
+                    "任务无法正常终止，是否强制结束？这可能导致数据不一致。",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.reset_task_state(force=True)
+                    self.log("已强制终止任务")
+                else:
+                    self.log("用户取消强制终止，任务可能仍在运行")
+                    self.set_task_running_state(False)  # 至少更新UI状态
+                    
+                self.start_stop_btn.setEnabled(True)
+
+    @pyqtSlot()
     def on_task_finished(self):
-        """任务完成后的处理"""
+        """任务完成后的处理（通过信号槽调用，确保在主线程执行）"""
         self.reset_task_state()
         self.log("所有任务执行完毕")
 
-    def reset_task_state(self):
-        """重置任务状态和UI"""
+    def reset_task_state(self, force=False):
+        """重置任务状态和UI，增强强制清理能力"""
+        # 首先更新状态标志
         self.set_task_running_state(False)
         self.progress_bar.setValue(0)
         
-        if self.auto_instance:
-            self.auto_instance.stop()
+        # 清理worker并断开信号连接
+        if self.task_worker:
+            try:
+                # 断开所有信号连接
+                self.task_worker.log_signal.disconnect(self.log)
+                self.task_worker.progress_signal.disconnect(self.update_progress)
+                self.task_worker.finished.disconnect(self.on_task_finished)
+                
+                # 如果仍在运行，尝试停止
+                if self.task_worker.isRunning():
+                    self.log("任务worker仍在运行，尝试停止...")
+                    self.task_worker.stop()
+                    if force and self.task_worker.isRunning():
+                        self.log("强制终止worker线程")
+                        self.task_worker.terminate()
+                        self.task_worker.wait(1000)
+            except Exception as e:
+                self.log(f"清理worker时出错: {str(e)}")
+            finally:
+                self.task_worker = None
         
-        if self.task_thread and self.task_thread.isRunning():
-            self.task_thread.quit()
-            self.task_thread.wait()
+        # 清理auto实例
+        if self.auto_instance:
+            try:
+                self.auto_instance.stop()
+                if force:
+                    self.auto_instance.set_should_stop(False)
+                    # 如果有强制终止的方法，可以在这里调用
+                    if hasattr(self.auto_instance, 'force_terminate'):
+                        self.auto_instance.force_terminate()
+            except Exception as e:
+                self.log(f"清理auto实例时出错: {str(e)}")
         
         self.start_stop_btn.setEnabled(True)
+        self.log("任务状态已重置")
 
     def set_task_running_state(self, running):
         """设置任务运行状态"""
@@ -757,17 +941,45 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(value)
 
     def closeEvent(self, event):
-        """窗口关闭事件"""
+        """窗口关闭事件，确保任务完全终止后再关闭"""
         # 保存窗口大小
         self.settings_manager.set_setting("window_size", [self.width(), self.height()])
         
         # 停止正在运行的任务
         if self.task_running:
+            self.log("检测到正在运行的任务，尝试终止后再关闭窗口...")
             self.stop_task()
+            
+            # 等待任务终止，最多等5秒
+            wait_time = 0
+            while self.task_running and wait_time < 50:  # 50 * 100ms = 5秒
+                QApplication.processEvents()
+                time.sleep(0.1)
+                wait_time += 1
+                
+            if self.task_running:
+                # 仍在运行，询问用户是否强制关闭
+                reply = QMessageBox.warning(
+                    self, 
+                    "任务仍在运行", 
+                    "任务仍在运行中，强制关闭可能导致问题，是否继续？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                
+                if reply != QMessageBox.StandardButton.Yes:
+                    event.ignore()  # 取消关闭
+                    return
+                else:
+                    # 强制清理
+                    self.reset_task_state(force=True)
         
         # 确保auto_instance被正确清理
         if self.auto_instance:
-            self.auto_instance.stop()
+            try:
+                self.auto_instance.stop()
+            except:
+                pass
             self.auto_instance = None
         
         # 保存其他设置
@@ -780,3 +992,4 @@ if __name__ == "__main__":
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
+    
