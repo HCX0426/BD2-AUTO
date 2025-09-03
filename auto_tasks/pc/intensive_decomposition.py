@@ -40,7 +40,8 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if pos := auto.check_element_exist("intensive_decomposition/装备标识"):
                         logger.info("进入装备界面")
                         auto.click(pos, time=2)
-                        auto.sleep(3)
+                        auto.click(pos, time=2)
+                        auto.sleep(0.5)
                         state = "filter_set"
                     else:
                         logger.error("装备标识不存在")
@@ -109,7 +110,8 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if pos := auto.check_element_exist("intensive_decomposition/装备标识"):
                         logger.info("进入装备界面")
                         auto.click(pos, time=2)
-                        auto.sleep(3)
+                        auto.click(pos, time=2)
+                        auto.sleep(0.5)
                         state = "filter_set"
                     continue
                 
