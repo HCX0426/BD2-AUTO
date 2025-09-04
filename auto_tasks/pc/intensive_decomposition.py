@@ -30,9 +30,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
             if phase == "decomposition":
                 if state == "init":
                     if back_to_main(auto):
-                        if auto.text_click("背包"):
-                            logger.info("成功打开背包")
-                            auto.sleep(3)
+                        if auto.text_click("背包",time=2):
+                            logger.info("打开背包")
+                            auto.sleep(1)
                             state = "bag_opened"
                     continue
                 
@@ -44,10 +44,8 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         auto.sleep(0.5)
                         state = "filter_set"
                     else:
-                        logger.error("装备标识不存在")
-                        if auto.text_click("背包",click=False):
-                            logger.error("未进入背包界面")
-                            state = "init"
+                        logger.error("未进入背包界面")
+                        state = "init"
                     continue
                 
                 if state == "filter_set":
@@ -100,9 +98,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
             elif phase == "enhancement":
                 if state == "init":
                     if back_to_main(auto):
-                        if auto.text_click("背包"):
-                            logger.info("成功打开背包")
-                            auto.sleep(3)
+                        if auto.text_click("背包",time=2):
+                            logger.info("打开背包")
+                            auto.sleep(1)
                             state = "bag_opened"
                     continue
                 
@@ -113,6 +111,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         auto.click(pos, time=2)
                         auto.sleep(0.5)
                         state = "filter_set"
+                    else:
+                        logger.error("未进入背包界面")
+                        state = "init"
                     continue
                 
                 if state == "filter_set":

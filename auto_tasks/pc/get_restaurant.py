@@ -61,18 +61,6 @@ def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
                     auto.sleep(1)
 
             elif state == "fourth":
-                if pos := auto.check_element_exist("get_restaurant/下一阶段"):
-                    logger.info("点击下一阶段")
-                    auto.click(pos, time=2)
-                    auto.sleep(1)
-                    continue
-                
-                if pos := auto.check_element_exist("get_restaurant/升级"):
-                    logger.info("点击升级")
-                    auto.click(pos, time=2)
-                    auto.sleep(1)
-                    continue
-
                 if pos := auto.text_click("点击画面关闭",click=False):
                     logger.info("点击画面关闭")
                     auto.click(pos,time=2)
@@ -83,9 +71,21 @@ def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
                     auto.sleep(1)
                     continue
                 
-                if pos := auto.text_click("常客",click=False):
+                if pos_1 := auto.text_click("常客",click=False):
+                    if pos := auto.check_element_exist("get_restaurant/下一阶段"):
+                        logger.info("点击下一阶段")
+                        auto.click(pos, time=2)
+                        auto.sleep(1)
+                        continue
+                    
+                    if pos := auto.check_element_exist("get_restaurant/升级"):
+                        logger.info("点击升级")
+                        auto.click(pos, time=2)
+                        auto.sleep(1)
+                        continue
+
                     logger.info("点击常客")
-                    auto.click(pos,time=2)
+                    auto.click(pos_1,time=2)
                     return back_to_main(auto)
             
             auto.sleep(0.5)

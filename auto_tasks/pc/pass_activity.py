@@ -31,12 +31,14 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                     if pos := auto.check_element_exist("pass_activity/活动关入口"):
                         logger.info("进入活动关卡")
                         auto.click(pos)
-                        auto.sleep(2)
-                        state = "entered"
+                        
                     else:
                         logger.error("未找到活动关入口")
-                        return False
-                continue
+                        auto.click((1700, 480), time=2)
+                    
+                    auto.sleep(2)
+                    state = "entered"
+                    continue
                 
             # 进入挑战战斗
             if state == "entered":
