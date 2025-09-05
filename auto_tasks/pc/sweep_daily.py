@@ -66,7 +66,7 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
                                 state['onigiri_selected'] = True
                     continue
                 
-                if auto.text_click("MAX"):
+                if auto.text_click("MAX",time=3):
                     if pos := auto.check_element_exist("sweep_daily/狩猎按钮"):
                         logger.info("点击狩猎按钮")
                         auto.click(pos)
@@ -94,7 +94,7 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
                         logger.info(f"未检测到{torch}")
                 continue
                 
-            if auto.text_click("MAX"):
+            if auto.text_click("MAX",time=3):
                 if pos := auto.check_element_exist("sweep_daily/狩猎按钮"):
                     logger.info("点击狩猎按钮")
                     auto.click(pos)

@@ -33,7 +33,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                         auto.click(pos)
                         
                     else:
-                        logger.error("未找到活动关入口")
+                        logger.error("未找到活动关入口,尝试点击坐标")
                         auto.click((1700, 480), time=2)
                     
                     auto.sleep(2)
@@ -45,6 +45,9 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                 if auto.text_click("挑战战斗",time=3):
                     logger.info("进入挑战战斗界面")
                     state = "challenge_selected"
+                else:
+                    logger.error("未找到挑战战斗按钮,尝试点击坐标")
+                    auto.click((1700, 480), time=2)
                 continue
                 
             # 选择困难第15关
@@ -52,7 +55,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                 # 检查是否仍在挑战战斗界面
                 if auto.text_click("行程", click=False):
                     logger.info("仍在挑战战斗界面")
-                    state == "entered"
+                    state = "entered"
                     continue
                 
                 if pos := auto.check_element_exist(f"pass_activity/{level_name}"):

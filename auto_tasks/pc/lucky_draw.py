@@ -4,7 +4,7 @@ from auto_control import Auto
 from auto_tasks.pc.public import back_to_main
 
 
-def lucky_draw(auto: Auto, timeout: int = 900, target_count: int = 6):
+def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
     """抽抽乐
     
     Args:
@@ -39,13 +39,13 @@ def lucky_draw(auto: Auto, timeout: int = 900, target_count: int = 6):
                 else:
                     if last_count != target_count:
                         last_count = target_count
-                        if auto.swipe((410, 410), (410, 180), duration=6, steps=6):
-                            logger.info("滑动抽抽乐")
-                            auto.sleep(2)
-                    else:
+                    #     if auto.swipe((410, 410), (410, 180), duration=6, steps=6):
+                    #         logger.info("滑动抽抽乐")
+                    #         auto.sleep(2)
+                    # else:
                         if auto.swipe((410, 310), (410, 185), duration=4, steps=4):
                             logger.info("滑动抽抽乐")
-                            auto.sleep(2)
+                            auto.sleep(1)
 
                     if auto.click((410, 310), time=2):
                         logger.info("点击抽抽乐")
