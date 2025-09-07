@@ -148,7 +148,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
                 
                 if state == "execute":
-                    if auto.text_click("连续精炼"):
+                    if auto.text_click("连续精炼",click=False):
                         logger.info("开始连续精炼")
                         auto.sleep(3)
                         if pos := auto.check_element_exist("intensive_decomposition/加十"):

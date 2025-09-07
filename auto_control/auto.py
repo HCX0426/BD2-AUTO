@@ -328,8 +328,9 @@ class Auto:
             center_y += roi_y1
 
         # 转换为相对于窗口的坐标
-        relative_x = int(center_x * scale_x)
-        relative_y = int(center_y * scale_y)
+        relative_x = int(center_x )
+        relative_y = int(center_y )
+        print(f"[INFO] 识别到文本 '{target_text}' 位置: ({relative_x}, {relative_y})")
 
         if click:
             # 使用设备的click方法
@@ -512,7 +513,8 @@ class Auto:
         duration: float = 3,
         steps: int = 1,
         delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None
+        device_uri: Optional[str] = None,
+        is_base_coord: bool = False
     ) -> bool:
         """执行滑动操作"""
         self._apply_delay(delay)
@@ -526,7 +528,8 @@ class Auto:
             start_pos[0], start_pos[1], 
             end_pos[0], end_pos[1], 
             duration,
-            steps
+            steps,
+            is_base_coord
         )
         return self.last_result
 
