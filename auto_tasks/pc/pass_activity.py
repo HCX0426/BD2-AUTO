@@ -28,14 +28,8 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
             # 初始状态：进入活动界面
             if state == "init":
                 if back_to_main(auto):
-                    if pos := auto.check_element_exist("pass_activity/活动关入口"):
+                    if auto.click((1700, 480), click_time=2, is_base_coord=True):
                         logger.info("进入活动关卡")
-                        auto.click(pos)
-                        
-                    else:
-                        logger.error("未找到活动关入口,尝试点击坐标")
-                        auto.click((1700, 480), click_time=2)
-                    
                     auto.sleep(2)
                     state = "entered"
                     continue
@@ -47,7 +41,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                     state = "challenge_selected"
                 else:
                     logger.error("未找到挑战战斗按钮,尝试点击坐标")
-                    auto.click((1700, 480), click_time=2)
+                    auto.click((1700, 480), click_time=2, is_base_coord=True)
                 continue
                 
             # 选择困难第15关

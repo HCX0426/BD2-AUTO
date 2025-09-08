@@ -1,7 +1,7 @@
 import logging
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -25,7 +25,7 @@ from .image_processor import ImageProcessor
 from .logger import Logger
 from .ocr_processor import OCRProcessor
 from .device_base import BaseDevice, DeviceState
-
+from airtest.core.api import Template
 
 class Auto:
     def __init__(
@@ -282,10 +282,11 @@ class Auto:
     # ======================== 核心操作方法 ========================
     def click(
         self,
-        pos: tuple,
+        pos: Tuple[int, int],
         click_time: int = 1,
         delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None
+        device_uri: Optional[str] = None,
+        is_base_coord: bool = False
     ) -> bool:
         """点击操作（支持绝对坐标，带状态校验）"""
         # 中断检查
@@ -315,7 +316,7 @@ class Auto:
             self.logger.error(f"错误: {self.last_error}")
             self.last_result = False
             return False
-
+        
         # 坐标边界检查
         abs_x, abs_y = round(pos[0]), round(pos[1])
         if (abs_x < 0 or abs_x >= resolution[0] or abs_y < 0 or abs_y >= resolution[1]):
@@ -325,7 +326,7 @@ class Auto:
             return False
 
         # 执行点击
-        self.last_result = device.click((abs_x, abs_y), click_time=click_time)
+        self.last_result = device.click((abs_x, abs_y), click_time=click_time, is_base_coord=is_base_coord)
         # 同步错误
         if not self.last_result:
             self.last_error = device.last_error or "点击执行失败"

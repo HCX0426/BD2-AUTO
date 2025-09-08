@@ -50,7 +50,7 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
                 else:
                     # 滑动地图寻找第七章
                     logger.info("滑动寻找第七章")
-                    auto.swipe((1666, 266), (833, 266), duration=5, steps=4)
+                    auto.swipe((1666, 266), (833, 266), duration=5, steps=4,is_base_coord=True)
                     auto.sleep(2)
                     continue
                 

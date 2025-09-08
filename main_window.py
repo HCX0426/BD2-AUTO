@@ -695,9 +695,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "已有任务正在运行，请等待其终止或点击\"停止任务\"")
             return
         
-        if self.task_thread and self.task_thread.isRunning():
+        if self.task_worker and self.task_worker.isRunning():
             self.log("检测到未释放的任务线程，正在强制清理...")
-            self.reset_task_state()
+            self.reset_task_state(force=True)
             QMessageBox.information(self, "提示", "检测到未释放的任务资源，已自动清理，请重试")
             return
         
@@ -744,9 +744,8 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             self.log(f"启动任务时发生错误: {str(e)}")
-            self.reset_task_state()
+            self.reset_task_state(force=True)
             QMessageBox.critical(self, "错误", f"启动任务时发生错误: {str(e)}")
-
 
     def stop_task(self):
         """停止当前任务，优化终止流程"""
@@ -766,7 +765,7 @@ class MainWindow(QMainWindow):
             self.task_worker.stop()
         
         # 启动定时器，轮询检查任务是否已终止
-        if self.stop_timer:
+        if self.stop_timer and self.stop_timer.isActive():
             self.stop_timer.stop()
             
         self.stop_timer = QTimer()
@@ -775,7 +774,7 @@ class MainWindow(QMainWindow):
         self.stop_timer.start()
 
     def check_task_stopped(self):
-        """轮询检查任务是否已停止，增加更可靠的超时处理"""
+        """轮询检查任务是否已停止，避免重复清理"""
         self.stop_attempts += 1
         
         # 检查条件：worker已停止
@@ -783,8 +782,10 @@ class MainWindow(QMainWindow):
         
         if worker_stopped:
             self.stop_timer.stop()
-            self.reset_task_state()
-            self.log("任务已完全终止")
+            # 只有在任务仍在运行状态时才进行清理，避免重复
+            if self.task_running:
+                self.reset_task_state()
+                self.log("任务已完全终止")
             self.start_stop_btn.setEnabled(True)
         else:
             # 显示剩余等待时间，让用户了解进度
@@ -816,12 +817,18 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def on_task_finished(self):
-        """任务完成后的处理（通过信号槽调用，确保在主线程执行）"""
-        self.reset_task_state()
-        self.log("所有任务执行完毕")
+        """任务完成后的处理，避免与定时器重复清理"""
+        # 只有在任务仍在运行状态时才进行清理
+        if self.task_running:
+            self.reset_task_state()
+            self.log("所有任务执行完毕")
 
     def reset_task_state(self, force=False):
-        """重置任务状态和UI，增强强制清理能力"""
+        """重置任务状态和UI，增加状态检查避免重复清理"""
+        # 如果已经不在运行状态，直接返回避免重复清理
+        if not self.task_running and not force:
+            return
+            
         # 首先更新状态标志
         self.set_task_running_state(False)
         self.progress_bar.setValue(0)
@@ -830,9 +837,12 @@ class MainWindow(QMainWindow):
         if self.task_worker:
             try:
                 # 断开所有信号连接
-                self.task_worker.log_signal.disconnect(self.log)
-                self.task_worker.progress_signal.disconnect(self.update_progress)
-                self.task_worker.finished.disconnect(self.on_task_finished)
+                try:
+                    self.task_worker.log_signal.disconnect(self.log)
+                    self.task_worker.progress_signal.disconnect(self.update_progress)
+                    self.task_worker.finished.disconnect(self.on_task_finished)
+                except:
+                    pass  # 忽略已经断开的连接
                 
                 # 如果仍在运行，尝试停止
                 if self.task_worker.isRunning():
@@ -847,17 +857,18 @@ class MainWindow(QMainWindow):
             finally:
                 self.task_worker = None
         
-        # 清理auto实例
+        # 清理auto实例（只在force模式下或正常模式下第一次清理）
         if self.auto_instance:
             try:
-                self.auto_instance.stop()
+                # 只有在force模式下才真正停止auto实例
+                # 正常模式下保持auto实例运行以便后续使用
                 if force:
+                    self.auto_instance.stop()
                     self.auto_instance.set_should_stop(False)
-                    # 如果有强制终止的方法，可以在这里调用
-                    if hasattr(self.auto_instance, 'force_terminate'):
-                        self.auto_instance.force_terminate()
             except Exception as e:
-                self.log(f"清理auto实例时出错: {str(e)}")
+                # 忽略已经关闭的错误
+                if "shutdown" not in str(e).lower():
+                    self.log(f"清理auto实例时出错: {str(e)}")
         
         self.start_stop_btn.setEnabled(True)
         self.log("任务状态已重置")
@@ -992,4 +1003,3 @@ if __name__ == "__main__":
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-    

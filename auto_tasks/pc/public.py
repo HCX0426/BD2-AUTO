@@ -199,7 +199,7 @@ def enter_map_select(auto: Auto, swipe_duration: int = 6) -> bool:
     logger = auto.get_task_logger("enter_map_select")
     
     try:
-        if not auto.click((1720, 990)):
+        if not auto.click((1720, 990), click_time=2, is_base_coord=True):
             logger.warning("点击地图选择按钮失败")
             return False
             
@@ -207,12 +207,13 @@ def enter_map_select(auto: Auto, swipe_duration: int = 6) -> bool:
         
         if auto.text_click("游戏卡珍藏集", click=False):
             logger.debug("检测到游戏卡珍藏集，执行滑动操作")
-            if auto.swipe((1800, 700), (1800, 900), duration=swipe_duration, steps=4):
+            if auto.swipe((1800, 700), (1800, 900), duration=swipe_duration, steps=4, is_base_coord=True):
                 auto.sleep(2)
                 return True
-                
-        logger.debug("未检测到游戏卡珍藏集，可能已在地图选择界面")
-        return True
+        else:
+            logger.warning("未检测到游戏卡珍藏集")
+            return False
+            
     except Exception as e:
         logger.error(f"进入地图选择时发生错误: {e}")
         return False

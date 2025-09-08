@@ -1,3 +1,4 @@
+import ctypes
 import time
 from ctypes import c_int, windll
 from typing import Optional, Tuple, Union
@@ -11,7 +12,7 @@ import win32gui
 import win32ui
 from airtest.core.api import Template, connect_device, exists, paste
 from airtest.core.api import sleep as air_sleep
-from airtest.core.api import touch, wait
+from airtest.core.api import wait, touch
 from airtest.core.helper import log, logwrap
 from PIL import Image
 
@@ -24,7 +25,12 @@ class WindowsDevice(BaseDevice):
         self.window_handle: Optional[int] = None
         self._last_window_state: Optional[str] = None
         self._window_original_rect: Optional[Tuple[int, int, int, int]] = None
-
+        
+        # 屏幕DPI信息
+        self._screen_dpi: Tuple[int, int] = (96, 96)  # 默认DPI值
+        self._scaling_percentage: str = "100%"  # DPI缩放百分比
+        self._dpi_scale_factor: float = 1.0  # DPI缩放因子
+        
         # 客户区尺寸（游戏实际渲染区域）
         self._client_size: Tuple[int, int] = (0, 0)
         # 启用DPI感知（解决高DPI缩放问题）
@@ -40,6 +46,63 @@ class WindowsDevice(BaseDevice):
             # 兼容旧系统（系统级DPI感知）
             windll.user32.SetProcessDPIAware()
             print(f"启用DPI感知兼容模式: {e}")
+
+    def _get_screen_dpi_info(self) -> None:
+        """获取屏幕DPI信息"""
+        try:
+            # 使用ctypes直接调用Windows API获取DPI
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+            
+            # 获取桌面窗口的DC
+            hdc = user32.GetDC(0)
+            LOGPIXELSX = 88  # 水平DPI常量
+            LOGPIXELSY = 90  # 垂直DPI常量
+            
+            # 获取DPI值
+            dpi_x = gdi32.GetDeviceCaps(hdc, LOGPIXELSX)
+            dpi_y = gdi32.GetDeviceCaps(hdc, LOGPIXELSY)
+            self._screen_dpi = (dpi_x, dpi_y)
+            
+            # 计算DPI缩放百分比（相对于标准96 DPI）
+            scaling_x = round((dpi_x / 96.0) * 100)
+            scaling_y = round((dpi_y / 96.0) * 100)
+            
+            # 通常情况下水平和垂直DPI相同
+            if scaling_x == scaling_y:
+                self._scaling_percentage = f"{scaling_x}%"
+                self._dpi_scale_factor = dpi_x / 96.0
+            else:
+                self._scaling_percentage = f"{scaling_x}% (水平), {scaling_y}% (垂直)"
+                # 使用水平DPI作为主要缩放因子
+                self._dpi_scale_factor = dpi_x / 96.0
+            
+            # 释放DC
+            user32.ReleaseDC(0, hdc)
+            
+        except Exception as e:
+            print(f"获取屏幕DPI信息时出错: {e}")
+            # 出错时使用默认值
+            self._screen_dpi = (96, 96)
+            self._scaling_percentage = "100%"
+            self._dpi_scale_factor = 1.0
+
+    def get_screen_info(self) -> dict:
+        """获取屏幕信息（分辨率和DPI）"""
+        # 获取屏幕分辨率
+        width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+        height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+        
+        # 获取DPI信息（如果尚未获取）
+        if self._screen_dpi == (96, 96):
+            self._get_screen_dpi_info()
+        
+        return {
+            "resolution": (width, height),
+            "dpi": self._screen_dpi,
+            "scaling_percentage": self._scaling_percentage,
+            "scale_factor": self._dpi_scale_factor
+        }
 
     def _get_window_title(self) -> str:
         """从URI中提取窗口标题"""
@@ -87,7 +150,6 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             error_msg = f"更新窗口信息失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
 
     def connect(self, timeout: float = 15.0) -> bool:
@@ -102,6 +164,9 @@ class WindowsDevice(BaseDevice):
             connect_device(self.device_uri)
             window_title = self._get_window_title()
 
+            # 获取屏幕DPI信息（在连接时获取一次）
+            self._get_screen_dpi_info()
+
             # 超时等待窗口句柄和有效客户区
             while time.time() - start_time < timeout:
                 self.window_handle = win32gui.FindWindow(None, window_title)
@@ -114,6 +179,12 @@ class WindowsDevice(BaseDevice):
                         self._update_device_state(DeviceState.IDLE)
                         print(
                             f"Windows设备连接成功：{window_title}（客户区尺寸：{self._client_size}）")
+                        # 打印屏幕信息
+                        screen_info = self.get_screen_info()
+                        print(f"屏幕分辨率: {screen_info['resolution']}")
+                        print(f"屏幕DPI (水平, 垂直): {screen_info['dpi']}")
+                        print(f"DPI缩放百分比: {screen_info['scaling_percentage']}")
+                        print(f"DPI缩放因子: {screen_info['scale_factor']}")
                         return True
                 self.sleep(0.1)
 
@@ -157,10 +228,11 @@ class WindowsDevice(BaseDevice):
             return False
 
     def convert_to_client_coords(self, x: int, y: int) -> Tuple[int, int]:
-        """将1920*1080基准坐标转换为窗口客户区坐标"""
+        """将1920*1080基准坐标转换为窗口客户区坐标，考虑DPI缩放"""
         if not self.is_connected:
             raise RuntimeError("无法转换坐标：设备未连接")
 
+        # 保持基准分辨率为1920×1080
         base_width, base_height = 1920, 1080
         client_width, client_height = self._client_size
 
@@ -171,69 +243,55 @@ class WindowsDevice(BaseDevice):
             if client_width == 0 or client_height == 0:
                 raise ValueError("客户区尺寸无效，无法转换坐标")
 
-        # 按客户区尺寸缩放基准坐标
-        client_x = int(x * (client_width / base_width))
-        client_y = int(y * (client_height / base_height))
+        # 按客户区尺寸缩放基准坐标，并考虑125%缩放因子
+        # 原来的坐标是在125%缩放下取的，所以需要除以1.25来还原
+        original_dpi_scale = 1.25  # 125%缩放
+        client_x = int(x * (client_width / base_width) / (self._dpi_scale_factor / original_dpi_scale))
+        client_y = int(y * (client_height / base_height) / (self._dpi_scale_factor / original_dpi_scale))
         return client_x, client_y
 
-    def client_to_screen(self, client_x: int, client_y: int, y_offset: int = -38) -> Tuple[int, int]:
-        """支持全屏检测和Y轴偏移校准的坐标转换（仅窗口模式应用偏移）"""
+    def client_to_screen(self, client_x: int, client_y: int) -> Tuple[int, int]:
         if not self.window_handle:
             raise ValueError("窗口句柄无效")
-
+        
         try:
-            # 1. 获取窗口坐标和客户区尺寸
-            win_left, win_top, win_right, win_bottom = win32gui.GetWindowRect(
-                self.window_handle)
-            client_left, client_top, client_right, client_bottom = win32gui.GetClientRect(
-                self.window_handle)
-            client_width = client_right - client_left
-            client_height = client_bottom - client_top
-
-            # 2. 检测是否全屏（窗口尺寸 ≈ 屏幕分辨率）
-            screen_width = win32api.GetSystemMetrics(0)  # 屏幕宽度
-            screen_height = win32api.GetSystemMetrics(1)  # 屏幕高度
-            is_fullscreen = (
-                abs(win_right - win_left - screen_width) < 5 and
-                abs(win_bottom - win_top - screen_height) < 5
-            )
-
-            # 3. 计算基准点（区分全屏/窗口模式）
-            if is_fullscreen:
-                # 全屏模式：无标题栏/边框，客户区即屏幕 → 偏移设为0
-                base_x = win_left
-                base_y = win_top
-                used_offset = 0  # 全屏禁用偏移
-                # print("检测到全屏模式，使用窗口左上角作为基准点（无偏移）")
-            else:
-                # 窗口模式：计算边框和标题栏 → 应用指定偏移（默认-38）
-                border_width = (win_right - win_left - client_width) // 2
-                title_bar_height = (win_bottom - win_top -
-                                    client_height) - border_width
-                base_x = win_left + border_width
-                base_y = win_top + title_bar_height
-                used_offset = y_offset  # 窗口模式使用传入的偏移
-                # print(
-                #     f"窗口模式：边框={border_width}px，标题栏={title_bar_height}px（应用偏移{used_offset}px）")
-
-            # 4. 应用Y轴偏移（根据模式选择是否偏移）
-            final_y = base_y + client_y + used_offset
-
-            # 5. 计算最终屏幕坐标
-            screen_x = base_x + client_x
-            screen_y = final_y
-
-            # 调试日志（明确显示实际使用的偏移）
-            # print(f"窗口坐标: ({win_left}, {win_top}, {win_right}, {win_bottom})")
-            # print(
-            #     f"客户区尺寸: {client_width}x{client_height}，屏幕尺寸: {screen_width}x{screen_height}")
-            # print(
-            #     f"基准点: ({base_x}, {base_y})，实际偏移{used_offset}px后 → 实际Y={final_y}")
-            # print(f"转换后屏幕坐标: ({screen_x}, {screen_y})")
+            # 检查是否已经是全屏状态
+            if self._is_fullscreen():
+                return (client_x, client_y)
+                
+            # 应用DPI缩放因子
+            scaled_client_x = int(client_x * self._dpi_scale_factor)
+            scaled_client_y = int(client_y * self._dpi_scale_factor)
+            
+            # 使用ClientToScreen API获取客户区原点
+            client_origin = win32gui.ClientToScreen(self.window_handle, (0, 0))
+            
+            # 计算屏幕坐标
+            screen_x = client_origin[0] + scaled_client_x
+            screen_y = client_origin[1] + scaled_client_y
+            
             return (screen_x, screen_y)
-
+            
         except Exception as e:
             raise RuntimeError(f"坐标转换失败: {str(e)}")
+            
+    def _is_fullscreen(self) -> bool:
+        """判断窗口是否处于全屏状态"""
+        if not self.window_handle:
+            return False
+            
+        # 获取窗口矩形和客户区矩形
+        window_rect = win32gui.GetWindowRect(self.window_handle)
+        client_rect = win32gui.GetClientRect(self.window_handle)
+        
+        # 比较窗口和客户区大小
+        window_width = window_rect[2] - window_rect[0]
+        window_height = window_rect[3] - window_rect[1]
+        client_width = client_rect[2] - client_rect[0]
+        client_height = client_rect[3] - client_rect[1]
+        
+        # 如果客户区大小与窗口大小几乎相同，则认为处于全屏状态
+        return abs(window_width - client_width) < 5 and abs(window_height - client_height) < 5
 
     def capture_screen(self) -> Optional[np.ndarray]:
         """捕获屏幕截图：状态流程 IDLE → BUSY → IDLE/ERROR"""
@@ -303,9 +361,14 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             error_msg = f"截图失败: {str(e)}"
             print(error_msg)
-            log(error_msg, level="ERROR")
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            
+            # 根据错误严重程度决定是否转为ERROR
+            if self._should_change_to_error_state(error_msg):
+                self._update_device_state(DeviceState.ERROR)
+            else:
+                self._update_device_state(DeviceState.IDLE)
+                
             return None
 
         finally:
@@ -315,56 +378,96 @@ class WindowsDevice(BaseDevice):
                 try:
                     win32gui.DeleteObject(saveBitMap.GetHandle())  # 释放位图句柄
                 except Exception as e:
-                    log(f"释放位图失败: {str(e)}", level="WARNING")
+                    print(f"释放位图失败: {str(e)}")
 
             # 2. 释放子DC（saveDC）
             if saveDC:
                 try:
                     saveDC.DeleteDC()
                 except Exception as e:
-                    log(f"释放saveDC失败: {str(e)}", level="ERROR")
+                    print(f"释放saveDC失败: {str(e)}")
 
             # 3. 释放父DC（mfcDC）
             if mfcDC:
                 try:
                     mfcDC.DeleteDC()
                 except Exception as e:
-                    log(f"释放mfcDC失败: {str(e)}", level="ERROR")
+                    print(f"释放mfcDC失败: {str(e)}")
 
             # 4. 释放窗口DC（hwndDC）
             if hwndDC and self.window_handle:
                 try:
                     win32gui.ReleaseDC(self.window_handle, hwndDC)
                 except Exception as e:
-                    log(f"释放hwndDC失败: {str(e)}", level="ERROR")
+                    print(f"释放hwndDC失败: {str(e)}")
 
     def set_foreground(self) -> bool:
-        """激活并置前窗口：仅在已连接状态下执行"""
+        """激活并置前窗口 - 修复版本"""
         if not self.is_connected or not self.window_handle:
             print("无法置前窗口：设备未连接或句柄无效")
             return False
 
         try:
-            if self.minimized:
-                self.restore_window()
-                self.sleep(0.3)
-
-            # 兼容Windows 10+的窗口置前（避免权限问题）
-            win32gui.ShowWindow(self.window_handle, win32con.SW_SHOWNA)
-            win32gui.SetForegroundWindow(self.window_handle)
+            # 强制更新窗口状态
             self._update_window_info()
-            print("窗口置前成功")
-            return True
+            
+            # 如果窗口最小化，先恢复
+            if self.minimized:
+                print("检测到窗口最小化，正在恢复...")
+                win32gui.ShowWindow(self.window_handle, win32con.SW_RESTORE)
+                time.sleep(0.5)  # 等待窗口恢复
+                # 再次更新状态
+                self._update_window_info()
+            
+            # 激活窗口
+            win32gui.ShowWindow(self.window_handle, win32con.SW_SHOW)
+            win32gui.SetForegroundWindow(self.window_handle)
+            
+            # 检查是否真的激活了
+            time.sleep(0.1)
+            foreground_window = win32gui.GetForegroundWindow()
+            
+            if foreground_window == self.window_handle and not self.is_minimized():
+                print("窗口激活成功")
+                return True
+            else:
+                print(f"窗口激活失败: 前景窗口={foreground_window}, 最小化={self.minimized}")
+                return False
+                
         except Exception as e:
             error_msg = f"窗口置前失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
             return False
 
+    def _should_change_to_error_state(self, error_msg: str) -> bool:
+        """
+        判断错误是否严重到需要改变设备状态
+        
+        Returns:
+            bool: True表示需要转为ERROR状态，False表示只记录错误
+        """
+        serious_errors = [
+            "设备未连接",
+            "窗口句柄无效",
+            "设备不可用",
+            "截图失败",
+            "PrintWindow截图失败",
+            "获取窗口DC失败",
+            "连接失败",
+            "断开连接失败"
+        ]
+        
+        # 检查错误消息中是否包含严重错误关键词
+        for serious_error in serious_errors:
+            if serious_error in error_msg:
+                return True
+                
+        return False
+
     @logwrap
     def click(self,
-              pos: Tuple[int, int],
+              pos: Union[Tuple[int, int], Template],
               duration: float = 0.1,
               click_time: int = 1,
               right_click: bool = False,
@@ -372,12 +475,6 @@ class WindowsDevice(BaseDevice):
         """
         点击操作：仅支持坐标输入（基准坐标/客户区坐标），支持多点击
         状态流程：IDLE → BUSY → IDLE/ERROR
-        :param pos: 点击坐标 (x, y)
-        :param duration: 单次点击的按住时长（秒）
-        :param click_time: 点击次数（≥1）
-        :param right_click: 是否右键点击（默认左键）
-        :param is_base_coord: 是否为1920*1080基准坐标（默认False，即客户区坐标）
-        :return: 点击是否成功
         """
         # 1. 前置校验：设备状态 + 点击次数合法性
         if not self.is_operable:
@@ -397,60 +494,77 @@ class WindowsDevice(BaseDevice):
             # 3. 激活窗口（确保窗口在前台）
             if not self.set_foreground() or self.minimized:
                 raise RuntimeError("窗口未激活或已最小化")
-
-            # 4. 坐标转换：基准坐标 → 客户区坐标 → 屏幕坐标
-            x, y = pos
-            if is_base_coord:
-                # 基准坐标（1920*1080）→ 客户区坐标
-                client_x, client_y = self.convert_to_client_coords(x, y)
-                print(f"[DEBUG] 基准坐标({x},{y}) → 客户区坐标({client_x},{client_y})")
+            
+            if isinstance(pos, Template):
+                # 模板点击 - 使用更安全的方式
+                try:
+                    target_screen_x, target_screen_y = touch(
+                        pos, time=click_time, duration=duration, right_click=right_click
+                    )
+                    print(f"模板点击成功: {pos.filename}")
+                except Exception as template_error:
+                    # 模板点击失败，但不影响设备状态
+                    error_msg = f"模板点击失败: {str(template_error)}"
+                    print(error_msg)
+                    self.last_error = error_msg
+                    # 不转为ERROR状态，只是返回失败
+                    self._update_device_state(DeviceState.IDLE)
+                    return False
             else:
-                # 直接使用客户区坐标
-                client_x, client_y = x, y
-                print(f"[DEBUG] 使用客户区坐标: ({client_x},{client_y})")
+                # 4. 坐标转换：基准坐标 → 客户区坐标 → 屏幕坐标
+                x, y = pos
+                if is_base_coord:
+                    # 基准坐标（1920*1080）→ 客户区坐标
+                    client_x, client_y = self.convert_to_client_coords(x, y)
+                    print(f"[DEBUG] 基准坐标({x},{y}) → 客户区坐标({client_x},{client_y})")
+                else:
+                    # 直接使用客户区坐标
+                    client_x, client_y = x, y
+                    print(f"[DEBUG] 使用客户区坐标: ({client_x},{client_y})")
 
-            # 客户区坐标 → 屏幕坐标（调用你修改后的client_to_screen）
-            target_screen_x, target_screen_y = self.client_to_screen(
-                client_x, client_y)
-            print(
-                f"[DEBUG] 客户区坐标 → 屏幕坐标: ({target_screen_x},{target_screen_y})")
+                # 客户区坐标 → 屏幕坐标
+                target_screen_x, target_screen_y = self.client_to_screen(client_x, client_y)
+                print(f"[DEBUG] 客户区坐标 → 屏幕坐标: ({target_screen_x},{target_screen_y})")
 
-            # 5. 执行点击（支持多次点击）
-            # 先移动鼠标到目标位置（避免每次点击重复移动）
-            win32api.SetCursorPos((target_screen_x, target_screen_y))
-            time.sleep(0.05)  # 等待鼠标移动稳定
+                # 5. 执行点击（支持多次点击）
+                # 先移动鼠标到目标位置
+                win32api.SetCursorPos((target_screen_x, target_screen_y))
+                time.sleep(0.05)  # 等待鼠标移动稳定
 
-            # 定义点击事件（左键/右键）
-            down_event = win32con.MOUSEEVENTF_RIGHTDOWN if right_click else win32con.MOUSEEVENTF_LEFTDOWN
-            up_event = win32con.MOUSEEVENTF_RIGHTUP if right_click else win32con.MOUSEEVENTF_LEFTUP
+                # 定义点击事件（左键/右键）
+                down_event = win32con.MOUSEEVENTF_RIGHTDOWN if right_click else win32con.MOUSEEVENTF_LEFTDOWN
+                up_event = win32con.MOUSEEVENTF_RIGHTUP if right_click else win32con.MOUSEEVENTF_LEFTUP
 
-            # 循环执行点击（按click_time次数）
-            for i in range(click_time):
-                # 按下鼠标
-                win32api.mouse_event(down_event, 0, 0, 0, 0)
-                # 按住指定时长
-                time.sleep(duration)
-                # 抬起鼠标
-                win32api.mouse_event(up_event, 0, 0, 0, 0)
-                # 多次点击时，相邻两次点击间隔0.1秒（可调整）
-                if i < click_time - 1:
-                    time.sleep(0.1)
+                # 循环执行点击（按click_time次数）
+                for i in range(click_time):
+                    # 按下鼠标
+                    win32api.mouse_event(down_event, 0, 0, 0, 0)
+                    # 按住指定时长
+                    time.sleep(duration)
+                    # 抬起鼠标
+                    win32api.mouse_event(up_event, 0, 0, 0, 0)
+                    # 多次点击时，相邻两次点击间隔0.1秒
+                    if i < click_time - 1:
+                        time.sleep(0.1)
 
             # 6. 点击成功：恢复IDLE状态
             self._update_device_state(DeviceState.IDLE)
             click_type = "右键" if right_click else "左键"
             coord_type = "基准坐标" if is_base_coord else "客户区坐标"
-            log(f"点击成功：{click_type} {click_time}次 | 屏幕坐标{target_screen_x, target_screen_y} | 源类型：{coord_type}",
-                snapshot=True)
+            print(f"点击成功：{click_type} {click_time}次 | 屏幕坐标{target_screen_x, target_screen_y} | 源类型：{coord_type}")
             return True
 
         except Exception as e:
-            # 7. 异常处理：记录错误并转为ERROR状态
             error_msg = f"点击操作失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
-            log(f"点击异常: {e}", desc="点击操作失败")
+            
+            # 根据错误类型决定是否转为ERROR状态
+            if self._should_change_to_error_state(error_msg):
+                self._update_device_state(DeviceState.ERROR)
+            else:
+                self._update_device_state(DeviceState.IDLE)
+                
             return False
 
     @logwrap
@@ -474,13 +588,18 @@ class WindowsDevice(BaseDevice):
             pydirectinput.keyUp(key)
 
             self._update_device_state(DeviceState.IDLE)
-            log(f"按键成功：{key}（按住{duration}秒）")
+            print(f"按键成功：{key}（按住{duration}秒）")
             return True
         except Exception as e:
             error_msg = f"按键操作失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            
+            if self._should_change_to_error_state(error_msg):
+                self._update_device_state(DeviceState.ERROR)
+            else:
+                self._update_device_state(DeviceState.IDLE)
+                
             return False
 
     def text_input(self, text: str, interval: float = 0.05) -> bool:
@@ -502,13 +621,18 @@ class WindowsDevice(BaseDevice):
             time.sleep(interval * len(text))  # 等待输入完成
 
             self._update_device_state(DeviceState.IDLE)
-            log(f"文本输入成功：{text}")
+            print(f"文本输入成功：{text}")
             return True
         except Exception as e:
             error_msg = f"文本输入失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            
+            if self._should_change_to_error_state(error_msg):
+                self._update_device_state(DeviceState.ERROR)
+            else:
+                self._update_device_state(DeviceState.IDLE)
+                
             return False
 
     @logwrap
@@ -529,19 +653,15 @@ class WindowsDevice(BaseDevice):
 
             # 坐标转换：基准坐标 → 客户区坐标
             if is_base_coord:
-                start_client_x, start_client_y = self.convert_to_client_coords(
-                    start_x, start_y)
-                end_client_x, end_client_y = self.convert_to_client_coords(
-                    end_x, end_y)
+                start_client_x, start_client_y = self.convert_to_client_coords(start_x, start_y)
+                end_client_x, end_client_y = self.convert_to_client_coords(end_x, end_y)
             else:
                 start_client_x, start_client_y = start_x, start_y
                 end_client_x, end_client_y = end_x, end_y
 
             # 客户区坐标 → 屏幕坐标
-            start_screen_x, start_screen_y = self.client_to_screen(
-                start_client_x, start_client_y)
-            end_screen_x, end_screen_y = self.client_to_screen(
-                end_client_x, end_client_y)
+            start_screen_x, start_screen_y = self.client_to_screen(start_client_x, start_client_y)
+            end_screen_x, end_screen_y = self.client_to_screen(end_client_x, end_client_y)
 
             # 计算每步移动距离（steps越多越平滑）
             step_x = (end_screen_x - start_screen_x) / steps
@@ -561,13 +681,18 @@ class WindowsDevice(BaseDevice):
 
             pydirectinput.mouseUp(button='left')
             self._update_device_state(DeviceState.IDLE)
-            log(f"滑动成功：从{start_screen_x, start_screen_y}到{end_screen_x, end_screen_y}（{duration}秒）")
+            print(f"滑动成功：从{start_screen_x, start_screen_y}到{end_screen_x, end_screen_y}（{duration}秒）")
             return True
         except Exception as e:
             error_msg = f"滑动操作失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            
+            if self._should_change_to_error_state(error_msg):
+                self._update_device_state(DeviceState.ERROR)
+            else:
+                self._update_device_state(DeviceState.IDLE)
+                
             return False
 
     def wait(self, template, timeout: float = 10.0) -> bool:
@@ -576,7 +701,9 @@ class WindowsDevice(BaseDevice):
             print(f"无法等待元素：设备状态为 {self.state.name}")
             return False
 
-        if not self._update_device_state(DeviceState.BUSY):
+        # 只在需要时转为BUSY状态
+        was_busy = self.state == DeviceState.BUSY
+        if not was_busy and not self._update_device_state(DeviceState.BUSY):
             print("无法等待元素：当前状态不允许")
             return False
 
@@ -586,18 +713,27 @@ class WindowsDevice(BaseDevice):
 
             # 等待模板匹配
             pos = wait(template, timeout=timeout)
-            self._update_device_state(DeviceState.IDLE)
+            
+            # 恢复状态
+            if not was_busy:
+                self._update_device_state(DeviceState.IDLE)
+                
             if pos:
-                log(f"等待元素成功：{template.filename}（坐标：{pos}）")
+                print(f"等待元素成功：{template.filename}（坐标：{pos}）")
                 return True
             else:
-                log(f"等待元素超时：{template.filename}（{timeout}秒）")
+                print(f"等待元素超时：{template.filename}（{timeout}秒）")
                 return False
+                
         except Exception as e:
             error_msg = f"等待元素失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            
+            # 不改变设备状态
+            if not was_busy:
+                self._update_device_state(DeviceState.IDLE)
+                
             return False
 
     def exists(self, template) -> bool:
@@ -606,24 +742,36 @@ class WindowsDevice(BaseDevice):
             print("无法检查元素：设备未连接")
             return False
 
-        if not self._update_device_state(DeviceState.BUSY):
+        # 只在需要时转为BUSY状态
+        was_busy = self.state == DeviceState.BUSY
+        if not was_busy and not self._update_device_state(DeviceState.BUSY):
             print("无法检查元素：当前状态不允许")
             return False
 
         try:
             if not isinstance(template, Template):
-                raise ValueError(f"模板参数必须是Template对象,当前类型为:{type(template)}")
+                print(f"模板参数必须是Template对象,当前类型为:{type(template)}")
+                return False
 
             # 检查元素存在性
             result = exists(template)
-            self._update_device_state(DeviceState.IDLE)
-            log(f"元素检查结果：{template.filename} → {'存在' if result else '不存在'}")
+            
+            # 只有成功转为BUSY状态才需要转回IDLE
+            if not was_busy:
+                self._update_device_state(DeviceState.IDLE)
+                
+            print(f"元素检查结果：{template.filename} → {'存在' if result else '不存在'}")
             return result
+            
         except Exception as e:
             error_msg = f"检查元素存在失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            
+            # 重要：不改变设备状态，只是记录错误
+            if not was_busy:
+                self._update_device_state(DeviceState.IDLE)
+                
             return False
 
     # ------------------------------
@@ -643,8 +791,8 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             error_msg = f"最小化窗口失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            self._update_device_state(DeviceState.IDLE)
             return False
 
     def maximize_window(self) -> bool:
@@ -661,8 +809,8 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             error_msg = f"最大化窗口失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            self._update_device_state(DeviceState.IDLE)
             return False
 
     def restore_window(self) -> bool:
@@ -679,8 +827,8 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             error_msg = f"恢复窗口失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            self._update_device_state(DeviceState.IDLE)
             return False
 
     def resize_window(self, width: int, height: int) -> bool:
@@ -690,8 +838,7 @@ class WindowsDevice(BaseDevice):
             return False
 
         try:
-            win_left, win_top, _, _ = win32gui.GetWindowRect(
-                self.window_handle)
+            win_left, win_top, _, _ = win32gui.GetWindowRect(self.window_handle)
             # 调整窗口大小
             win32gui.SetWindowPos(
                 self.window_handle,
@@ -705,8 +852,8 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             error_msg = f"调整窗口大小失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            self._update_device_state(DeviceState.IDLE)
             return False
 
     def move_window(self, x: int, y: int) -> bool:
@@ -728,8 +875,8 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             error_msg = f"移动窗口失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            self._update_device_state(DeviceState.IDLE)
             return False
 
     def reset_window(self) -> bool:
@@ -755,8 +902,8 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             error_msg = f"重置窗口失败: {str(e)}"
             print(error_msg)
-            self._update_device_state(DeviceState.ERROR)
             self.last_error = error_msg
+            self._update_device_state(DeviceState.IDLE)
             return False
 
     # ------------------------------
