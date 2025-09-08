@@ -1,142 +1,164 @@
 from abc import ABC, abstractmethod
 from enum import Enum, auto
-from typing import Optional, Tuple
-from airtest.core.api import paste
+from typing import Optional, Tuple, Callable
+from threading import Lock
+
 
 class DeviceState(Enum):
-    DISCONNECTED = auto() # 设备已断开
-    CONNECTING = auto() # 连接中
-    CONNECTED = auto() # 设备已连接
-    BUSY = auto() # 设备忙
-    IDLE = auto() # 设备空闲
-    ERROR = auto() # 设备错误
+    """设备状态枚举，覆盖全生命周期的互斥状态"""
+    DISCONNECTED = auto()  # 设备已断开
+    CONNECTING = auto()    # 连接中
+    CONNECTED = auto()     # 设备已连接（基础状态）
+    BUSY = auto()          # 设备忙（执行操作中）
+    IDLE = auto()          # 设备空闲（已连接且可操作）
+    ERROR = auto()         # 设备错误
 
 
-class BaseDevice(ABC):    
+class BaseDevice(ABC):
+    """
+    设备控制抽象基类，带严格的状态管理：
+    - 状态转换校验（防止不合理状态覆盖）
+    - 线程安全（状态更新加锁）
+    - 状态变化回调（支持上层监听）
+    """
+    # 合法状态转换表：key为当前状态，value为允许转换到的状态列表
+    _VALID_TRANSITIONS = {
+        DeviceState.DISCONNECTED: [DeviceState.CONNECTING, DeviceState.ERROR],
+        DeviceState.CONNECTING: [DeviceState.CONNECTED, DeviceState.DISCONNECTED, DeviceState.ERROR],
+        DeviceState.CONNECTED: [DeviceState.IDLE, DeviceState.DISCONNECTED, DeviceState.ERROR],
+        DeviceState.IDLE: [DeviceState.BUSY, DeviceState.DISCONNECTED, DeviceState.ERROR],
+        DeviceState.BUSY: [DeviceState.IDLE, DeviceState.DISCONNECTED, DeviceState.ERROR],
+        DeviceState.ERROR: [DeviceState.DISCONNECTED, DeviceState.CONNECTING]
+    }
+
     def __init__(self, device_uri: str):
         self.device_uri = device_uri
-        self.connected = False
-        self.resolution: Tuple[int, int] = (0, 0)
-        self.minimized = False
-        self.state = DeviceState.DISCONNECTED
-        self.last_error: Optional[str] = None
+        self.resolution: Tuple[int, int] = (0, 0)  # 设备分辨率
+        self.minimized = False  # 是否最小化
+        self.state = DeviceState.DISCONNECTED  # 初始状态
+        self.last_error: Optional[str] = None  # 最后一次错误信息
+        self._state_lock = Lock()  # 状态更新锁（保证线程安全）
+        self._state_listeners = []  # 状态变化监听器
 
+    @property
+    def is_connected(self) -> bool:
+        """从状态推导是否已连接（替代原self.connected）"""
+        return self.state in [DeviceState.CONNECTED, DeviceState.IDLE, DeviceState.BUSY]
+
+    @property
+    def is_operable(self) -> bool:
+        """判断设备是否可执行操作（已连接且非忙碌/错误）"""
+        return self.state in [DeviceState.CONNECTED, DeviceState.IDLE]
+
+    def _update_device_state(self, new_state: DeviceState) -> bool:
+        """
+        线程安全的状态更新，仅允许合法状态转换
+        :return: 状态是否更新成功
+        """
+        with self._state_lock:  # 加锁保证原子操作
+            current_state = self.state
+            # 校验转换状态转换转换合法性
+            if new_state not in self._VALID_TRANSITIONS.get(current_state, []):
+                print(f"状态转换错误: 不允许从 {current_state.name} 转换到 {new_state.name}")
+                return False
+            
+            # 执行状态更新
+            old_state = current_state
+            self.state = new_state
+            self._trigger_state_listeners(old_state, new_state)
+            return True
+
+    def add_state_listener(self, callback: Callable[[DeviceState, DeviceState], None]) -> None:
+        """
+        添加状态变化监听器
+        :param callback: 回调函数，参数为 (旧状态, 新状态)
+        """
+        if callback not in self._state_listeners:
+            self._state_listeners.append(callback)
+
+    def remove_state_listener(self, callback: Callable[[DeviceState, DeviceState], None]) -> None:
+        """移除状态变化监听器"""
+        if callback in self._state_listeners:
+            self._state_listenerss.remove(callback)
+
+    def _trigger_state_listeners(self, old_state: DeviceState, new_state: DeviceState) -> None:
+        """触发        触发所有状态监听器
+        :param old_state: 旧状态
+        :param new_state: 新状态
+        """
+        for callback in self._state_listeners:
+            try:
+                callback(old_state, new_state)
+            except Exception as e:
+                print(f"状态监听器执行失败: {str(e)}")
+
+    # 以下为设备操作抽象方法（子类必须实现）
     @abstractmethod
     def connect(self, timeout: float = 10.0) -> bool:
-        """
-        连接设备
-        :param timeout: 连接超时时间(秒)
-        :return: 是否连接成功
-        """
+        """连接设备"""
         pass
 
     @abstractmethod
     def disconnect(self) -> bool:
-        """
-        断开连接并清理资源
-        :return: 是否成功断开
-        """
-        self.connected = False
-        self.state = DeviceState.DISCONNECTED
+        """断开连接并清理资源"""
         pass
 
     @abstractmethod
     def capture_screen(self) -> Optional[bytes]:
-        """
-        捕获屏幕截图
-        :return: 截图二进制数据或None
-        """
+        """捕获屏幕截图"""
         pass
 
     @abstractmethod
-    def click(self, x: int, y: int, duration: float = 0.1, time: int = 1, right_click: bool = False, is_relative: bool = False) -> bool:
-        """
-        点击指定位置
-        :param x: X坐标
-        :param y: Y坐标
-        :param duration: 点击持续时间(秒)
-        :return: 是否点击成功
-        """
+    def click(self, x: int, y: int, duration: float = 0.1, time: int = 1, 
+              right_click: bool = False, is_relative: bool = False) -> bool:
+        """点击指定位置"""
         pass
 
     @abstractmethod
     def key_press(self, key: str, duration: float = 0.1) -> bool:
-        """
-        按键操作
-        :param key: 按键名称
-        :param duration: 按键持续时间(秒)
-        :return: 是否按键成功
-        """
+        """按键操作"""
         pass
 
     @abstractmethod
     def text_input(self, text: str, interval: float = 0.05) -> bool:
-        """
-        文本输入
-        :param text: 要输入的文本
-        :param interval: 字符输入间隔(秒)
-        :return: 是否输入成功
-        """
+        """文本输入"""
         pass
 
     @abstractmethod
-    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5) -> bool:
-        """
-        滑动操作 (跨平台)
-        :param start_x: 起始X坐标
-        :param start_y: 起始Y坐标
-        :param end_x: 结束X坐标
-        :param end_y: 结束Y坐标
-        :param duration: 滑动持续时间(秒)
-        :return: 是否滑动成功
-        """
+    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, 
+              duration: float = 0.5) -> bool:
+        """滑动操作"""
         pass
 
     @abstractmethod
     def wait(self, template, timeout: float = 10.0) -> bool:
-        """
-        等待元素出现
-        :param template: 要等待的模板
-        :param timeout: 超时时间(秒)
-        :return: 是否等待成功
-        """
+        """等待元素出现"""
         pass
 
     @abstractmethod
     def exists(self, template) -> bool:
-        """
-        检查元素是否存在
-        :param template: 要检查的模板
-        :return: 元素是否存在
-        """
+        """检查元素是否存在"""
         pass
 
     @abstractmethod
     def sleep(self, secs: float) -> bool:
-        """
-        设备睡眠
-        :param secs: 睡眠时间(秒)
-        :return: 是否执行成功
-        """
+        """设备睡眠"""
         pass
 
+    # 以下为默认实现的通用方法（子类可按需重写）
     def paste_text(self, text: str) -> bool:
-        """
-        粘贴文本
-        :param text: 要粘贴的文本
-        :return: 是否粘贴成功
-        """
+        """粘贴文本（默认实现，子类可重写）"""
         try:
+            from airtest.core.api import paste  # 延迟导入，避免依赖强制要求
             paste(text)
             return True
         except Exception as e:
+            self.last_error = f"粘贴失败: {str(e)}"
+            self._update_device_state(DeviceState.ERROR)
             return False
 
     def set_foreground(self) -> bool:
-        """
-        将窗口置前
-        :return: 是否置前成功
-        """
+        """将窗口置前（默认返回True，子类应重写实际逻辑）"""
         return True
 
     def get_resolution(self) -> Tuple[int, int]:

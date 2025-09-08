@@ -62,7 +62,7 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
             if state == "chapter_selected":
                 if pos := auto.check_element_exist("map_collection/探寻"):
                     logger.info("开始探寻")
-                    auto.click(pos, time=2)
+                    auto.click(pos, click_time=2)
                     auto.sleep(5)
                     state = "exploring"
                 continue
@@ -73,7 +73,7 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
                 if not materials_collected:
                     if pos := auto.check_element_exist("map_collection/材料吸收"):
                         logger.info("收集材料")
-                        auto.click(pos, time=2)
+                        auto.click(pos, click_time=2)
                         collect_attempts += 1
                         
                         if auto.check_element_exist("map_collection/吸收材料完成"):
@@ -85,7 +85,7 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
                 if not gold_collected:
                     if pos := auto.check_element_exist("map_collection/金币吸收"):
                         logger.info("收集金币")
-                        auto.click(pos, time=2)
+                        auto.click(pos, click_time=2)
                         collect_attempts += 1
                         
                         if auto.check_element_exist("map_collection/金币吸收完成"):

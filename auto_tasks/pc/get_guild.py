@@ -46,7 +46,7 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                 
             # 返回处理
             if state == "checking":
-                if auto.template_click("public/返回键1",time=2):
+                if auto.template_click("public/返回键1",click_time=2):
                     logger.info("成功点击返回键")
                     auto.sleep(2)
                     state = "completed"

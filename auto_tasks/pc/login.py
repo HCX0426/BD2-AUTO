@@ -29,7 +29,7 @@ def login(auto: Auto, timeout: int = 300) -> bool:
             if state == "start_screen":
                 if pos := auto.check_element_exist("login/开始游戏"):
                     logger.info("检测到开始游戏按钮，点击进入")
-                    auto.click(pos,time=3)
+                    auto.click(pos,click_time=3)
                     auto.sleep(3)
                 state = "main_check"
                 continue

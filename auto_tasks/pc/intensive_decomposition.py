@@ -30,7 +30,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
             if phase == "decomposition":
                 if state == "init":
                     if back_to_main(auto):
-                        if auto.text_click("背包",time=2):
+                        if auto.text_click("背包",click_time=2):
                             logger.info("打开背包")
                             auto.sleep(1)
                             state = "bag_opened"
@@ -39,8 +39,8 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                 if state == "bag_opened":
                     if pos := auto.check_element_exist("intensive_decomposition/装备标识"):
                         logger.info("进入装备界面")
-                        auto.click(pos, time=2)
-                        auto.click(pos, time=2)
+                        auto.click(pos, click_time=2)
+                        auto.click(pos, click_time=2)
                         auto.sleep(0.5)
                         state = "filter_set"
                     else:
@@ -57,7 +57,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                             auto.click(pos)
                             logger.info("选择R装备")
                             auto.sleep(2)
-                            if auto.text_click("确认",time=3):
+                            if auto.text_click("确认",click_time=3):
                                 logger.info("确认筛选条件")
                                 auto.sleep(3)
                                 state = "confirm"
@@ -98,7 +98,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
             elif phase == "enhancement":
                 if state == "init":
                     if back_to_main(auto):
-                        if auto.text_click("背包",time=2):
+                        if auto.text_click("背包",click_time=2):
                             logger.info("打开背包")
                             auto.sleep(1)
                             state = "bag_opened"
@@ -107,8 +107,8 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                 if state == "bag_opened":
                     if pos := auto.check_element_exist("intensive_decomposition/装备标识"):
                         logger.info("进入装备界面")
-                        auto.click(pos, time=2)
-                        auto.click(pos, time=2)
+                        auto.click(pos, click_time=2)
+                        auto.click(pos, click_time=2)
                         auto.sleep(0.5)
                         state = "filter_set"
                     else:
@@ -130,7 +130,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                                 if pos := auto.check_element_exist("intensive_decomposition/制作"):
                                     auto.click(pos)
                                     auto.sleep(1)
-                                    if auto.text_click("确认",time=3):
+                                    if auto.text_click("确认",click_time=3):
                                         auto.sleep(1)
                                         state = "confirm"
                     continue
@@ -139,7 +139,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if auto.click((785, 200)):  # 选择装备位置
                         logger.info("选择装备")
                         auto.sleep(1)
-                        if auto.text_click("精炼",time=3):
+                        if auto.text_click("精炼",click_time=3):
                             logger.info("进入精炼界面")
                             auto.sleep(2)
                     if auto.text_click("连续精炼"):
@@ -155,10 +155,10 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                             auto.click(pos)
                             auto.sleep(1)
                             if pos := auto.check_element_exist("intensive_decomposition/精炼"):
-                                auto.click(pos,time=2)
+                                auto.click(pos,click_time=2)
                                 auto.sleep(1)
                         if pos := auto.check_element_exist("public/跳过"):
-                            auto.click(pos,time=2)
+                            auto.click(pos,click_time=2)
                             auto.sleep(5)
                     if pos := auto.text_click("确认",click=False):
                         auto.click(pos)

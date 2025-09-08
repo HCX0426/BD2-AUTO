@@ -19,7 +19,7 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
         logger.info("开始抽抽乐")
         start_time = time.time()
         first = True
-        last_count = 0
+        last_count = target_count
 
         while time.time() - start_time < timeout:
             if auto.check_should_stop():
@@ -29,7 +29,7 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
             if first:
                 if back_to_main(auto):
                     auto.text_click("抽抽乐")
-                    auto.sleep(4)
+                    auto.sleep(3)
                     first = False
 
             if not first:
@@ -43,19 +43,19 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
                             logger.info("滑动抽抽乐")
                             auto.sleep(2)
                     else:
-                        if auto.swipe((410, 310), (410, 195), duration=4, steps=4):
+                        if auto.swipe((410, 310), (410, 175), duration=4, steps=4):
                             logger.info("滑动抽抽乐")
                             auto.sleep(1)
 
-                    if auto.click((410, 310), time=2):
-                        auto.click((410, 310), time=2)
+                    if auto.click((410, 310), click_time=2):
+                        auto.click((410, 310), click_time=2)
                         auto.sleep(1)
-                        auto.click((410, 310), time=2)
+                        auto.click((410, 310), click_time=2)
                         auto.sleep(1)
                         logger.info("点击抽抽乐")
                         
 
-                if auto.text_click("购买",time=2):
+                if auto.text_click("购买",click_time=2):
                     logger.info("点击购买")
                     auto.sleep(2)
                 pos = None

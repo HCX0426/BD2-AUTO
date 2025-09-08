@@ -30,10 +30,10 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                 if back_to_main(auto) and enter_map_select(auto):
                     if pos := auto.check_element_exist("get_pvp/pvp地图"):
                         logger.info("进入PVP地图1")
-                        auto.click(pos, time=3)
+                        auto.click(pos, click_time=3)
                     elif pos := auto.check_element_exist("get_pvp/pvp地图2"):
                         logger.info("进入PVP地图2")
-                        auto.click(pos, time=3)
+                        auto.click(pos, click_time=3)
                     else:
                         logger.warning("未找到PVP地图")
                         continue
@@ -71,12 +71,12 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                 # 设置MAX次数
                 if pos := auto.text_click("MAX", click=False):
                     logger.info("设置MAX战斗次数")
-                    auto.click(pos,time=2)
+                    auto.click(pos,click_time=2)
                     auto.sleep(1)
                     if pos := auto.check_element_exist("get_pvp/选项完成"):
                         logger.info("开始战斗")
-                        auto.click(pos, time=2)
-                        auto.click(pos, time=2)
+                        auto.click(pos, click_time=2)
+                        auto.click(pos, click_time=2)
                         state = "battle_prepared"
                 continue
                 
@@ -90,8 +90,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     auto.sleep(1)
                     if pos := auto.check_element_exist("get_pvp/选项完成"):
                         logger.info("开始战斗")
-                        auto.click(pos, time=2)
-                        auto.click(pos, time=2)
+                        auto.click(pos, click_time=2)
+                        auto.click(pos, click_time=2)
                     continue
                 
                 # 处理战斗结果
@@ -104,7 +104,7 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                 # 离开战斗
                 if pos := auto.text_click("离开", click=False):
                     logger.info("离开战斗界面")
-                    auto.click(pos, time=3)
+                    auto.click(pos, click_time=3)
                     auto.sleep(3)
                     state = "battle_completed"
                 else:

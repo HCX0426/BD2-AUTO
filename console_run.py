@@ -19,15 +19,16 @@ def console_execute(task_ids=None):
             auto.logger.error(f"设备添加失败: {auto.last_error}")
             return False
         auto.start()
+        auto.swipe((410, 310), (410, 175), duration=4, steps=4)
 
         # auto.swipe((410, 410), (410, 180),duration=6, steps=6,is_base_coord = True)
-        pos = auto.check_element_exist("public/主界面")
-        if pos:
-           auto.click(pos)
-           print(pos)
-        else:
-            auto.logger.error("主界面元素未找到")
-            return False
+        # pos = auto.text_click("背包")
+        # if pos:
+        # #    auto.click(pos)
+        #    print(pos)
+        # else:
+        #     auto.logger.error("主界面元素未找到")
+        #     return False
 
 
 
