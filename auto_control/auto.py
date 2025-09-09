@@ -27,6 +27,7 @@ from .ocr_processor import OCRProcessor
 from .device_base import BaseDevice, DeviceState
 from airtest.core.api import Template
 
+
 class Auto:
     def __init__(
         self,
@@ -38,25 +39,28 @@ class Auto:
         self.should_stop = False  # 任务中断标志
         self.running = False      # 系统运行状态
 
-        # 核心模块初始化
-        self.device_manager = DeviceManager()
-        self.ocr_processor = OCRProcessor(engine=ocr_engine)
+        # 核心模块初始化（传递日志实例）
         self.logger = Logger(
             task_name="System",
             base_log_dir=LOG_CONFIG["BASE_LOG_DIR"],
             log_file_prefix="system"
         )
-
+        # 设备管理器初始化时传递日志实例
+        self.device_manager = DeviceManager(logger=self.logger)
+        self.ocr_processor = OCRProcessor(engine=ocr_engine, logger=self.logger)
+        
         # 设备配置
         self.default_device_uri = device_uri
         self.base_resolution = None
         
         # 图像处理器
-        self.image_processor = ImageProcessor()
+        self.image_processor = ImageProcessor(logger=self.logger)
 
         # 结果与错误追踪
         self.last_result = None    # 最后操作结果
         self.last_error = None     # 最后错误信息
+        
+        self.logger.info("Auto自动化系统初始化完成")
 
     def check_should_stop(self) -> bool:
         """线程安全检查任务中断标志"""
@@ -122,6 +126,7 @@ class Auto:
                 result = True
             
             self.last_result = result
+            self.logger.debug(f"睡眠完成: {secs}秒")
             return result
         except Exception as e:
             self.last_error = f"睡眠失败: {str(e)}"
@@ -138,8 +143,12 @@ class Auto:
             return False
 
         try:
-            # 调用DeviceManager添加设备
-            result = self.device_manager.add_device(device_uri, timeout=timeout)
+            # 传递日志实例给DeviceManager
+            result = self.device_manager.add_device(
+                device_uri, 
+                timeout=timeout,
+                logger=self.logger  # 关键：将Auto的日志实例传递下去
+            )
             self.last_result = result
 
             if result:
@@ -170,7 +179,7 @@ class Auto:
             return result
         except Exception as e:
             self.last_error = f"添加设备异常: {str(e)}"
-            self.logger.error(f"错误: {self.last_error}")
+            self.logger.error(f"错误: {self.last_error}", exc_info=True)
             self.last_result = False
             return False
 
@@ -182,6 +191,8 @@ class Auto:
         if not result:
             self.last_error = f"设置活动设备失败: {device_uri}"
             self.logger.error(f"错误: {self.last_error}")
+        else:
+            self.logger.info(f"活动设备已切换为: {device_uri}")
         
         return result
 
@@ -250,10 +261,8 @@ class Auto:
             self.should_stop = True  # 触发所有任务中断
 
         # 断开所有设备连接
-        for uri, device in self.device_manager.get_all_devices().items():
-            if device.is_connected:
-                device.disconnect()
-                self.logger.info(f"设备 {uri} 已断开连接")
+        success, fail = self.device_manager.disconnect_all()
+        self.logger.info(f"设备断开统计: 成功{success}个, 失败{fail}个")
 
         # 关闭日志线程池
         self.logger.shutdown()
@@ -263,12 +272,12 @@ class Auto:
     def get_status(self) -> dict:
         """获取系统完整状态"""
         active_device = self.device_manager.get_active_device()
-        return {
+        status = {
             "system_running": self.running,
             "task_should_stop": self.check_should_stop(),
             "active_device": active_device.device_uri if active_device else None,
             "active_device_state": active_device.get_state().name if active_device else None,
-            "total_devices": len(self.device_manager.devices),
+            "total_devices": len(self.device_manager),
             "device_list": list(self.device_manager.devices.keys()),
             "device_states": {
                 uri: dev.get_state().name for uri, dev in self.device_manager.devices.items()
@@ -278,6 +287,8 @@ class Auto:
             "last_error": self.last_error,
             "last_result": self.last_result
         }
+        self.logger.debug(f"系统状态查询: {status}")
+        return status
 
     # ======================== 核心操作方法 ========================
     def click(
@@ -332,7 +343,8 @@ class Auto:
             self.last_error = device.last_error or "点击执行失败"
             self.logger.error(f"错误: {self.last_error}")
         else:
-            self.logger.info(f"点击成功: 坐标({abs_x},{abs_y}) | 次数{click_time}")
+            coord_type = "基准坐标" if is_base_coord else "客户区坐标"
+            self.logger.info(f"点击成功: {coord_type}({abs_x},{abs_y}) | 次数{click_time}")
         
         return self.last_result
 
@@ -534,7 +546,7 @@ class Auto:
         # 执行OCR
         self.last_result = self.ocr_processor.recognize_text(screen, lang=lang)
         if self.last_result:
-            self.logger.info(f"OCR识别成功: {self.last_result}")
+            self.logger.info(f"OCR识别成功: {self.last_result[:50]}...")  # 截断长文本
         else:
             self.last_error = "OCR识别失败: 未识别到文本"
             self.logger.warning(f"警告: {self.last_error}")
@@ -754,7 +766,7 @@ class Auto:
             return self.last_result
         except Exception as e:
             self.last_error = f"检查元素异常: {str(e)}"
-            self.logger.error(f"错误: {self.last_error}")
+            self.logger.error(f"错误: {self.last_error}", exc_info=True)
             self.last_result = False
             return False
 
@@ -784,7 +796,7 @@ class Auto:
             self.last_result = screen
 
             if screen is None:
-                self.last_error = "截图失败: 未获取到图像数据"
+                self.last_error = "截图失败: 底层返回空图像"
                 self.logger.error(f"错误: {self.last_error}")
                 return None
 
@@ -798,7 +810,7 @@ class Auto:
             return screen
         except Exception as e:
             self.last_error = f"截图异常: {str(e)}"
-            self.logger.error(f"错误: {self.last_error}")
+            self.logger.error(f"错误: {self.last_error}", exc_info=True)
             self.last_result = None
             return None
 
@@ -865,7 +877,7 @@ class Auto:
             self.last_result = False
             return False
 
-        # 执行滑动（适配改进后的device.swipe）
+        # 执行滑动
         self.last_result = device.swipe(
             start_pos[0], start_pos[1],
             end_pos[0], end_pos[1],
@@ -914,3 +926,4 @@ class Auto:
             self.logger.info(f"文本输入成功: {text}")
         
         return self.last_result
+    

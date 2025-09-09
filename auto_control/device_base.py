@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from enum import Enum, auto
 from typing import Optional, Tuple, Callable
 from threading import Lock
+from functools import wraps
+from typing import Callable, Any
 
 
 class DeviceState(Enum):
@@ -79,10 +81,10 @@ class BaseDevice(ABC):
     def remove_state_listener(self, callback: Callable[[DeviceState, DeviceState], None]) -> None:
         """移除状态变化监听器"""
         if callback in self._state_listeners:
-            self._state_listenerss.remove(callback)
+            self._state_listeners.remove(callback)
 
     def _trigger_state_listeners(self, old_state: DeviceState, new_state: DeviceState) -> None:
-        """触发        触发所有状态监听器
+        """触发所有状态监听器
         :param old_state: 旧状态
         :param new_state: 新状态
         """
@@ -91,6 +93,50 @@ class BaseDevice(ABC):
                 callback(old_state, new_state)
             except Exception as e:
                 print(f"状态监听器执行失败: {str(e)}")
+
+    # 在 BaseDevice 类中修改 require_operable 装饰器
+    @classmethod
+    def require_operable(cls, func):
+        """
+        类方法装饰器：校验设备是否可操作，并尝试切换为BUSY状态
+        """
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            # 1. 校验设备是否可操作（CONNECTED/IDLE）
+            if not self.is_operable:
+                error_msg = f"无法执行 {func.__name__}：设备状态为 {self.state.name}"
+                print(error_msg)
+                self.last_error = error_msg
+                return False
+
+            # 2. 尝试切换为BUSY状态
+            if not self._update_device_state(DeviceState.BUSY):
+                error_msg = f"无法执行 {func.__name__}：当前状态不允许切换为BUSY"
+                print(error_msg)
+                self.last_error = error_msg
+                return False
+
+            # 3. 执行原方法
+            try:
+                result = func(self, *args, **kwargs)
+                # 操作成功，恢复为IDLE状态
+                self._update_device_state(DeviceState.IDLE)
+                return result
+            except Exception as e:
+                # 若原方法抛出异常，自动记录错误并恢复状态
+                error_msg = f"{func.__name__} 执行异常: {str(e)}"
+                print(error_msg)
+                self.last_error = error_msg
+                
+                # 根据错误类型决定是否转为ERROR状态
+                if hasattr(self, '_should_change_to_error_state') and \
+                self._should_change_to_error_state(error_msg):
+                    self._update_device_state(DeviceState.ERROR)
+                else:
+                    self._update_device_state(DeviceState.IDLE)
+                return False
+
+        return wrapper
 
     # 以下为设备操作抽象方法（子类必须实现）
     @abstractmethod
@@ -172,3 +218,4 @@ class BaseDevice(ABC):
     def get_state(self) -> DeviceState:
         """获取设备当前状态"""
         return self.state
+    
