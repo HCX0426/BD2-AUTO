@@ -931,7 +931,6 @@ class ImageProcessor:
         if best_match.confidence > 0:
             self.logger.info(
                 f"多尺度模板匹配成功 | 模板: {template_name} | "
-                f"最佳比例: {scales[np.argmax([r.confidence for r in results])]:.2f} | "
                 f"置信度: {best_match.confidence:.2f} | 坐标: {best_match.position}"
             )
         else:
