@@ -39,11 +39,11 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
                 else:
                     if last_count != target_count:
                         last_count = target_count
-                        if auto.swipe((410, 410), (410, 203), duration=2, steps=1, is_base_coord=True):
+                        if auto.swipe((410, 410), (410, 203), duration=2, steps=2, is_base_coord=True):
                             logger.info("滑动抽抽乐")
                             auto.sleep(2)
                     else:
-                        if auto.swipe((410, 310), (410, 203), duration=1, steps=1, is_base_coord=True):
+                        if auto.swipe((410, 310), (410, 203), duration=1, steps=2, is_base_coord=True):
                             logger.info("滑动抽抽乐")
                             auto.sleep(1)
 

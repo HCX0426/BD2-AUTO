@@ -58,7 +58,11 @@ class BaseDevice(ABC):
         :return: 状态是否更新成功
         """
         with self._state_lock:  # 加锁保证原子操作
+            
             current_state = self.state
+            if new_state == current_state:
+                return True  # 相同状态不触发转换
+            
             # 校验转换状态转换转换合法性
             if new_state not in self._VALID_TRANSITIONS.get(current_state, []):
                 print(f"状态转换错误: 不允许从 {current_state.name} 转换到 {new_state.name}")

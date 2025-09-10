@@ -8,32 +8,27 @@ from typing import Any, Dict, List
 
 # 标准化的语言代码映射（主键为标准化代码）
 LANGUAGE_CODE_MAP = {
-    'chi_sim': {'name': '简体中文', 'easyocr': 'ch_sim', 'tesseract': 'chi_sim'},
-    'chi_tra': {'name': '繁体中文', 'easyocr': 'ch_tra', 'tesseract': 'chi_tra'},
-    'eng': {'name': '英文', 'easyocr': 'en', 'tesseract': 'eng'},
-    'jpn': {'name': '日文', 'easyocr': 'ja', 'tesseract': 'jpn'}
+    'chi_sim': {'name': '简体中文', 'easyocr': 'ch_sim'},
+    'chi_tra': {'name': '繁体中文', 'easyocr': 'ch_tra'},
+    'eng': {'name': '英文', 'easyocr': 'en'},
+    'jpn': {'name': '日文', 'easyocr': 'ja'}
 }
 
 # 各引擎的默认语言组合（使用标准化代码）
 ENGINE_DEFAULT_LANGUAGES = {
-    'tesseract': ['chi_sim', 'eng'],
     'easyocr': ['ch_sim', 'en']
 }
 
 # 语言强制组合规则（针对特定引擎）
 LANGUAGE_COMBINATION_RULES = {
     'easyocr': {
-        'ch_tra': ['ch_tra', 'en']  # 使用繁体时必须包含英文
+        'ch_tra': ['ch_tra', 'en']
     }
+    # 移除了 Tesseract 的组合规则
 }
 
 # 引擎基础配置
 ENGINE_CONFIGS = {
-    'tesseract': {
-        'gpu': False,
-        'timeout': 30,
-        'preprocess': True
-    },
     'easyocr': {
         'gpu': True,
         'timeout': 60,
@@ -51,12 +46,13 @@ PREPROCESS_CONFIG = {
 def get_default_languages(engine: str) -> str:
     """获取指定引擎的默认语言组合"""
     if engine not in ENGINE_DEFAULT_LANGUAGES:
-        raise ValueError(f"Unsupported OCR engine: {engine}")
+        raise ValueError(f"不支持的OCR引擎: {engine}")
     return '+'.join(ENGINE_DEFAULT_LANGUAGES[engine])
 
 def convert_lang_code(lang: str, engine: str) -> str:
     """将标准化语言代码转换为指定引擎的代码"""
     if lang not in LANGUAGE_CODE_MAP:
+        # 如果不在映射表中，直接返回原值（可能是直接使用引擎代码）
         return lang
     return LANGUAGE_CODE_MAP[lang].get(engine, lang)
 
@@ -74,4 +70,6 @@ def validate_lang_combination(langs: List[str], engine: str) -> List[str]:
 
 def get_engine_config(engine: str) -> Dict[str, Any]:
     """获取引擎配置"""
-    return ENGINE_CONFIGS.get(engine, {})
+    if engine not in ENGINE_CONFIGS:
+        raise ValueError(f"不支持的OCR引擎: {engine}")
+    return ENGINE_CONFIGS[engine]

@@ -421,18 +421,18 @@ class Auto:
         return self.last_result
 
     def text_click(
-        self,
-        target_text: str,
-        click: bool = True,
-        lang: str = None,
-        roi: Optional[tuple] = None,
-        delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None,
-        duration: float = 0.1,
-        click_time: int = 1,
-        right_click: bool = False
-    ) -> Optional[Tuple[int, int]]:
-        """OCR文本识别并点击（自动适配窗口大小）"""
+            self,
+            target_text: str,
+            click: bool = True,
+            lang: str = None,
+            roi: Optional[tuple] = None,  # 格式：(x, y, w, h)，基于 BASE_RESOLUTION 的绝对坐标
+            delay: float = DEFAULT_CLICK_DELAY,
+            device_uri: Optional[str] = None,
+            duration: float = 0.1,
+            click_time: int = 1,
+            right_click: bool = False
+        ) -> Optional[Tuple[int, int]]:
+        """OCR文本识别并点击（支持基于基准绝对坐标的ROI，自动适配窗口大小）"""
         if self.check_should_stop():
             self.logger.info("文本点击任务被中断")
             self.last_result = None
@@ -446,28 +446,102 @@ class Auto:
             self.last_result = None
             return None
 
-        # 1. 获取窗口信息
-        window_w, window_h = device.resolution
-        if window_w == 0 or window_h == 0:
-            self.last_error = "文本点击失败: 窗口分辨率无效"
+        # 1. 确保窗口/客户区信息最新（关键：获取当前客户区尺寸用于缩放）
+        device._update_window_info()  # 强制更新客户区大小
+        client_width, client_height = device._client_size
+        base_width, base_height = device.BASE_RESOLUTION  # 从WindowsDevice获取基准分辨率（如1920x1080）
+        
+        # 校验客户区和基准分辨率有效性
+        if client_width == 0 or client_height == 0:
+            self.last_error = "文本点击失败: 客户区尺寸无效"
+            self.logger.error(f"错误: {self.last_error}")
+            self.last_result = None
+            return None
+        if base_width == 0 or base_height == 0:
+            self.last_error = "文本点击失败: 基准分辨率未配置"
             self.logger.error(f"错误: {self.last_error}")
             self.last_result = None
             return None
 
-        # 2. 截图
+        # 2. 计算缩放比例（当前客户区 / 基准分辨率）
+        scale_x = client_width / base_width  # 水平缩放比例
+        scale_y = client_height / base_height  # 垂直缩放比例
+        self.logger.debug(
+            f"ROI缩放参数 | 基准分辨率: {base_width}x{base_height} | "
+            f"当前客户区: {client_width}x{client_height} | "
+            f"缩放比例(x/y): {scale_x:.2f}/{scale_y:.2f}"
+        )
+
+        # 3. 截图（WindowsDevice.capture_screen 已返回客户区截图，无需处理非客户区）
         screen = device.capture_screen()
         if screen is None:
             self.last_error = "文本点击失败: 截图失败"
             self.logger.error(f"错误: {self.last_error}")
             self.last_result = None
             return None
-
-        # 3. OCR识别
+        # 校验截图尺寸与客户区一致（避免缩放错误）
         screen_h, screen_w = screen.shape[:2]
-        # 处理ROI区域
-        roi_screen = self.image_processor.get_roi_region(screen, roi) if roi else screen
+        if not (abs(screen_w - client_width) < 2 and abs(screen_h - client_height) < 2):
+            self.logger.warning(
+                f"截图尺寸与客户区不匹配 | 截图: {screen_w}x{screen_h} | "
+                f"客户区: {client_width}x{client_height} | 可能影响ROI精度"
+            )
+
+        # 4. 处理ROI：将基准绝对坐标转换为当前客户区的绝对坐标
+        region = None  # 最终传给find_text_position的区域（当前客户区绝对坐标）
+        if roi:
+            try:
+                # 步骤1：校验用户传入的roi格式
+                if not isinstance(roi, (tuple, list)) or len(roi) != 4:
+                    raise ValueError(f"roi必须是4元组/列表（x, y, w, h），当前为{type(roi)}且长度{len(roi)}")
+                roi_x, roi_y, roi_w, roi_h = roi
+
+                # 步骤2：校验基准roi的合法性（不超出基准分辨率，尺寸为正）
+                if roi_x < 0 or roi_y < 0:
+                    raise ValueError(f"roi坐标不能为负数 | 传入: ({roi_x}, {roi_y})")
+                if roi_w <= 0 or roi_h <= 0:
+                    raise ValueError(f"roi宽高必须为正数 | 传入: ({roi_w}, {roi_h})")
+                if roi_x + roi_w > base_width or roi_y + roi_h > base_height:
+                    raise ValueError(
+                        f"roi超出基准分辨率范围 | 基准: {base_width}x{base_height} | "
+                        f"roi终点: ({roi_x+roi_w}, {roi_y+roi_h})"
+                    )
+
+                # 步骤3：按当前客户区比例缩放roi（四舍五入为整数像素）
+                scaled_x = int(round(roi_x * scale_x))
+                scaled_y = int(round(roi_y * scale_y))
+                scaled_w = int(round(roi_w * scale_x))
+                scaled_h = int(round(roi_h * scale_y))
+
+                # 步骤4：二次校验缩放后的region不超出当前客户区（避免裁剪错误）
+                if scaled_x + scaled_w > client_width:
+                    scaled_w = client_width - scaled_x  # 调整宽度，避免超出
+                    self.logger.warning(f"缩放后roi宽度超出客户区，自动调整为{scaled_w}")
+                if scaled_y + scaled_h > client_height:
+                    scaled_h = client_height - scaled_y  # 调整高度，避免超出
+                    self.logger.warning(f"缩放后roi高度超出客户区，自动调整为{scaled_h}")
+                if scaled_w <= 0 or scaled_h <= 0:
+                    raise ValueError(f"缩放后roi尺寸无效 | 缩放后: ({scaled_w}, {scaled_h})")
+
+                # 最终region（当前客户区的绝对坐标）
+                region = (scaled_x, scaled_y, scaled_w, scaled_h)
+                self.logger.debug(
+                    f"ROI转换完成 | 基准roi: {roi} → 当前客户区roi: {region}"
+                )
+
+            except ValueError as e:
+                self.last_error = f"文本点击失败: ROI参数无效 - {str(e)}"
+                self.logger.error(f"错误: {self.last_error}")
+                self.last_result = None
+                return None
+
+        # 5. 调用改造后的find_text_position（传入客户区截图+缩放后的region）
         text_pos = self.ocr_processor.find_text_position(
-            roi_screen, target_text, lang=lang, fuzzy_match=DEFAULT_TEXT_FUZZY_MATCH
+            image=screen,  # 客户区截图（无标题栏/边框）
+            target_text=target_text,
+            lang=lang,
+            fuzzy_match=DEFAULT_TEXT_FUZZY_MATCH,
+            region=region  # 缩放后的当前客户区绝对坐标
         )
 
         if not text_pos:
@@ -476,21 +550,15 @@ class Auto:
             self.last_result = None
             return None
 
-        # 4. 计算点击坐标（中心位置）
+        # 6. 计算点击坐标（文本框中心，客户区绝对坐标）
         x, y, w, h = text_pos
-        center_x, center_y = x + w // 2, y + h // 2
+        client_center_x = x + w // 2
+        client_center_y = y + h // 2
+        self.logger.info(
+            f"识别到文本 '{target_text}' | 客户区坐标: ({x},{y},{w},{h}) | 中心: ({client_center_x},{client_center_y})"
+        )
 
-        # 修正ROI偏移
-        if roi and len(roi) >= 4:
-            roi_x1 = int(screen_w * roi[0])
-            roi_y1 = int(screen_h * roi[1])
-            center_x += roi_x1
-            center_y += roi_y1
-
-        # 5. 执行点击（如果需要）
-        final_x, final_y = int(center_x), int(center_y)
-        self.logger.info(f"识别到文本 '{target_text}' 坐标: ({final_x},{final_y})")
-
+        # 7. 执行点击（调用WindowsDevice.click，直接传入客户区坐标）
         if click:
             # 校验设备可操作性
             if not device.is_operable:
@@ -499,16 +567,23 @@ class Auto:
                 self.last_result = None
                 return None
 
-            # 执行点击
-            self.last_result = device.click((final_x, final_y), duration=duration, click_time=click_time, right_click=right_click)
-            if not self.last_result:
+            # 调用WindowsDevice.click（is_base_coord=False表示传入的是客户区坐标）
+            click_result = device.click(
+                pos=(client_center_x, client_center_y),
+                duration=duration,
+                click_time=click_time,
+                right_click=right_click,
+                is_base_coord=False  # 关键：明确是客户区坐标，无需再转换
+            )
+
+            if not click_result:
                 self.last_error = device.last_error or "文本点击执行失败"
                 self.logger.error(f"错误: {self.last_error}")
                 return None
-            return (final_x, final_y)
+            return (client_center_x, client_center_y)  # 返回客户区坐标
         else:
-            self.last_result = (final_x, final_y)
-            return (final_x, final_y)
+            self.last_result = (client_center_x, client_center_y)
+            return (client_center_x, client_center_y)
 
     def ocr(
         self,
@@ -776,7 +851,7 @@ class Auto:
         delay: float = DEFAULT_SCREENSHOT_DELAY,
         device_uri: str = None
     ) -> Optional[np.ndarray]:
-        """截图并可选保存"""
+        """截图并可选保存（添加颜色通道兼容性处理）"""
         if self.check_should_stop():
             self.logger.info("截图任务被中断")
             self.last_result = None
@@ -791,7 +866,7 @@ class Auto:
             return None
 
         try:
-            # 执行截图（适配改进后的device.capture_screen）
+            # 执行截图
             screen = device.capture_screen()
             self.last_result = screen
 
@@ -802,7 +877,15 @@ class Auto:
 
             # 保存截图（如果指定路径）
             if save_path:
-                cv2.imwrite(save_path, screen)
+                # 颜色通道转换：RGB -> BGR（兼容cv2.imwrite）
+                # 仅对3通道彩色图进行转换，单通道灰度图不处理
+                if len(screen.shape) == 3 and screen.shape[2] == 3:
+                    screen_bgr = cv2.cvtColor(screen, cv2.COLOR_RGB2BGR)
+                else:
+                    screen_bgr = screen  # 灰度图或其他格式直接保存
+                
+                # 保存转换后的图像
+                cv2.imwrite(save_path, screen_bgr)
                 self.logger.info(f"截图保存成功: {save_path}")
             else:
                 self.logger.info("截图成功（未保存）")

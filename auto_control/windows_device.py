@@ -55,7 +55,7 @@ class BitmapHandle:
 
 
 class WindowsDevice(BaseDevice):
-    # 类常量：替代魔法数字，提高可读性
+    # 类常量
     FULLSCREEN_THRESHOLD = 5          # 全屏判断的尺寸差异阈值
     ORIGINAL_DPI_SCALE = 1.25         # 原始DPI缩放比例（125%）
     MOUSE_MOVE_DELAY = 0.05           # 鼠标移动后的稳定等待时间

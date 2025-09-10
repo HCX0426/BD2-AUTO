@@ -1,7 +1,6 @@
-# ocr_processor.py
 from typing import List, Dict, Optional, Tuple, Union
 import numpy as np
-from .ocr_core import TesseractOCR, EasyOCRWrapper, BaseOCR
+from .ocr_core import EasyOCRWrapper, BaseOCR
 from .config import get_default_languages
 from airtest.core.helper import logwrap
 
@@ -11,16 +10,15 @@ class OCRProcessor:
         """
         OCR处理器封装类（统一调用不同OCR引擎）
         
-        :param engine: OCR引擎类型，可选 'tesseract' 或 'easyocr'（默认easyocr）
+        :param engine: OCR引擎类型，目前只支持 'easyocr'（默认）
         :param logger: 日志实例（从上层传递，如Auto类）
         :param kwargs: 引擎特定参数：
-            - tesseract_path: Tesseract可执行文件路径（仅Tesseract需要）
-            - languages: 自定义默认语言组合（如 'chi_sim+eng'，可选）
+            - languages: 自定义默认语言组合（如 'ch_tra+eng'，可选）
         """
         # 验证引擎类型
         self.engine_type = engine.lower()
-        if self.engine_type not in ['tesseract', 'easyocr']:
-            raise ValueError(f"不支持的OCR引擎: {engine}，仅支持 'tesseract' 和 'easyocr'")
+        if self.engine_type != 'easyocr':
+            raise ValueError(f"不支持的OCR引擎: {engine}，目前只支持 'easyocr'")
         
         # 初始化日志系统（支持降级）
         self.logger = logger if logger else self._create_default_logger()
@@ -64,15 +62,12 @@ class OCRProcessor:
         """根据引擎类型初始化具体OCR实例"""
         self.logger.debug(f"开始初始化{self.engine_type.upper()}引擎 | 参数: {kwargs}")
         
-        if self.engine_type == 'tesseract':
-            # 初始化Tesseract（支持传入可执行文件路径）
-            return TesseractOCR(
-                tesseract_path=kwargs.get('tesseract_path'),
-                logger=self.logger  # 传递日志实例给引擎
-            )
-        elif self.engine_type == 'easyocr':
+        if self.engine_type == 'easyocr':
             # 初始化EasyOCR（参数通过配置文件读取，无需额外传入）
             return EasyOCRWrapper(logger=self.logger)  # 传递日志实例给引擎
+        else:
+            # 为未来可能的引擎扩展预留接口
+            raise ValueError(f"不支持的OCR引擎: {self.engine_type}")
 
     def detect_text(self, 
                    image: np.ndarray, 
@@ -81,7 +76,7 @@ class OCRProcessor:
         检测图像中的文本位置及内容（返回详细边界框信息）
         
         :param image: 输入图像（numpy数组，BGR格式）
-        :param lang: 语言代码（如 'chi_sim' 中文，'eng' 英文，支持组合 'chi_sim+eng'）
+        :param lang: 语言代码（如 'ch_tra' 繁体中文，'eng' 英文，支持组合 'ch_tra+eng'）
                      未指定时使用默认语言
         :return: 文本检测结果列表，每个元素为字典：
                  {
@@ -199,7 +194,7 @@ class OCRProcessor:
 
     def enable_gpu(self, enable: bool = True):
         """
-        启用/禁用GPU加速（仅EasyOCR支持，Tesseract无GPU支持）
+        启用/禁用GPU加速
         
         :param enable: True=启用，False=禁用
         """
@@ -208,25 +203,31 @@ class OCRProcessor:
 
     @logwrap
     def find_text_position(self,
-                          image: np.ndarray,
-                          target_text: str,
-                          lang: Optional[str] = None,
-                          fuzzy_match: bool = False,
-                          min_confidence: float = 0.6) -> Optional[Tuple[int, int, int, int]]:
+                        image: np.ndarray,
+                        target_text: str,
+                        lang: Optional[str] = None,
+                        fuzzy_match: bool = False,
+                        min_confidence: float = 0.6,
+                        region: Optional[Tuple[int, int, int, int]] = None) -> Optional[Tuple[int, int, int, int]]:
         """
-        查找特定文本在图像中的位置（返回最匹配的边界框）
+        查找特定文本在图像中的位置（支持限定区域查找，返回最匹配的边界框）
         
         :param image: 输入图像（numpy数组，BGR格式）
         :param target_text: 要查找的目标文本（如 "确认"、"登录"）
-        :param lang: 语言代码（未指定时使用默认语言）
+        :param lang: 语言代码（如 'ch_tra' 繁体中文，'eng' 英文，支持组合 'ch_tra+eng'）
+                    未指定时使用默认语言
         :param fuzzy_match: 是否启用模糊匹配（默认False，精确匹配）
-                           启用后使用字符串相似度（≥0.8）判断匹配
+                        启用后使用字符串相似度（≥0.8）判断匹配
         :param min_confidence: 最小置信度阈值（默认0.6，仅筛选高于此值的结果）
-        :return: 目标文本的边界框 (x, y, w, h)，未找到时返回None
+        :param region: 限定查找的目标区域（格式：(x, y, w, h)），基于输入图像的绝对坐标：
+                    - x/y：区域左上角在输入图像中的坐标
+                    - w/h：区域的宽度和高度
+                    未指定时默认全图查找
+        :return: 目标文本在原图中的边界框 (x, y, w, h)，未找到时返回None
         """
         target_lang = lang or self._default_lang
         
-        # 输入参数校验
+        # 1. 基础输入参数校验
         if image is None or image.size == 0:
             self.logger.error("查找文本位置失败：无效的输入图像")
             return None
@@ -234,24 +235,57 @@ class OCRProcessor:
             self.logger.error("查找文本位置失败：目标文本为空")
             return None
         
+        # 2. 处理限定区域（裁剪图像+记录偏移量）
+        orig_image = image.copy()  # 保存原图用于最终坐标映射
+        region_offset = (0, 0)     # 裁剪区域在原图中的偏移量（x, y）
+        
+        if region:
+            try:
+                r_x, r_y, r_w, r_h = region
+                img_h, img_w = orig_image.shape[:2]  # 原图尺寸（h在前，w在后，OpenCV格式）
+                
+                # 校验region合法性：坐标非负、宽高为正、不超出原图范围
+                if r_x < 0 or r_y < 0:
+                    raise ValueError(f"区域起始坐标不能为负数：(x={r_x}, y={r_y})")
+                if r_w <= 0 or r_h <= 0:
+                    raise ValueError(f"区域宽高必须为正数：(w={r_w}, h={r_h})")
+                if r_x + r_w > img_w or r_y + r_h > img_h:
+                    raise ValueError(
+                        f"区域超出原图范围：原图({img_w}x{img_h})，区域终点({r_x+r_w}, {r_y+r_h})"
+                    )
+                
+                # 裁剪子图（OpenCV切片：[y_start:y_end, x_start:x_end]）
+                image = orig_image[r_y:r_y + r_h, r_x:r_x + r_w]
+                region_offset = (r_x, r_y)  # 记录裁剪区域的左上角偏移
+                self.logger.debug(
+                    f"已裁剪限定区域 | 原图尺寸: {img_w}x{img_h} | "
+                    f"区域参数: {region} | 裁剪后子图尺寸: {image.shape[1]}x{image.shape[0]}"
+                )
+                
+            except (TypeError, ValueError) as e:
+                self.logger.error(f"限定区域参数无效：{str(e)}，自动切换为全图查找")
+                region = None  # 校验失败时回退到全图查找
+
+        # 3. 日志输出查找参数
         self.logger.debug(
             f"调用文本位置查找接口 | "
             f"目标文本: '{target_text}' | "
             f"语言: {target_lang} | "
             f"模糊匹配: {'是' if fuzzy_match else '否'} | "
             f"最小置信度: {min_confidence} | "
-            f"图像尺寸: {image.shape[:2]}"
+            f"查找范围: {'指定区域' if region else '全图'} | "
+            f"处理图像尺寸: {image.shape[1]}x{image.shape[0]}"
         )
         
-        # 第一步：检测图像中的所有文本
+        # 4. 检测裁剪后图像中的所有文本（复用原有detect_and_recognize逻辑）
         text_results = self.detect_and_recognize(image, target_lang)
         if not text_results:
-            self.logger.warning(f"未检测到任何文本，无法查找目标 '{target_text}'")
+            self.logger.warning(f"在{'指定区域' if region else '全图'}中未检测到任何文本，无法查找目标 '{target_text}'")
             return None
         
-        # 第二步：筛选符合条件的匹配结果
+        # 5. 筛选符合条件的匹配结果
         best_match = None
-        highest_confidence = 0.0  # 记录最高置信度
+        highest_confidence = 0.0  # 记录最高置信度（优先选择置信度高的匹配）
         
         for result in text_results:
             # 过滤低于最小置信度的结果
@@ -262,43 +296,53 @@ class OCRProcessor:
                 )
                 continue
             
-            # 判断是否匹配目标文本
+            # 判断文本是否匹配目标
             is_match = False
             result_text = result['text'].strip()
             
             if fuzzy_match:
-                # 模糊匹配：计算字符串相似度（使用difflib）
+                # 模糊匹配：使用difflib计算字符串相似度（≥0.8视为匹配）
                 from difflib import SequenceMatcher
-                similarity = SequenceMatcher(None, result_text, target_text).ratio()
-                is_match = similarity >= 0.8  # 相似度≥0.8视为匹配
+                similarity = SequenceMatcher(None, result_text, target_text.strip()).ratio()
+                is_match = similarity >= 0.8
                 self.logger.debug(
-                    f"模糊匹配结果 | 文本: '{result_text}' | 目标: '{target_text}' | "
+                    f"模糊匹配结果 | 识别文本: '{result_text}' | 目标: '{target_text}' | "
                     f"相似度: {similarity:.2f} | 匹配: {'是' if is_match else '否'}"
                 )
             else:
-                # 精确匹配：完全相等（忽略大小写？根据需求可调整）
+                # 精确匹配：完全相等（可根据需求改为忽略大小写，如 result_text.lower() == target_text.strip().lower()）
                 is_match = result_text == target_text.strip()
                 self.logger.debug(
-                    f"精确匹配结果 | 文本: '{result_text}' | 目标: '{target_text}' | 匹配: {'是' if is_match else '否'}"
+                    f"精确匹配结果 | 识别文本: '{result_text}' | 目标: '{target_text}' | 匹配: {'是' if is_match else '否'}"
                 )
             
-            # 找到更优匹配（置信度更高）
+            # 找到更优匹配（置信度更高则更新）
             if is_match and current_confidence > highest_confidence:
                 highest_confidence = current_confidence
-                best_match = result['bbox']
+                # 关键：将子图中的边界框坐标映射回原图（加上裁剪区域的偏移量）
+                sub_x, sub_y, sub_w, sub_h = result['bbox']
+                orig_bbox = (
+                    sub_x + region_offset[0],  # 加上x方向偏移
+                    sub_y + region_offset[1],  # 加上y方向偏移
+                    sub_w,
+                    sub_h
+                )
+                best_match = orig_bbox
                 self.logger.debug(
-                    f"更新最佳匹配 | 置信度: {highest_confidence} | 位置: {best_match}"
+                    f"更新最佳匹配 | 置信度: {highest_confidence} | "
+                    f"子图位置: {result['bbox']} | 原图位置: {orig_bbox}"
                 )
         
-        # 输出最终结果
+        # 6. 输出最终结果
         if best_match:
             self.logger.info(
                 f"成功找到目标文本 | "
                 f"文本: '{target_text}' | "
-                f"位置: {best_match} | "
-                f"置信度: {highest_confidence}"
+                f"原图位置: {best_match} | "
+                f"置信度: {highest_confidence:.2f} | "
+                f"查找范围: {'指定区域' if region else '全图'}"
             )
             return best_match
         else:
-            self.logger.warning(f"未找到匹配的目标文本: '{target_text}'")
+            self.logger.warning(f"在{'指定区域' if region else '全图'}中未找到匹配的目标文本: '{target_text}'")
             return None

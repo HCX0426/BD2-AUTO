@@ -1,6 +1,9 @@
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from enum import Enum
+from functools import wraps
 from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
@@ -9,9 +12,14 @@ from airtest import aircv
 from airtest.core.cv import Template
 
 # 导入配置
-from .config import *
+from .config import (
+    ScaleStrategy, MatchMethod, TEMPLATE_DIR, AUTO_LOAD_TEMPLATES,
+    TEMPLATE_EXTENSIONS, TEMPLATE_ROI_CONFIG, DEFAULT_RESOLUTION,
+    DEFAULT_THRESHOLD, DEFAULT_SCALE_STRATEGY, DEFAULT_MATCH_METHOD, MAX_WORKERS
+)
 
 
+# 数据类定义
 @dataclass
 class MatchResult:
     """匹配结果数据类"""
@@ -93,13 +101,43 @@ class ImageProcessor:
         
         return DefaultLogger()
 
+    def _timing_decorator(func):
+        """计时装饰器"""
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            start_time = time.time()
+            result = func(self, *args, **kwargs)
+            elapsed = time.time() - start_time
+            self.logger.debug(f"{func.__name__} 执行时间: {elapsed:.3f}秒")
+            return result
+        return wrapper
+
+    def list_templates(self) -> List[str]:
+        """列出所有已加载的模板名称"""
+        return list(self.templates.keys())
+
+    def remove_template(self, template_name: str) -> bool:
+        """移除指定的模板"""
+        if template_name in self.templates:
+            del self.templates[template_name]
+            self.logger.info(f"已移除模板: {template_name}")
+            return True
+        else:
+            self.logger.warning(f"尝试移除不存在的模板: {template_name}")
+            return False
+
+    def clear_templates(self) -> None:
+        """清除所有模板"""
+        count = len(self.templates)
+        self.templates.clear()
+        self.logger.info(f"已清除所有模板 | 数量: {count}")
+
     def load_templates_from_dir(
             self,
             dir_path: str,
             extensions: Tuple[str, ...] = TEMPLATE_EXTENSIONS,
             recursive: bool = True,
-            roi_config: Optional[Dict[str,
-                                    Tuple[float, float, float, float]]] = None,
+            roi_config: Optional[Dict[str, Tuple[float, float, float, float]]] = None,
             threshold: float = DEFAULT_THRESHOLD,
             scale_strategy: ScaleStrategy = DEFAULT_SCALE_STRATEGY
         ) -> Dict[str, Template]:
@@ -146,8 +184,16 @@ class ImageProcessor:
         return loaded
 
     def __del__(self):
+        # 先记录释放信息（使用同步方式）
+        if hasattr(self.logger, 'logger'):
+            # 如果是标准logger，直接调用同步方法
+            self.logger.logger.debug("图像处理器资源已释放")
+        else:
+            # 如果是降级logger，直接调用方法
+            self.logger.debug("图像处理器资源已释放")
+        
+        # 然后关闭线程池
         self.executor.shutdown()
-        self.logger.debug("图像处理器资源已释放")
 
     def update_resolution(self, new_resolution: Tuple[int, int]) -> None:
         """更新基准分辨率"""
@@ -320,6 +366,7 @@ class ImageProcessor:
         )
         return roi_region
 
+    @_timing_decorator
     def match_template(
         self,
         screen: np.ndarray,
@@ -467,7 +514,6 @@ class ImageProcessor:
     def preprocess_for_ocr(
         self,
         image: np.ndarray,
-        denoise: bool = True,
         clahe_clip: float = 2.0,
         clahe_grid: Tuple[int, int] = (8, 8)
     ) -> np.ndarray:
@@ -489,22 +535,11 @@ class ImageProcessor:
         )
         enhanced = clahe.apply(gray)
 
-        # 二值化
-        binary = cv2.adaptiveThreshold(
-            enhanced, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY, 11, 2
-        )
-
-        # 去噪
-        if denoise:
-            binary = cv2.fastNlMeansDenoising(binary, None, 10, 7, 21)
-
         self.logger.debug(
             f"OCR预处理完成 | 原始尺寸: {image.shape[:2]} | "
-            f"去噪: {denoise} | CLAHE参数: {clahe_clip}/{clahe_grid}"
+            f"CLAHE参数: {clahe_clip}/{clahe_grid}"
         )
-        return binary
+        return enhanced
 
     def crop_image(
         self,
@@ -584,26 +619,84 @@ class ImageProcessor:
             self.logger.error(f"颜色匹配错误", exc_info=True)
             return None
 
+    def find_color_regions(
+        self,
+        image: np.ndarray,
+        color: Tuple[int, int, int],
+        color_range: Tuple[int, int, int] = (10, 10, 10),
+        min_area: int = 10,
+        max_results: int = 10
+    ) -> List[Tuple[int, int, int, int]]:
+        """查找图像中指定颜色的区域"""
+        if image is None or image.size == 0:
+            self.logger.error("无效图像，无法查找颜色区域")
+            return []
+
+        try:
+            # 创建颜色范围掩码
+            lower = np.array([
+                max(0, color[0]-color_range[0]),
+                max(0, color[1]-color_range[1]),
+                max(0, color[2]-color_range[2])
+            ])
+            upper = np.array([
+                min(255, color[0]+color_range[0]),
+                min(255, color[1]+color_range[1]),
+                min(255, color[2]+color_range[2])
+            ])
+            
+            mask = cv2.inRange(image, lower, upper)
+            
+            # 查找轮廓
+            contours, _ = cv2.findContours(
+                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # 提取区域
+            regions = []
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area >= min_area:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    regions.append((x, y, w, h))
+                    
+                    if len(regions) >= max_results:
+                        break
+            
+            # 按面积排序
+            regions.sort(key=lambda r: r[2]*r[3], reverse=True)
+            
+            self.logger.debug(
+                f"颜色区域查找完成 | 颜色: {color} | 范围: {color_range} | "
+                f"找到区域: {len(regions)}个 | 最小面积: {min_area}"
+            )
+            return regions
+            
+        except Exception as e:
+            self.logger.error(f"颜色区域查找错误", exc_info=True)
+            return []
+
+    @_timing_decorator
     def match_multiple_templates(
         self,
         screen: np.ndarray,
         template_names: List[str],
         threshold: float = 0.8,
-        parallel: bool = True
-    ) -> MatchResult:
-        """同时匹配多个模板并返回最佳结果"""
+        parallel: bool = True,
+        return_all: bool = False
+    ) -> Union[MatchResult, List[MatchResult]]:
+        """同时匹配多个模板并返回结果"""
         if not template_names:
             self.logger.warning("未提供模板名称列表，无法进行多模板匹配")
-            return MatchResult(name="", position=None, confidence=0.0)
+            return MatchResult(name="", position=None, confidence=0.0) if not return_all else []
 
         if screen is None or screen.size == 0:
             self.logger.error("无效的屏幕截图，无法进行多模板匹配")
-            return MatchResult(name="", position=None, confidence=0.0)
+            return MatchResult(name="", position=None, confidence=0.0) if not return_all else []
 
-        best_match = MatchResult(name="", position=None, confidence=0.0)
+        results = []
         self.logger.debug(
             f"开始多模板匹配 | 模板数量: {len(template_names)} | "
-            f"并行模式: {parallel} | 阈值: {threshold}"
+            f"并行模式: {parallel} | 阈值: {threshold} | 返回所有: {return_all}"
         )
 
         if parallel:
@@ -620,28 +713,38 @@ class ImageProcessor:
                 template_name = futures[future]
                 try:
                     result = future.result()
-                    if result.confidence > best_match.confidence:
-                        best_match = result
+                    results.append(result)
                 except Exception as e:
                     self.logger.error(f"多模板匹配线程错误 '{template_name}'", exc_info=True)
         else:
             for name in template_names:
                 result = self.match_template(screen, name)
-                if result.confidence > best_match.confidence:
-                    best_match = result
+                results.append(result)
 
-        # 最终结果检查
-        if best_match.confidence >= threshold:
+        # 过滤低于阈值的结果
+        valid_results = [r for r in results if r.confidence >= threshold]
+        
+        if return_all:
             self.logger.info(
-                f"多模板匹配成功 | 最佳匹配: {best_match.name} | "
-                f"置信度: {best_match.confidence:.2f} | 坐标: {best_match.position}"
+                f"多模板匹配完成 | 有效结果: {len(valid_results)}/{len(template_names)} | "
+                f"阈值: {threshold}"
             )
-            return best_match
+            return valid_results
         else:
-            self.logger.debug(
-                f"多模板匹配未找到合格结果 | 最高置信度: {best_match.confidence:.2f} < {threshold}"
-            )
-            return MatchResult(name="", position=None, confidence=0.0)
+            # 返回最佳匹配
+            best_match = max(valid_results, key=lambda x: x.confidence, default=MatchResult(name="", position=None, confidence=0.0))
+            
+            if best_match.confidence > 0:
+                self.logger.info(
+                    f"多模板匹配成功 | 最佳匹配: {best_match.name} | "
+                    f"置信度: {best_match.confidence:.2f} | 坐标: {best_match.position}"
+                )
+                return best_match
+            else:
+                self.logger.debug(
+                    f"多模板匹配未找到合格结果 | 最高置信度: {best_match.confidence:.2f} < {threshold}"
+                )
+                return MatchResult(name="", position=None, confidence=0.0)
 
     def find_shapes(
         self,
@@ -693,6 +796,193 @@ class ImageProcessor:
         except Exception as e:
             self.logger.error(f"形状查找错误", exc_info=True)
             return []
+
+    def compare_images(
+        self,
+        img1: np.ndarray,
+        img2: np.ndarray,
+        method: int = cv2.HISTCMP_CORREL
+    ) -> float:
+        """比较两张图像的相似度"""
+        if img1 is None or img2 is None or img1.size == 0 or img2.size == 0:
+            self.logger.error("无效图像，无法比较")
+            return 0.0
+        
+        try:
+            # 确保图像尺寸相同
+            if img1.shape != img2.shape:
+                img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
+            
+            # 计算直方图
+            hist1 = cv2.calcHist([img1], [0], None, [256], [0, 256])
+            hist2 = cv2.calcHist([img2], [0], None, [256], [0, 256])
+            
+            # 归一化
+            cv2.normalize(hist1, hist1, 0, 1, cv2.NORM_MINMAX)
+            cv2.normalize(hist2, hist2, 0, 1, cv2.NORM_MINMAX)
+            
+            # 比较直方图
+            similarity = cv2.compareHist(hist1, hist2, method)
+            
+            self.logger.debug(
+                f"图像比较完成 | 相似度: {similarity:.3f} | "
+                f"方法: {method} | 图像尺寸: {img1.shape[:2]}"
+            )
+            return similarity
+            
+        except Exception as e:
+            self.logger.error(f"图像比较错误", exc_info=True)
+            return 0.0
+
+    def save_image(
+        self,
+        image: np.ndarray,
+        file_path: str,
+        create_dir: bool = True
+    ) -> bool:
+        """保存图像到文件"""
+        if image is None or image.size == 0:
+            self.logger.error("无效图像，无法保存")
+            return False
+        
+        try:
+            # 创建目录（如果需要）
+            if create_dir:
+                dir_path = os.path.dirname(file_path)
+                if dir_path and not os.path.exists(dir_path):
+                    os.makedirs(dir_path)
+            
+            # 保存图像
+            success = cv2.imwrite(file_path, image)
+            
+            if success:
+                self.logger.debug(f"图像保存成功: {file_path}")
+            else:
+                self.logger.error(f"图像保存失败: {file_path}")
+                
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"图像保存错误: {str(e)}", exc_info=True)
+            return False
+
+    def get_screen_resolution(self, screen: np.ndarray) -> Tuple[int, int]:
+        """获取屏幕截图的分辨率"""
+        if screen is None or screen.size == 0:
+            self.logger.error("无效屏幕截图，无法获取分辨率")
+            return (0, 0)
+        
+        height, width = screen.shape[:2]
+        self.logger.debug(f"屏幕分辨率: {width}x{height}")
+        return (width, height)
+
+    def find_template_with_scale(
+        self,
+        screen: np.ndarray,
+        template_name: str,
+        min_scale: float = 0.5,
+        max_scale: float = 2.0,
+        scale_steps: int = 10
+    ) -> MatchResult:
+        """在不同缩放比例下查找模板"""
+        if screen is None or screen.size == 0:
+            self.logger.error("无效屏幕截图，无法进行多尺度模板匹配")
+            return self._create_no_match_result(template_name)
+        
+        if template_name not in self.templates:
+            self.logger.warning(f"模板 '{template_name}' 未加载，无法匹配")
+            return self._create_no_match_result(template_name)
+        
+        best_match = self._create_no_match_result(template_name)
+        template_info = self.templates[template_name]
+        
+        self.logger.debug(
+            f"开始多尺度模板匹配 | 模板: {template_name} | "
+            f"缩放范围: {min_scale}-{max_scale} | 步数: {scale_steps}"
+        )
+        
+        # 生成缩放比例序列
+        scales = np.linspace(min_scale, max_scale, scale_steps)
+        
+        for scale in scales:
+            try:
+                # 缩放屏幕截图
+                scaled_screen = cv2.resize(
+                    screen, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+                )
+                
+                # 进行模板匹配
+                result = self.match_template(scaled_screen, template_name)
+                
+                # 调整坐标到原始尺寸
+                if result.position:
+                    x, y = result.position
+                    result.position = (int(x / scale), int(y / scale))
+                    result.confidence = result.confidence  # 置信度保持不变
+                
+                # 更新最佳匹配
+                if result.confidence > best_match.confidence:
+                    best_match = result
+                    
+            except Exception as e:
+                self.logger.warning(f"缩放比例 {scale:.2f} 下匹配失败: {str(e)}")
+                continue
+        
+        if best_match.confidence > 0:
+            self.logger.info(
+                f"多尺度模板匹配成功 | 模板: {template_name} | "
+                f"最佳比例: {scales[np.argmax([r.confidence for r in results])]:.2f} | "
+                f"置信度: {best_match.confidence:.2f} | 坐标: {best_match.position}"
+            )
+        else:
+            self.logger.debug(f"多尺度模板匹配未找到合格结果: {template_name}")
+        
+        return best_match
+
+    def wait_for_template(
+        self,
+        screen_provider: callable,
+        template_name: str,
+        timeout: float = 10.0,
+        interval: float = 0.5,
+        threshold: float = DEFAULT_THRESHOLD
+    ) -> Optional[MatchResult]:
+        """等待模板出现"""
+        import time
+        
+        start_time = time.time()
+        self.logger.info(
+            f"开始等待模板 | 模板: {template_name} | 超时: {timeout}秒 | 间隔: {interval}秒"
+        )
+        
+        while time.time() - start_time < timeout:
+            try:
+                # 获取当前屏幕
+                screen = screen_provider()
+                if screen is None or screen.size == 0:
+                    self.logger.warning("获取到无效屏幕，继续等待")
+                    time.sleep(interval)
+                    continue
+                
+                # 进行模板匹配
+                result = self.match_template(screen, template_name)
+                
+                if result.confidence >= threshold:
+                    self.logger.info(
+                        f"模板出现 | 模板: {template_name} | "
+                        f"置信度: {result.confidence:.2f} | 坐标: {result.position}"
+                    )
+                    return result
+                
+                # 等待下一轮
+                time.sleep(interval)
+                
+            except Exception as e:
+                self.logger.error(f"等待模板过程中发生错误: {str(e)}", exc_info=True)
+                time.sleep(interval)
+        
+        self.logger.warning(f"等待模板超时 | 模板: {template_name} | 超时时间: {timeout}秒")
+        return None
 
     def close(self):
         """释放资源"""

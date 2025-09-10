@@ -177,7 +177,11 @@ def click_back(auto: Auto) -> bool:
         if auto.text_click("点击画面即可返回"):
             logger.debug("点击画面返回成功")
             auto.sleep(1)
-            return True
+            state = "OK"
+
+        if state == "OK":
+           if not auto.text_click("点击画面即可返回",click=False):
+               return True
             
         logger.debug("未检测到点击画面返回提示")
         return False
