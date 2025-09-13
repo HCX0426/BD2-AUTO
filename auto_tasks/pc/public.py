@@ -174,6 +174,7 @@ def click_back(auto: Auto) -> bool:
     logger = auto.get_task_logger("click_back")
     
     try:
+        state = None
         if auto.text_click("点击画面即可返回"):
             logger.debug("点击画面返回成功")
             auto.sleep(1)

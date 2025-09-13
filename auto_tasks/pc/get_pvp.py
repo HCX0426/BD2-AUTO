@@ -46,7 +46,7 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
             if state == "arena_entered":
                 if auto.text_click("游戏卡珍藏集",click=False):
                     logger.debug("未进入PVP地图")
-                    state == "init"
+                    state = "init"
                     continue
                 if click_back(auto):
                     logger.info("领取赛季奖励")
