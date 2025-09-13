@@ -98,7 +98,6 @@ class BaseDevice(ABC):
             except Exception as e:
                 print(f"状态监听器执行失败: {str(e)}")
 
-    # 在 BaseDevice 类中修改 require_operable 装饰器
     @classmethod
     def require_operable(cls, func):
         """
@@ -195,20 +194,8 @@ class BaseDevice(ABC):
         """设备睡眠"""
         pass
 
-    # 以下为默认实现的通用方法（子类可按需重写）
-    def paste_text(self, text: str) -> bool:
-        """粘贴文本（默认实现，子类可重写）"""
-        try:
-            from airtest.core.api import paste  # 延迟导入，避免依赖强制要求
-            paste(text)
-            return True
-        except Exception as e:
-            self.last_error = f"粘贴失败: {str(e)}"
-            self._update_device_state(DeviceState.ERROR)
-            return False
-
     def set_foreground(self) -> bool:
-        """将窗口置前（默认返回True，子类应重写实际逻辑）"""
+        """将窗口置前"""
         return True
 
     def get_resolution(self) -> Tuple[int, int]:

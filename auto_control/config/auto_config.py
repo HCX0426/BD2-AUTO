@@ -5,7 +5,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__))) # 项
 
 DEFAULT_BASE_RESOLUTION = (1920, 1080)  # 默认分辨率
 DEFAULT_OCR_ENGINE = "easyocr"  # 默认OCR引擎
-DEFAULT_DEVICE_URI = "Windows:///?title_re=BrownDust II" # 默认设备URI
+DEFAULT_DEVICE_URI = "Windows:///?title_re=.*BrownDust.*" # 默认设备URI
 DEFAULT_TASK_TIMEOUT = 300  # 默认任务超时时间(秒)
 DEFAULT_TEXT_FUZZY_MATCH = True  # 默认使用模糊文本匹配
 DEFAULT_WINDOW_OPERATION_DELAY = 0.0  # 窗口操作默认延迟

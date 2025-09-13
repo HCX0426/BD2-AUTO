@@ -4,12 +4,15 @@ from typing import Dict, Optional, List, Tuple
 from auto_control.adb_device import ADBDevice
 from auto_control.device_base import BaseDevice, DeviceState
 from auto_control.windows_device import WindowsDevice
+from auto_control.image_processor import ImageProcessor
+# 导入CoordinateTransformer
+from auto_control.coordinate_transformer import CoordinateTransformer
 
 
 class DeviceManager:
     """设备管理器：负责设备的添加、移除、状态跟踪和活动设备管理"""
     
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, image_processor: Optional[ImageProcessor] = None, coord_transformer: Optional[CoordinateTransformer] = None):
         """初始化设备管理器"""
         # 设备存储：URI -> 设备实例
         self.devices: Dict[str, BaseDevice] = {}
@@ -17,6 +20,10 @@ class DeviceManager:
         self.active_device: Optional[str] = None
         # 日志实例（从上层接收）
         self.logger = logger if logger else self._create_default_logger()
+        # 坐标转换器实例（从上层接收）
+        self.coord_transformer = coord_transformer
+        # 图像处理器实例（从上层接收）
+        self.image_processor = image_processor
         self.logger.info("设备管理器初始化完成")
 
     def _create_default_logger(self):
@@ -70,12 +77,21 @@ class DeviceManager:
         """获取所有设备URI列表"""
         return list(self.devices.keys())
 
-    def add_device(self, device_uri: str, timeout: float = 10.0, logger=None) -> bool:
+    def add_device(
+        self, 
+        device_uri: str, 
+        timeout: float = 10.0, 
+        logger=None,
+        image_processor: Optional[ImageProcessor] = None,
+        coord_transformer: Optional[CoordinateTransformer] = None
+    ) -> bool:
         """
         添加设备并连接（支持Windows和ADB设备）
         :param device_uri: 设备URI（如windows://title_re=xxx或adb://xxx）
         :param timeout: 连接超时时间
         :param logger: 传递给设备的日志实例
+        :param image_processor: 共享的ImageProcessor实例
+        :param coord_transformer: 共享的CoordinateTransformer实例
         :return: 是否添加成功
         """
         lower_uri = device_uri.lower()
@@ -94,6 +110,10 @@ class DeviceManager:
         # 识别设备类型
         if lower_uri.startswith("windows://"):
             device_type = "windows"
+            # Windows设备必须传入ImageProcessor
+            if not image_processor:
+                self.logger.error("添加Windows设备失败：必须提供ImageProcessor实例")
+                return False
         elif lower_uri.startswith(("android://", "adb://")):
             device_type = "adb"
         else:
@@ -103,11 +123,16 @@ class DeviceManager:
         try:
             self.logger.info(f"开始添加{device_type}设备: {device_uri}（超时: {timeout}s）")
             
-            # 创建对应类型的设备实例（传递日志）
+            # 创建对应类型的设备实例
             if device_type == "windows":
-                device = WindowsDevice(device_uri, logger=logger or self.logger)
+                device = WindowsDevice(
+                    device_uri=device_uri,
+                    logger=logger or self.logger,
+                    image_processor=image_processor or self.image_processor,
+                    coord_transformer=coord_transformer or self.coord_transformer
+                )
             elif device_type == "adb":
-                device = ADBDevice(device_uri, logger=logger or self.logger)  # 假设ADBDevice支持logger参数
+                pass
             else:
                 raise ValueError(f"不支持的设备类型: {device_type}")
 
@@ -181,6 +206,11 @@ class DeviceManager:
         
         self.active_device = lower_uri
         self.logger.info(f"活动设备已设置为: {device_uri}（状态: {device.get_state().name}）")
+        
+        # 当切换活动设备时，更新坐标转换器的上下文
+        if self.coord_transformer and hasattr(device, '_update_window_info'):
+            device._update_window_info()  # 让设备更新窗口信息并同步到坐标转换器
+        
         return True
 
     def disconnect_all(self) -> Tuple[int, int]:

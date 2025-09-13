@@ -18,21 +18,25 @@ from .config import (
     DEFAULT_SCREENSHOT_DELAY,
     DEFAULT_TASK_TIMEOUT,
     DEFAULT_TEXT_FUZZY_MATCH,
-    LOG_CONFIG
+    LOG_CONFIG,
+    DEFAULT_DPI_SCALE
 )
 from .device_manager import DeviceManager
 from .image_processor import ImageProcessor
 from .logger import Logger
 from .ocr_processor import OCRProcessor
 from .device_base import BaseDevice, DeviceState
-from airtest.core.api import Template
 
+from .coordinate_transformer import CoordinateTransformer
 
+# 此层传递均为客户区坐标
 class Auto:
     def __init__(
         self,
         ocr_engine: str = DEFAULT_OCR_ENGINE,
-        device_uri: str = DEFAULT_DEVICE_URI
+        device_uri: str = DEFAULT_DEVICE_URI,
+        base_resolution: Tuple[int, int] = DEFAULT_BASE_RESOLUTION,
+        dpi_scale: float = DEFAULT_DPI_SCALE
     ):
         # 线程安全控制
         self.lock = threading.Lock()
@@ -45,17 +49,33 @@ class Auto:
             base_log_dir=LOG_CONFIG["BASE_LOG_DIR"],
             log_file_prefix="system"
         )
-        # 设备管理器初始化时传递日志实例
-        self.device_manager = DeviceManager(logger=self.logger)
-        self.ocr_processor = OCRProcessor(engine=ocr_engine, logger=self.logger)
+        
+        self.coord_transformer = CoordinateTransformer(
+            original_base_res=base_resolution,
+            original_dpi=dpi_scale,
+            logger=self.logger
+        )
+        self.logger.info(f"CoordinateTransformer初始化完成，基准分辨率: {base_resolution}, DPI缩放: {dpi_scale}")
+        
+        # 图像处理器
+        self.image_processor = ImageProcessor(
+            logger=self.logger,
+            coord_transformer=self.coord_transformer
+        )
+        
+        # 设备管理器
+        self.device_manager = DeviceManager(
+            logger=self.logger,
+            image_processor=self.image_processor,
+            coord_transformer=self.coord_transformer
+        )
+        
+        self.ocr_processor = OCRProcessor(engine=ocr_engine, logger=self.logger, coord_transformer=self.coord_transformer)
         
         # 设备配置
         self.default_device_uri = device_uri
-        self.base_resolution = None
+        self.base_resolution = base_resolution
         
-        # 图像处理器
-        self.image_processor = ImageProcessor(logger=self.logger)
-
         # 结果与错误追踪
         self.last_result = None    # 最后操作结果
         self.last_error = None     # 最后错误信息
@@ -143,16 +163,17 @@ class Auto:
             return False
 
         try:
-            # 传递日志实例给DeviceManager
             result = self.device_manager.add_device(
-                device_uri, 
+                device_uri=device_uri,
                 timeout=timeout,
-                logger=self.logger  # 关键：将Auto的日志实例传递下去
+                logger=self.logger,
+                image_processor=self.image_processor,
+                coord_transformer=self.coord_transformer
             )
             self.last_result = result
 
             if result:
-                # 关键优化：直接获取刚添加的设备，而非依赖活动设备
+                # 直接获取刚添加的设备，而非依赖活动设备
                 new_device = self.device_manager.get_device(device_uri)
                 if new_device and new_device.is_connected:
                     # 临时将新设备设为活动设备（确保分辨率更新成功）
@@ -193,6 +214,13 @@ class Auto:
             self.logger.error(f"错误: {self.last_error}")
         else:
             self.logger.info(f"活动设备已切换为: {device_uri}")
+            # 当切换活动设备时，更新坐标转换器的上下文
+            active_device = self.device_manager.get_active_device()
+            if active_device:
+                self.coord_transformer.update_context(
+                    client_size=active_device._client_size,
+                    current_dpi=active_device.dpi_scale
+                )
         
         return result
 
@@ -223,10 +251,9 @@ class Auto:
                 self.logger.error(f"错误: {self.last_error}")
                 return False
 
-            # 更新分辨率
+            # 更新分辨率（同步坐标转换器）
             self.base_resolution = resolution
-            self.image_processor.update_resolution(resolution)
-            self.logger.info(f"基准分辨率已更新为: {resolution}")
+            device._update_window_info()
             return True
 
         # 超过最大重试次数
@@ -272,6 +299,9 @@ class Auto:
     def get_status(self) -> dict:
         """获取系统完整状态"""
         active_device = self.device_manager.get_active_device()
+        # 获取坐标转换器的当前状态
+        transformer_status = self.coord_transformer.get_status()
+        
         status = {
             "system_running": self.running,
             "task_should_stop": self.check_should_stop(),
@@ -282,6 +312,7 @@ class Auto:
             "device_states": {
                 uri: dev.get_state().name for uri, dev in self.device_manager.devices.items()
             },
+            "coordinate_transformer": transformer_status,  # 包含坐标转换器的状态信息
             "base_resolution": self.base_resolution,
             "loaded_templates": len(self.image_processor.templates),
             "last_error": self.last_error,
@@ -299,7 +330,7 @@ class Auto:
         device_uri: Optional[str] = None,
         is_base_coord: bool = False
     ) -> bool:
-        """点击操作（支持绝对坐标，带状态校验）"""
+        """点击操作"""
         # 中断检查
         if self.check_should_stop():
             self.logger.info("点击任务被中断")
@@ -313,38 +344,15 @@ class Auto:
             self.last_result = False
             return False
 
-        # 关键校验：设备必须可操作（CONNECTED/IDLE）
-        if not device.is_operable:
-            self.last_error = f"点击失败: 设备状态为 {device.get_state().name}（不可操作）"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
-
-        # 分辨率校验
-        resolution = device.get_resolution()
-        if not resolution or resolution == (0, 0):
-            self.last_error = "点击失败: 无法获取设备分辨率"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
-        
-        # 坐标边界检查
-        abs_x, abs_y = round(pos[0]), round(pos[1])
-        if (abs_x < 0 or abs_x >= resolution[0] or abs_y < 0 or abs_y >= resolution[1]):
-            self.last_error = f"点击失败: 坐标({abs_x},{abs_y})超出分辨率{resolution}范围"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
-
-        # 执行点击
-        self.last_result = device.click((abs_x, abs_y), click_time=click_time, is_base_coord=is_base_coord)
+        # 执行点击（传客户）
+        self.last_result = device.click((pos[0], pos[1]), click_time=click_time, is_base_coord=is_base_coord)
         # 同步错误
         if not self.last_result:
             self.last_error = device.last_error or "点击执行失败"
             self.logger.error(f"错误: {self.last_error}")
         else:
             coord_type = "基准坐标" if is_base_coord else "客户区坐标"
-            self.logger.info(f"点击成功: {coord_type}({abs_x},{abs_y}) | 次数{click_time}")
+            self.logger.info(f"点击成功: {coord_type}{pos} | 次数{click_time}")
         
         return self.last_result
 
@@ -363,11 +371,11 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        if not device or not device.is_operable:
-            self.last_error = f"按键失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
+        # if not device or not device.is_operable:
+        #     self.last_error = f"按键失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
+        #     self.logger.error(f"错误: {self.last_error}")
+        #     self.last_result = False
+        #     return False
 
         # 执行按键
         self.last_result = device.key_press(key, duration=duration)
@@ -380,15 +388,15 @@ class Auto:
         return self.last_result
 
     def template_click(
-        self,
-        template_name: str,
-        delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None,
-        duration: float = 0.1,
-        click_time: int = 1,
-        right_click: bool = False
-    ) -> bool:
-        """模板匹配点击（支持右键）"""
+            self,
+            template_name: str,
+            delay: float = DEFAULT_CLICK_DELAY,
+            device_uri: Optional[str] = None,
+            duration: float = 0.1,
+            click_time: int = 1,
+            right_click: bool = False
+        ) -> bool:
+        """模板匹配点击（支持右键）——修改：传模板名称，不提前检查"""
         if self.check_should_stop():
             self.logger.info("模板点击任务被中断")
             self.last_result = False
@@ -396,23 +404,21 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        if not device or not device.is_operable or device.is_minimized():
-            self.last_error = f"模板点击失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
+        # if not device or not device.is_operable or device.is_minimized():
+        #     self.last_error = f"模板点击失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
+        #     self.logger.error(f"错误: {self.last_error}")
+        #     self.last_result = False
+        #     return False
 
-        # 获取模板
-        template = self.image_processor.get_template(template_name)
-        if not template:
-            self.last_error = f"模板点击失败: 未找到模板 {template_name}"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
-
-        # 执行模板点击
-        self.last_result = device.click(template, duration=duration, click_time=click_time, right_click=right_click)
+        self.last_result = device.click(
+            pos=template_name,
+            duration=duration,
+            click_time=click_time,
+            right_click=right_click
+        )
+        
         if not self.last_result:
+            # 同步device的错误信息（包含“模板不存在”“匹配失败”等）
             self.last_error = device.last_error or f"模板 {template_name} 点击失败"
             self.logger.error(f"错误: {self.last_error}")
         else:
@@ -432,7 +438,7 @@ class Auto:
             click_time: int = 1,
             right_click: bool = False
         ) -> Optional[Tuple[int, int]]:
-        """OCR文本识别并点击（支持基于基准绝对坐标的ROI，自动适配窗口大小）"""
+        """OCR文本识别并点击（支持ROI）"""
         if self.check_should_stop():
             self.logger.info("文本点击任务被中断")
             self.last_result = None
@@ -440,91 +446,37 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        if not device or not device.is_connected:
-            self.last_error = "文本点击失败: 设备未连接"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = None
-            return None
+        # if not device or not device.is_connected:
+        #     self.last_error = "文本点击失败: 设备未连接"
+        #     self.logger.error(f"错误: {self.last_error}")
+        #     self.last_result = None
+        #     return None
 
-        # 1. 确保窗口/客户区信息最新（关键：获取当前客户区尺寸用于缩放）
-        device._update_window_info()  # 强制更新客户区大小
-        client_width, client_height = device._client_size
-        base_width, base_height = device.BASE_RESOLUTION  # 从WindowsDevice获取基准分辨率（如1920x1080）
-        
-        # 校验客户区和基准分辨率有效性
-        if client_width == 0 or client_height == 0:
-            self.last_error = "文本点击失败: 客户区尺寸无效"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = None
-            return None
-        if base_width == 0 or base_height == 0:
-            self.last_error = "文本点击失败: 基准分辨率未配置"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = None
-            return None
+        # 1. 确保窗口/客户区信息最新（WindowsDevice已同步坐标转换器的上下文）
+        # device._update_window_info()
 
-        # 2. 计算缩放比例（当前客户区 / 基准分辨率）
-        scale_x = client_width / base_width  # 水平缩放比例
-        scale_y = client_height / base_height  # 垂直缩放比例
-        self.logger.debug(
-            f"ROI缩放参数 | 基准分辨率: {base_width}x{base_height} | "
-            f"当前客户区: {client_width}x{client_height} | "
-            f"缩放比例(x/y): {scale_x:.2f}/{scale_y:.2f}"
-        )
-
-        # 3. 截图（WindowsDevice.capture_screen 已返回客户区截图，无需处理非客户区）
+        # 2. 截图（WindowsDevice.capture_screen 已返回客户区截图）
         screen = device.capture_screen()
         if screen is None:
             self.last_error = "文本点击失败: 截图失败"
             self.logger.error(f"错误: {self.last_error}")
             self.last_result = None
             return None
-        # 校验截图尺寸与客户区一致（避免缩放错误）
-        screen_h, screen_w = screen.shape[:2]
-        if not (abs(screen_w - client_width) < 2 and abs(screen_h - client_height) < 2):
-            self.logger.warning(
-                f"截图尺寸与客户区不匹配 | 截图: {screen_w}x{screen_h} | "
-                f"客户区: {client_width}x{client_height} | 可能影响ROI精度"
-            )
 
-        # 4. 处理ROI：将基准绝对坐标转换为当前客户区的绝对坐标
+        # 3. 处理ROI：调用坐标转换器转换基准ROI到客户区ROI
         region = None  # 最终传给find_text_position的区域（当前客户区绝对坐标）
         if roi:
             try:
                 # 步骤1：校验用户传入的roi格式
                 if not isinstance(roi, (tuple, list)) or len(roi) != 4:
                     raise ValueError(f"roi必须是4元组/列表（x, y, w, h），当前为{type(roi)}且长度{len(roi)}")
-                roi_x, roi_y, roi_w, roi_h = roi
+                
+                # 步骤2：使用坐标转换器转换ROI
+                region = self.coord_transformer.convert_original_rect_to_current_client(roi)
 
-                # 步骤2：校验基准roi的合法性（不超出基准分辨率，尺寸为正）
-                if roi_x < 0 or roi_y < 0:
-                    raise ValueError(f"roi坐标不能为负数 | 传入: ({roi_x}, {roi_y})")
-                if roi_w <= 0 or roi_h <= 0:
-                    raise ValueError(f"roi宽高必须为正数 | 传入: ({roi_w}, {roi_h})")
-                if roi_x + roi_w > base_width or roi_y + roi_h > base_height:
-                    raise ValueError(
-                        f"roi超出基准分辨率范围 | 基准: {base_width}x{base_height} | "
-                        f"roi终点: ({roi_x+roi_w}, {roi_y+roi_h})"
-                    )
+                if not region:
+                    raise ValueError("ROI转换后无效（可能超出客户区或尺寸为0）")
 
-                # 步骤3：按当前客户区比例缩放roi（四舍五入为整数像素）
-                scaled_x = int(round(roi_x * scale_x))
-                scaled_y = int(round(roi_y * scale_y))
-                scaled_w = int(round(roi_w * scale_x))
-                scaled_h = int(round(roi_h * scale_y))
-
-                # 步骤4：二次校验缩放后的region不超出当前客户区（避免裁剪错误）
-                if scaled_x + scaled_w > client_width:
-                    scaled_w = client_width - scaled_x  # 调整宽度，避免超出
-                    self.logger.warning(f"缩放后roi宽度超出客户区，自动调整为{scaled_w}")
-                if scaled_y + scaled_h > client_height:
-                    scaled_h = client_height - scaled_y  # 调整高度，避免超出
-                    self.logger.warning(f"缩放后roi高度超出客户区，自动调整为{scaled_h}")
-                if scaled_w <= 0 or scaled_h <= 0:
-                    raise ValueError(f"缩放后roi尺寸无效 | 缩放后: ({scaled_w}, {scaled_h})")
-
-                # 最终region（当前客户区的绝对坐标）
-                region = (scaled_x, scaled_y, scaled_w, scaled_h)
                 self.logger.debug(
                     f"ROI转换完成 | 基准roi: {roi} → 当前客户区roi: {region}"
                 )
@@ -535,7 +487,7 @@ class Auto:
                 self.last_result = None
                 return None
 
-        # 5. 调用改造后的find_text_position（传入客户区截图+缩放后的region）
+        # 4. 调用OCR识别（传入客户区截图+转换后的region）
         text_pos = self.ocr_processor.find_text_position(
             image=screen,  # 客户区截图（无标题栏/边框）
             target_text=target_text,
@@ -550,7 +502,7 @@ class Auto:
             self.last_result = None
             return None
 
-        # 6. 计算点击坐标（文本框中心，客户区绝对坐标）
+        # 5. 计算点击坐标（文本框中心，客户区绝对坐标）
         x, y, w, h = text_pos
         client_center_x = x + w // 2
         client_center_y = y + h // 2
@@ -558,14 +510,14 @@ class Auto:
             f"识别到文本 '{target_text}' | 客户区坐标: ({x},{y},{w},{h}) | 中心: ({client_center_x},{client_center_y})"
         )
 
-        # 7. 执行点击（调用WindowsDevice.click，直接传入客户区坐标）
+        # 6. 执行点击（调用WindowsDevice.click，直接传入客户区坐标）
         if click:
             # 校验设备可操作性
-            if not device.is_operable:
-                self.last_error = f"文本点击失败: 设备状态为 {device.get_state().name}"
-                self.logger.error(f"错误: {self.last_error}")
-                self.last_result = None
-                return None
+            # if not device.is_operable:
+            #     self.last_error = f"文本点击失败: 设备状态为 {device.get_state().name}"
+            #     self.logger.error(f"错误: {self.last_error}")
+            #     self.last_result = None
+            #     return None
 
             # 调用WindowsDevice.click（is_base_coord=False表示传入的是客户区坐标）
             click_result = device.click(
@@ -592,7 +544,7 @@ class Auto:
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None
     ) -> Optional[str]:
-        """OCR文本识别"""
+        """OCR文本识别（优化ROI转换）"""
         if self.check_should_stop():
             self.logger.info("OCR任务被中断")
             self.last_result = None
@@ -614,9 +566,15 @@ class Auto:
             self.last_result = None
             return None
 
-        # 处理ROI
+        # 处理ROI：使用坐标转换器转换
         if roi:
-            screen = self.image_processor.get_roi_region(screen, roi)
+            converted_roi = self.coord_transformer.convert_base_roi_to_client(roi)
+            if converted_roi:
+                screen, _ = self.image_processor.get_roi_region(screen, converted_roi)
+            else:
+                self.last_error = "OCR失败: ROI转换无效"
+                self.logger.error(f"错误: {self.last_error}")
+                return None
 
         # 执行OCR
         self.last_result = self.ocr_processor.recognize_text(screen, lang=lang)
@@ -740,6 +698,8 @@ class Auto:
             self.logger.error(f"错误: {self.last_error}")
         else:
             self.logger.info(f"窗口调整为 {width}x{height} 成功")
+            # 窗口大小改变后，更新坐标转换器的上下文
+            device._update_window_info()
         
         return self.last_result
 
@@ -798,17 +758,19 @@ class Auto:
             self.logger.error(f"错误: {self.last_error}")
         else:
             self.logger.info("窗口重置成功")
+            # 窗口重置后，更新坐标转换器的上下文
+            device._update_window_info()
         
         return self.last_result
 
     # ======================== 图像相关方法 ========================
     def check_element_exist(
-        self,
-        template_name: str,
-        delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
-        device_uri: Optional[str] = None
-    ) -> bool:
-        """检查模板元素是否存在"""
+            self,
+            template_name: str,
+            delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
+            device_uri: Optional[str] = None
+        ) -> bool:
+        """检查模板元素是否存在——修改：传模板名称，"""
         if self.check_should_stop():
             self.logger.info("检查元素任务被中断")
             self.last_result = False
@@ -823,22 +785,15 @@ class Auto:
             return False
 
         try:
-            # 获取模板
-            template = self.image_processor.get_template(template_name)
-            if not template:
-                self.last_error = f"检查元素失败: 未找到模板 {template_name}"
-                self.logger.error(f"错误: {self.last_error}")
-                return False
-
-            # 执行检查（适配改进后的device.exists）
-            self.last_result = device.exists(template)
-            # 同步错误
+            result = device.exists(template_name)
+            
+            # 同步device的错误信息
             if device.last_error:
                 self.last_error = f"检查元素异常: {device.last_error}"
                 self.logger.warning(f"警告: {self.last_error}")
             
             self.logger.info(f"元素 {template_name} 存在: {self.last_result}")
-            return self.last_result
+            return result
         except Exception as e:
             self.last_error = f"检查元素异常: {str(e)}"
             self.logger.error(f"错误: {self.last_error}", exc_info=True)
@@ -898,13 +853,13 @@ class Auto:
             return None
 
     def wait_element(
-        self,
-        template_name: str,
-        timeout: float = DEFAULT_TASK_TIMEOUT,
-        delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
-        device_uri: Optional[str] = None
-    ) -> bool:
-        """等待模板元素出现"""
+            self,
+            template_name: str,
+            timeout: float = DEFAULT_TASK_TIMEOUT,
+            delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
+            device_uri: Optional[str] = None
+        ) -> bool:
+        """等待模板元素出现——修改：传模板名称"""
         if self.check_should_stop():
             self.logger.info("等待元素任务被中断")
             self.last_result = False
@@ -912,23 +867,16 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        if not device or not device.is_operable:
-            self.last_error = f"等待元素失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
+        # if not device or not device.is_operable:
+        #     self.last_error = f"等待元素失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
+        #     self.logger.error(f"错误: {self.last_error}")
+        #     self.last_result = False
+        #     return False
 
-        # 获取模板
-        template = self.image_processor.get_template(template_name)
-        if not template:
-            self.last_error = f"等待元素失败: 未找到模板 {template_name}"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
-
-        # 执行等待（适配改进后的device.wait）
-        self.last_result = device.wait(template, timeout=timeout)
+        self.last_result = device.wait(template_name, timeout=timeout)
+        
         if not self.last_result:
+            # 同步device的错误信息
             self.last_error = device.last_error or f"等待 {template_name} 超时（{timeout}s）"
             self.logger.error(f"错误: {self.last_error}")
         else:
@@ -954,13 +902,13 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        if not device or not device.is_operable:
-            self.last_error = f"滑动失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
+        # if not device or not device.is_operable:
+        #     self.last_error = f"滑动失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
+        #     self.logger.error(f"错误: {self.last_error}")
+        #     self.last_result = False
+        #     return False
 
-        # 执行滑动
+        # 执行滑动（device.swipe已通过CoordinateTransformer转换坐标）
         self.last_result = device.swipe(
             start_pos[0], start_pos[1],
             end_pos[0], end_pos[1],
@@ -994,13 +942,13 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        if not device or not device.is_operable:
-            self.last_error = f"文本输入失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = False
-            return False
+        # if not device or not device.is_operable:
+        #     self.last_error = f"文本输入失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
+        #     self.logger.error(f"错误: {self.last_error}")
+        #     self.last_result = False
+        #     return False
 
-        # 执行输入（适配改进后的device.text_input）
+        # 执行输入
         self.last_result = device.text_input(text, interval=interval)
         if not self.last_result:
             self.last_error = device.last_error or f"输入文本 '{text}' 失败"
@@ -1009,4 +957,3 @@ class Auto:
             self.logger.info(f"文本输入成功: {text}")
         
         return self.last_result
-    
