@@ -1,60 +1,40 @@
-import io
 import sys
+import io  # 添加缺失的io导入
 
 from auto_control import Auto
 from auto_control.config import *
+from auto_control.image_processor import ImageProcessor
 from auto_tasks.pc import *
+from auto_tasks.pc.public import back_to_main
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-def console_execute(task_ids=None):
-    """控制台模式执行任务，默认运行所有任务"""
-    # 如果未指定任务ID，默认执行所有任务
-    # if task_ids is None or not task_ids:
-    #     task_ids = ["all"]
-    
+def console_execute():
     auto = Auto()
     try:
         if not auto.add_device():
             auto.logger.error(f"设备添加失败: {auto.last_error}")
             return False
         auto.start()
-        auto.swipe((410, 310), (410, 175), duration=4, steps=4)
+        # 修改template_click的使用方式，它返回的是布尔值而不是坐标
+        # click_success = auto.click((179,158))
+        click_success = auto.template_click("get_guild/公会标识")
+        if click_success:
+            auto.logger.info(f"公会标识点击成功:{click_success}")
+        else:
+            auto.logger.warning("公会标识点击失败或未找到")
 
-        # auto.swipe((410, 410), (410, 180),duration=6, steps=6,is_base_coord = True)
-        # pos = auto.text_click("背包")
-        # if pos:
-        # #    auto.click(pos)
-        #    print(pos)
-        # else:
-        #     auto.logger.error("主界面元素未找到")
-        #     return False
-
-
-
+        # a  = back_to_main(auto)
+        # print("11"+str(a))
+        
+        # 如果需要获取坐标位置，应该使用check_element_exist结合其他方法
+        # 例如：
+        # if auto.check_element_exist("get_guild/公会标识"):
+        #     # 这里可以获取坐标或执行其他操作
+        
         return True
     except Exception as e:
         auto.logger.error(f"运行失败: {str(e)}", exc_info=True)
         return False
-    # finally:
-        # auto.stop()
 
-# if __name__ == "__main__":
-#     # 如果没有提供参数，默认执行所有任务
-#     task_ids = sys.argv[1:] if len(sys.argv) > 1 else None
-    
-    # 显示帮助信息的情况
-    # if task_ids and ("-h" in task_ids or "--help" in task_ids):
-    #     print("使用方法:")
-    #     print("  执行所有任务: python console_run.py")
-    #     print("  执行指定任务: python console_run.py 任务1 任务2 ...")
-    #     print("  查看帮助: python console_run.py -h 或 --help")
-    #     print("  可用任务:", ", ".join([
-    #         "login", "get_guild", "get_pvp", "get_restaurant",
-    #         "intensive_decomposition", "lucky_draw", "map_collection",
-    #         "pass_activity", "sweep_daily", "pass_rewards", "get_email", "daily"
-    #     ]))
-        # sys.exit(0)
-    
 console_execute()
-    

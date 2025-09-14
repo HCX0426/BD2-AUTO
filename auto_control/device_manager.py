@@ -131,8 +131,6 @@ class DeviceManager:
                     image_processor=image_processor or self.image_processor,
                     coord_transformer=coord_transformer or self.coord_transformer
                 )
-            elif device_type == "adb":
-                pass
             else:
                 raise ValueError(f"不支持的设备类型: {device_type}")
 
@@ -145,7 +143,7 @@ class DeviceManager:
                 # 自动设置第一个设备为活动设备
                 if not self.active_device:
                     self.active_device = lower_uri
-                    self.logger.info(f"自动设置活动设备: {lower_uri}")
+                    self.logger.debug(f"自动设置活动设备: {lower_uri}")
                 self.logger.info(f"设备添加成功: {device_uri}（耗时: {time.time()-start_time:.2f}s）")
                 return True
             else:
@@ -209,7 +207,7 @@ class DeviceManager:
         
         # 当切换活动设备时，更新坐标转换器的上下文
         if self.coord_transformer and hasattr(device, '_update_window_info'):
-            device._update_window_info()  # 让设备更新窗口信息并同步到坐标转换器
+            device._update_window_info()
         
         return True
 

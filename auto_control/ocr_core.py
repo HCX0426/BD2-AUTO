@@ -137,7 +137,7 @@ class EasyOCRWrapper(BaseOCR):
             download_enabled=True  # 允许自动下载缺失的模型
         )
 
-        self.logger.info(
+        self.logger.debug(
             f"EasyOCR实例初始化完成 | "
             f"默认语言: {self._current_lang} | "
             f"GPU加速: {'启用' if self._use_gpu else '禁用'} | "
@@ -213,7 +213,7 @@ class EasyOCRWrapper(BaseOCR):
             return formatted_results
 
         except Exception as e:
-            self.logger.error(f"EasyOCR文本检测失败: {str(e)}", exc_info=True)
+            self.logger.warning(f"EasyOCR文本检测失败: {str(e)}", exc_info=True)
             return []
 
     def recognize_text(self, image: np.ndarray, lang: str) -> str:
@@ -228,7 +228,7 @@ class EasyOCRWrapper(BaseOCR):
             return result_text
 
         except Exception as e:
-            self.logger.error(f"EasyOCR文本识别失败: {str(e)}", exc_info=True)
+            self.logger.warning(f"EasyOCR文本识别失败: {str(e)}", exc_info=True)
             return ""
 
     def detect_and_recognize(self, image: np.ndarray, lang: str) -> List[Dict]:

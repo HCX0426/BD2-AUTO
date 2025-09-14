@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, Tuple, Union
 import numpy as np
 from .ocr_core import EasyOCRWrapper, BaseOCR
 from .config import get_default_languages
-from .coordinate_transformer import CoordinateTransformer  # 导入坐标转换器
+from .coordinate_transformer import CoordinateTransformer
 
 class OCRProcessor:
     def __init__(self, 

@@ -47,7 +47,9 @@ class Auto:
         self.logger = Logger(
             task_name="System",
             base_log_dir=LOG_CONFIG["BASE_LOG_DIR"],
-            log_file_prefix="system"
+            log_file_prefix="system",
+            file_log_level=logging.DEBUG,
+            console_log_level=logging.INFO     # 控制台只输出重要信息
         )
         
         self.coord_transformer = CoordinateTransformer(
@@ -55,10 +57,11 @@ class Auto:
             original_dpi=dpi_scale,
             logger=self.logger
         )
-        self.logger.info(f"CoordinateTransformer初始化完成，基准分辨率: {base_resolution}, DPI缩放: {dpi_scale}")
         
         # 图像处理器
         self.image_processor = ImageProcessor(
+            original_base_res=base_resolution,
+            original_dpi=dpi_scale,
             logger=self.logger,
             coord_transformer=self.coord_transformer
         )
@@ -371,11 +374,6 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        # if not device or not device.is_operable:
-        #     self.last_error = f"按键失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-        #     self.logger.error(f"错误: {self.last_error}")
-        #     self.last_result = False
-        #     return False
 
         # 执行按键
         self.last_result = device.key_press(key, duration=duration)
@@ -404,11 +402,6 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        # if not device or not device.is_operable or device.is_minimized():
-        #     self.last_error = f"模板点击失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-        #     self.logger.error(f"错误: {self.last_error}")
-        #     self.last_result = False
-        #     return False
 
         self.last_result = device.click(
             pos=template_name,
@@ -446,14 +439,6 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        # if not device or not device.is_connected:
-        #     self.last_error = "文本点击失败: 设备未连接"
-        #     self.logger.error(f"错误: {self.last_error}")
-        #     self.last_result = None
-        #     return None
-
-        # 1. 确保窗口/客户区信息最新（WindowsDevice已同步坐标转换器的上下文）
-        # device._update_window_info()
 
         # 2. 截图（WindowsDevice.capture_screen 已返回客户区截图）
         screen = device.capture_screen()
@@ -512,12 +497,6 @@ class Auto:
 
         # 6. 执行点击（调用WindowsDevice.click，直接传入客户区坐标）
         if click:
-            # 校验设备可操作性
-            # if not device.is_operable:
-            #     self.last_error = f"文本点击失败: 设备状态为 {device.get_state().name}"
-            #     self.logger.error(f"错误: {self.last_error}")
-            #     self.last_result = None
-            #     return None
 
             # 调用WindowsDevice.click（is_base_coord=False表示传入的是客户区坐标）
             click_result = device.click(
@@ -867,11 +846,6 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        # if not device or not device.is_operable:
-        #     self.last_error = f"等待元素失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-        #     self.logger.error(f"错误: {self.last_error}")
-        #     self.last_result = False
-        #     return False
 
         self.last_result = device.wait(template_name, timeout=timeout)
         
@@ -902,11 +876,6 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        # if not device or not device.is_operable:
-        #     self.last_error = f"滑动失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-        #     self.logger.error(f"错误: {self.last_error}")
-        #     self.last_result = False
-        #     return False
 
         # 执行滑动（device.swipe已通过CoordinateTransformer转换坐标）
         self.last_result = device.swipe(
@@ -942,11 +911,6 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        # if not device or not device.is_operable:
-        #     self.last_error = f"文本输入失败: 设备不可用（状态: {device.get_state().name if device else '无'}）"
-        #     self.logger.error(f"错误: {self.last_error}")
-        #     self.last_result = False
-        #     return False
 
         # 执行输入
         self.last_result = device.text_input(text, interval=interval)

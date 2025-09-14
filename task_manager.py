@@ -4,7 +4,6 @@ import inspect
 from PyQt6.QtCore import QThread, pyqtSignal
 from auto_control.auto import Auto
 from auto_control.config.auto_config import PROJECT_ROOT
-from auto_control.config.st_config import generate_report
 
 # 任务模块路径
 TASKS_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc')
@@ -183,5 +182,4 @@ class TaskWorker(QThread):
         except Exception as e:
             self.log_signal.emit(f"任务执行框架错误: {str(e)}")
         finally:
-            generate_report(__file__)
             self.finished.emit()

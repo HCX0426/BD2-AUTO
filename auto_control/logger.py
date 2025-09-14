@@ -6,7 +6,7 @@ from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from .config import LOG_CONFIG, get_log_dir  # 集中导入日志配置
+from .config import LOG_CONFIG, get_log_dir
 
 class CompressedTimedRotatingFileHandler(TimedRotatingFileHandler):
     """支持压缩旧日志 + 自动清理超期日志的 Handler"""
@@ -167,7 +167,10 @@ class Logger:
 
     def create_task_logger(self, task_name: str) -> logging.Logger:
         """创建带任务名称的子日志"""
-        return self.logger.getChild(task_name)
+        child_logger = self.logger.getChild(task_name)
+        # 确保子日志器级别设置为DEBUG
+        child_logger.setLevel(logging.DEBUG)
+        return child_logger
 
     # 以下日志方法保持不变...
     def debug(self, message):

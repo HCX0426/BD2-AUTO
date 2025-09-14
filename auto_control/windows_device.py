@@ -1,6 +1,6 @@
 import ctypes
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 from ctypes import c_int, wintypes
 import cv2
 import numpy as np
@@ -16,7 +16,7 @@ from auto_control.device_base import BaseDevice, DeviceState
 from auto_control.image_processor import ImageProcessor
 
 class DCHandle:
-    """DC资源上下文管理器：修复为仅获取客户区DC，排除标题栏/边框"""
+    """DC资源上下文管理器：仅获取客户区DC，排除标题栏/边框"""
     def __init__(self, hwnd,logger):
         self.hwnd = hwnd
         self.hdc = None
@@ -66,15 +66,15 @@ class WindowsDevice(BaseDevice):
     def __init__(
         self,
         device_uri: str,
-        logger=None,
+        logger = None,
         image_processor: Optional[ImageProcessor] = None,
         coord_transformer: Optional[CoordinateTransformer] = None
     ):
         super().__init__(device_uri)
 
         self.logger = logger
-        self.image_processor = image_processor
-        self.coord_transformer = coord_transformer
+        self.image_processor: ImageProcessor = image_processor
+        self.coord_transformer: CoordinateTransformer = coord_transformer
 
         # 窗口信息
         self.hwnd: Optional[int] = None  # 窗口句柄
@@ -528,7 +528,7 @@ class WindowsDevice(BaseDevice):
                 win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
                 time.sleep(self.WINDOW_RESTORE_DELAY)
             self._update_window_info()
-            self.logger.info(f"窗口已恢复: {self.window_title}")
+            self.logger.debug(f"窗口已恢复: {self.window_title}")
             return True
         except Exception as e:
             self.last_error = f"恢复窗口失败: {str(e)}"
@@ -593,7 +593,7 @@ class WindowsDevice(BaseDevice):
             foreground_window = win32gui.GetForegroundWindow()
             
             if foreground_window == self.hwnd and not self.is_minimized():
-                self.logger.info("窗口激活成功")
+                # self.logger.info("窗口激活成功")
                 return True
             else:
                 # 尝试降级方案：发送ALT键事件绕过限制
@@ -739,7 +739,14 @@ class WindowsDevice(BaseDevice):
                     self.last_error = "截图失败，无法模板匹配"
                     return False
 
-                match_result = self.image_processor.match_template(screen, pos)
+                match_result = self.image_processor.match_template(
+                    image=screen,  # 待匹配截图（客户区，无标题栏）
+                    template=pos,  # 模板名称（pos 是传入的模板名）
+                    current_dpi=self.dpi_scale,  # 当前窗口的 DPI 缩放因子（已实时更新）
+                    hwnd=self.hwnd,  # 窗口句柄（用于判断全屏状态）
+                    physical_screen_res=self._get_screen_hardware_res(),  # 物理屏幕分辨率（全屏时必用）
+                    threshold=0.6  # 保持默认阈值，与原逻辑一致（也可按需调整）
+                )
                 if match_result is None:
                     self.last_error = f"模板匹配失败: {pos}"
                     return False
@@ -780,15 +787,11 @@ class WindowsDevice(BaseDevice):
 
             # 客户区逻辑坐标转屏幕物理坐标
             is_fullscreen = self.coord_transformer._is_current_window_fullscreen(self.hwnd)
-            if not is_fullscreen:
-                screen_physical_x, screen_physical_y = self.coord_transformer.convert_current_client_to_screen(*client_pos)
-            else:
-                screen_physical_x, screen_physical_y = client_pos
+            screen_physical_x, screen_physical_y = self.coord_transformer.convert_current_client_to_screen(*client_pos)
 
-            # 执行点击（使用修正后的物理坐标）
+            # 执行点击
             win32api.SetCursorPos((screen_physical_x, screen_physical_y))
             time.sleep(0.1)  # 延长等待，确保移动到位
-
 
             # 发送点击事件
             down_event = win32con.MOUSEEVENTF_RIGHTDOWN if right_click else win32con.MOUSEEVENTF_LEFTDOWN
@@ -976,7 +979,14 @@ class WindowsDevice(BaseDevice):
                 return None
 
             self.logger.debug(f"检查模板: {template_name}（阈值: {threshold}）")
-            match_result = self.image_processor.match_template(screen, template_name, threshold)
+            match_result = self.image_processor.match_template(
+                image=screen,  # 待匹配截图（客户区，无标题栏）
+                template=template_name,  # 待检查的模板名称
+                current_dpi=self.dpi_scale,  # 当前窗口 DPI 缩放因子
+                hwnd=self.hwnd,  # 窗口句柄（判断全屏）
+                threshold=threshold,  # 传入的匹配阈值（原逻辑保留）
+                physical_screen_res=self._get_screen_hardware_res()  # 物理屏幕分辨率
+            )
 
             # 2. 模板不存在的情况
             if match_result is None:

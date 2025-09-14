@@ -130,33 +130,50 @@ class CoordinateTransformer:
     def convert_current_client_to_screen(
         self, 
         client_x: int, 
-        client_y: int
+        client_y: int,
     ) -> Tuple[int, int]:
-        """将“当前窗口的客户区坐标”转换为“屏幕坐标”（仅依赖当前窗口参数）"""
+        """将"当前窗口的客户区坐标"转换为"屏幕坐标"，正确处理DPI缩放"""
         if not self._current_handle:
             raise ValueError("当前窗口句柄未设置，无法转换为屏幕坐标")
         
         try:
-            # 全屏模式特殊处理：客户区坐标直接等于屏幕坐标
+            # 全屏模式特殊处理
             if self._is_current_window_fullscreen(self._current_handle):
-                self.logger.debug(f"当前窗口全屏 → 客户区({client_x},{client_y}) = 屏幕坐标")
-                return client_x, client_y
+                # 计算DPI缩放比例
+                dpi_ratio = self._current_dpi / self._original_dpi
+                
+                # 全屏时，需要根据DPI比例进行缩放
+                if self._current_dpi > self._original_dpi:
+                    # current_dpi > original_dpi，坐标需要缩小
+                    screen_x = int(round(client_x / dpi_ratio))
+                    screen_y = int(round(client_y / dpi_ratio))
+                else:
+                    # current_dpi <= original_dpi，坐标需要放大
+                    screen_x = int(round(client_x * dpi_ratio))
+                    screen_y = int(round(client_y * dpi_ratio))
+                    
+                self.logger.debug(
+                    f"全屏模式坐标转换 | 客户区: ({client_x},{client_y}) "
+                    f"→ 屏幕坐标: ({screen_x},{screen_y}) "
+                    f"[DPI比例: {dpi_ratio:.3f}, 原始DPI: {self._original_dpi:.2f}, 当前DPI: {self._current_dpi:.2f}]"
+                )
+                return screen_x, screen_y
 
-            # 非全屏：客户区坐标 → 适配当前DPI → 叠加窗口在屏幕上的原点
-            # 步骤1：客户区坐标适配当前DPI（窗口显示时已被系统DPI缩放，需同步）
-            dpi_scaled_x = int(round(client_x * self._current_dpi))
-            dpi_scaled_y = int(round(client_y * self._current_dpi))
-
-            # 步骤2：获取窗口在屏幕上的原点（客户区左上角对应的屏幕坐标）
-            window_origin = win32gui.ClientToScreen(self._current_handle, (0, 0))
-            screen_x = window_origin[0] + dpi_scaled_x
-            screen_y = window_origin[1] + dpi_scaled_y
-
+            # 非全屏模式处理
+            # 关键修正：ClientToScreen需要传入未经过DPI缩放的原始客户区坐标
+            # 因为ClientToScreen内部会自动应用当前DPI缩放
+            original_client_x = int(round(client_x / self._current_dpi))
+            original_client_y = int(round(client_y / self._current_dpi))
+            
+            # 使用原始的客户区坐标调用ClientToScreen
+            screen_point = win32gui.ClientToScreen(self._current_handle, (original_client_x, original_client_y))
+            screen_x, screen_y = screen_point
+            
             self.logger.debug(
-                f"客户区→屏幕坐标 | 客户区: ({client_x},{client_y}) "
-                f"→ DPI缩放后: ({dpi_scaled_x},{dpi_scaled_y}) "
+                f"客户区→屏幕坐标 | 客户区逻辑坐标: ({client_x},{client_y}) "
+                f"→ 客户区原始坐标: ({original_client_x},{original_client_y}) "
                 f"→ 屏幕坐标: ({screen_x},{screen_y}) "
-                f"[窗口原点: {window_origin}, 当前DPI: {self._current_dpi:.2f}]"
+                f"[当前DPI: {self._current_dpi:.2f}]"
             )
             return screen_x, screen_y
 
