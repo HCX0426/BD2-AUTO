@@ -209,15 +209,37 @@ class WindowsDevice(BaseDevice):
         return None
 
     def _enable_dpi_awareness(self) -> None:
-        """启用DPI感知（确保获取正确的物理尺寸和DPI缩放因子）"""
+        """启用DPI感知（Windows 11专用优化版）"""
         try:
-            # Windows 10+ 推荐：Per-Monitor DPI感知V2（最精准）
-            ctypes.windll.user32.SetProcessDpiAwarenessContext(c_int(-4))
-            self.logger.debug("已启用Per-Monitor DPI感知V2模式")
+            # 直接使用SetProcessDpiAwareness（Windows 8.1+推荐）
+            import ctypes
+            shcore = ctypes.windll.shcore
+            # PROCESS_PER_MONITOR_DPI_AWARE = 2
+            result = shcore.SetProcessDpiAwareness(2)
+            
+            if result == 0:  # S_OK
+                self.logger.debug("已成功启用Per-Monitor DPI感知模式")
+                
+                # 可选：获取当前DPI信息用于调试
+                try:
+                    from ctypes import wintypes
+                    dpi = ctypes.windll.user32.GetDpiForSystem()
+                    self.logger.debug(f"系统DPI: {dpi}")
+                except:
+                    pass
+                    
+            else:
+                self.logger.warning(f"SetProcessDpiAwareness失败，错误码: {result}")
+                
         except Exception as e:
-            # 兼容旧系统：系统级DPI感知
-            ctypes.windll.user32.SetProcessDPIAware()
-            self.logger.debug(f"启用DPI感知兼容模式: {e}")
+            self.logger.error(f"启用DPI感知失败: {e}")
+            
+            # 备用方案（通常不需要，但保留）
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+                self.logger.debug("已启用备用DPI感知模式")
+            except:
+                self.logger.error("所有DPI感知方法都失败")
 
     def _get_dpi_for_window(self) -> float:
         """获取当前窗口的DPI缩放因子（优先级：窗口DPI > 监视器DPI > 系统DPI）"""
@@ -786,7 +808,6 @@ class WindowsDevice(BaseDevice):
                 self.logger.debug(f"原始坐标 {target_pos} → 当前客户区坐标 {client_pos}（逻辑坐标）")
 
             # 客户区逻辑坐标转屏幕物理坐标
-            is_fullscreen = self.coord_transformer._is_current_window_fullscreen(self.hwnd)
             screen_physical_x, screen_physical_y = self.coord_transformer.convert_current_client_to_screen(*client_pos)
 
             # 执行点击

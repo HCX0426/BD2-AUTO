@@ -362,7 +362,7 @@ class OCRProcessor:
         
         # 区域坐标转换（基准坐标 -> 图像坐标）
         if region and is_base_region and self.coord_transformer:
-            processed_region = self.coord_transformer.convert_base_rect_to_client(region)
+            processed_region = self.coord_transformer.convert_original_to_current_client(region)
             self.logger.debug(f"区域坐标转换 | 基准区域: {region} -> 图像区域: {processed_region}")
         
         if processed_region:

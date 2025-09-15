@@ -6,7 +6,7 @@ import logging
 import win32gui
 
 # 导入坐标转换器
-from auto_control.config.image_config import TEMPLATE_DIR
+from auto_control.config.image_config import TEMPLATE_DIR,TEMPLATE_EXTENSIONS
 from auto_control.coordinate_transformer import CoordinateTransformer
 
 
@@ -90,7 +90,7 @@ class ImageProcessor:
         # 递归搜索所有子目录中的PNG文件
         for root, dirs, files in os.walk(self.template_dir):
             for filename in files:
-                if filename.lower().endswith(".png"):
+                if filename.lower().endswith(TEMPLATE_EXTENSIONS):
                     # 使用相对路径作为模板名称，避免重名冲突
                     rel_path = os.path.relpath(root, self.template_dir)
                     if rel_path == ".":

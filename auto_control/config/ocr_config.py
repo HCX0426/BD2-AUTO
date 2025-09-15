@@ -24,7 +24,6 @@ LANGUAGE_COMBINATION_RULES = {
     'easyocr': {
         'ch_tra': ['ch_tra', 'en']
     }
-    # 移除了 Tesseract 的组合规则
 }
 
 # 引擎基础配置
