@@ -20,7 +20,8 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
-                
+
+            auto.sleep(2)    
             # 检查是否已在主界面
             if auto.check_element_exist("public/主界面"):
                 logger.debug("已在主界面")
@@ -47,6 +48,7 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
                     auto.click(cancel_pos)
                     auto.sleep(1)
                     auto.key_press("h")
+                    auto.sleep(2)
                     # 检查返回是否成功
                     if auto.check_element_exist("public/主界面"):
                         return True

@@ -31,6 +31,8 @@ class OCRProcessor:
         
         # 初始化坐标转换器
         self.coord_transformer = coord_transformer
+        # 从坐标转换器获取原始基准分辨率（缓存，避免重复获取）
+        self._original_base_res = coord_transformer._original_base_res if (coord_transformer and hasattr(coord_transformer, '_original_base_res')) else (0, 0)
         
         # 初始化指定的OCR引擎（确保与BaseOCR接口兼容）
         self.engine: BaseOCR = self._init_engine(**kwargs)
@@ -41,7 +43,8 @@ class OCRProcessor:
             f"引擎: {self.engine_type.upper()} | "
             f"默认语言: {self._default_lang} | "
             f"GPU加速: {'启用' if self.engine._use_gpu else '禁用'} | "
-            f"坐标转换: {'已配置' if self.coord_transformer else '未配置'}"
+            f"坐标转换: {'已配置' if self.coord_transformer else '未配置'} | "
+            f"原始基准分辨率: {self._original_base_res}"
         )
 
     def _create_default_logger(self):
@@ -77,9 +80,76 @@ class OCRProcessor:
             raise ValueError(f"不支持的OCR引擎: {self.engine_type}")
 
     def set_coord_transformer(self, transformer: CoordinateTransformer) -> None:
-        """设置坐标转换器实例"""
+        """设置坐标转换器实例，同步更新原始基准分辨率"""
         self.coord_transformer = transformer
-        self.logger.info("坐标转换器已更新")
+        self._original_base_res = transformer._original_base_res if (transformer and hasattr(transformer, '_original_base_res')) else (0, 0)
+        self.logger.info(f"坐标转换器已更新 | 原始基准分辨率: {self._original_base_res}")
+
+    def _convert_current_client_to_base(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        补充：当前客户区坐标 → 原始基准坐标（反向转换）
+        逻辑：基于原始基准分辨率与当前客户区尺寸的比例推导
+        """
+        if not self.coord_transformer:
+            self.logger.warning("无坐标转换器，无法将当前客户区坐标转为原始基准坐标")
+            return (x, y)
+        
+        # 获取当前客户区尺寸（从坐标转换器动态获取）
+        curr_client_w, curr_client_h = self.coord_transformer._current_client_size
+        orig_base_w, orig_base_h = self._original_base_res
+        
+        # 校验参数有效性（避免除零错误）
+        if curr_client_w <= 0 or curr_client_h <= 0 or orig_base_w <= 0 or orig_base_h <= 0:
+            self.logger.warning(
+                f"无效参数，无法反向转换坐标 | "
+                f"当前客户区尺寸: ({curr_client_w},{curr_client_h}) | "
+                f"原始基准分辨率: ({orig_base_w},{orig_base_h})"
+            )
+            return (x, y)
+        
+        # 反向转换比例：原始基准尺寸 / 当前客户区尺寸
+        scale_x = orig_base_w / curr_client_w
+        scale_y = orig_base_h / curr_client_h
+        
+        # 计算原始基准坐标（四舍五入为整数）
+        base_x = int(round(x * scale_x))
+        base_y = int(round(y * scale_y))
+        
+        self.logger.debug(
+            f"当前客户区→原始基准坐标转换 | "
+            f"当前坐标: ({x},{y}) | 比例(x:y): {scale_x:.2f}:{scale_y:.2f} | "
+            f"原始基准坐标: ({base_x},{base_y})"
+        )
+        return (base_x, base_y)
+
+    def _convert_current_client_rect_to_base(self, rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+        补充：当前客户区矩形 → 原始基准矩形（反向转换，处理ROI）
+        :param rect: 当前客户区矩形 (x, y, w, h)
+        :return: 原始基准矩形 (x, y, w, h)
+        """
+        x, y, w, h = rect
+        # 转换左上角坐标
+        base_x, base_y = self._convert_current_client_to_base(x, y)
+        # 转换宽高（使用相同比例）
+        curr_client_w, curr_client_h = self.coord_transformer._current_client_size
+        orig_base_w, orig_base_h = self._original_base_res
+        if curr_client_w <= 0 or curr_client_h <= 0 or orig_base_w <= 0 or orig_base_h <= 0:
+            return (base_x, base_y, w, h)
+        scale_x = orig_base_w / curr_client_w
+        scale_y = orig_base_h / curr_client_h
+        base_w = int(round(w * scale_x))
+        base_h = int(round(h * scale_y))
+        # 确保尺寸为正
+        base_w = max(1, base_w)
+        base_h = max(1, base_h)
+        
+        self.logger.debug(
+            f"当前客户区→原始基准矩形转换 | "
+            f"当前矩形: {rect} | 比例(x:y): {scale_x:.2f}:{scale_y:.2f} | "
+            f"原始基准矩形: ({base_x},{base_y},{base_w},{base_h})"
+        )
+        return (base_x, base_y, base_w, base_h)
 
     def detect_text(self, 
                    image: np.ndarray, 
@@ -126,14 +196,24 @@ class OCRProcessor:
         # 调用引擎的检测方法（确保与BaseOCR接口一致）
         results = self.engine.detect_text(processed_image, target_lang)
         
-        # 如果需要转换为基准坐标
+        # 如果需要转换为基准坐标（调用补充的反向转换方法）
         if is_base_coord and self.coord_transformer:
             converted_results = []
             for result in results:
                 bbox = result['bbox']
-                # 当前客户区坐标 → 原始基准坐标（对齐新方法名）
-                converted_x, converted_y = self.coord_transformer.convert_current_client_to_base((bbox[0], bbox[1]))
-                converted_bbox = (converted_x, converted_y, bbox[2], bbox[3])
+                x, y, w, h = bbox
+                # 转换左上角坐标，宽高同步转换
+                base_x, base_y = self._convert_current_client_to_base(x, y)
+                curr_client_w, curr_client_h = self.coord_transformer._current_client_size
+                orig_base_w, orig_base_h = self._original_base_res
+                if curr_client_w > 0 and curr_client_h > 0 and orig_base_w > 0 and orig_base_h > 0:
+                    scale_x = orig_base_w / curr_client_w
+                    scale_y = orig_base_h / curr_client_h
+                    base_w = int(round(w * scale_x))
+                    base_h = int(round(h * scale_y))
+                else:
+                    base_w, base_h = w, h
+                converted_bbox = (base_x, base_y, base_w, base_h)
                 converted_result = {**result, 'bbox': converted_bbox}
                 converted_results.append(converted_result)
             results = converted_results
@@ -164,11 +244,16 @@ class OCRProcessor:
             self.logger.error("无效的输入图像（空图像或尺寸为0）")
             return ""
         
-        # 处理区域坐标转换
+        # 处理区域坐标转换（修正方法名：convert_base_rect_to_client → convert_original_rect_to_current_client）
         processed_region = region
         if region and is_base_region and self.coord_transformer:
-            processed_region = self.coord_transformer.convert_base_rect_to_client(region)
-            self.logger.debug(f"区域坐标转换 | 基准区域: {region} -> 图像区域: {processed_region}")
+            try:
+                # 原始基准矩形 → 当前客户区矩形（使用正确的方法名）
+                processed_region = self.coord_transformer.convert_original_rect_to_current_client(region)
+                self.logger.debug(f"区域坐标转换 | 基准区域: {region} -> 图像区域: {processed_region}")
+            except Exception as e:
+                self.logger.error(f"区域坐标转换失败: {str(e)}，将使用原始区域")
+                processed_region = region
         
         # 裁剪区域（如果指定）
         processed_image = image
@@ -235,13 +320,24 @@ class OCRProcessor:
         # 调用引擎方法（确保与BaseOCR接口一致）
         results = self.engine.detect_and_recognize(processed_image, target_lang)
         
-        # 坐标转换处理
+        # 坐标转换处理（使用补充的反向转换方法）
         if is_base_coord and self.coord_transformer:
             converted_results = []
             for result in results:
                 bbox = result['bbox']
-                converted_x, converted_y = self.coord_transformer.convert_current_client_to_base((bbox[0], bbox[1]))
-                converted_bbox = (converted_x, converted_y, bbox[2], bbox[3])
+                x, y, w, h = bbox
+                # 转换左上角坐标和宽高
+                base_x, base_y = self._convert_current_client_to_base(x, y)
+                curr_client_w, curr_client_h = self.coord_transformer._current_client_size
+                orig_base_w, orig_base_h = self._original_base_res
+                if curr_client_w > 0 and curr_client_h > 0 and orig_base_w > 0 and orig_base_h > 0:
+                    scale_x = orig_base_w / curr_client_w
+                    scale_y = orig_base_h / curr_client_h
+                    base_w = int(round(w * scale_x))
+                    base_h = int(round(h * scale_y))
+                else:
+                    base_w, base_h = w, h
+                converted_bbox = (base_x, base_y, base_w, base_h)
                 converted_result = {**result, 'bbox': converted_bbox}
                 converted_results.append(converted_result)
             results = converted_results
@@ -290,15 +386,26 @@ class OCRProcessor:
         # 调用引擎的批量处理方法（确保与BaseOCR接口一致）
         batch_results = self.engine.batch_process(processed_images, target_lang)
         
-        # 坐标转换处理
+        # 坐标转换处理（使用补充的反向转换方法）
         if is_base_coord and self.coord_transformer:
             converted_batch = []
             for results in batch_results:
                 converted_results = []
                 for result in results:
                     bbox = result['bbox']
-                    converted_x, converted_y = self.coord_transformer.convert_current_client_to_base((bbox[0], bbox[1]))
-                    converted_bbox = (converted_x, converted_y, bbox[2], bbox[3])
+                    x, y, w, h = bbox
+                    # 转换左上角坐标和宽高
+                    base_x, base_y = self._convert_current_client_to_base(x, y)
+                    curr_client_w, curr_client_h = self.coord_transformer._current_client_size
+                    orig_base_w, orig_base_h = self._original_base_res
+                    if curr_client_w > 0 and curr_client_h > 0 and orig_base_w > 0 and orig_base_h > 0:
+                        scale_x = orig_base_w / curr_client_w
+                        scale_y = orig_base_h / curr_client_h
+                        base_w = int(round(w * scale_x))
+                        base_h = int(round(h * scale_y))
+                    else:
+                        base_w, base_h = w, h
+                    converted_bbox = (base_x, base_y, base_w, base_h)
                     converted_result = {**result, 'bbox': converted_bbox}
                     converted_results.append(converted_result)
                 converted_batch.append(converted_results)
@@ -360,11 +467,16 @@ class OCRProcessor:
         region_offset = (0, 0)     # 裁剪区域在原图中的偏移量（x, y）
         processed_region = region
         
-        # 区域坐标转换（基准坐标 -> 图像坐标）
+        # 区域坐标转换（基准坐标 -> 图像坐标，修正方法名）
         if region and is_base_region and self.coord_transformer:
-            processed_region = self.coord_transformer.convert_original_to_current_client(region)
-            self.logger.debug(f"区域坐标转换 | 基准区域: {region} -> 图像区域: {processed_region}")
-        
+            try:
+                # 使用正确的方法名：convert_original_rect_to_current_client
+                processed_region = self.coord_transformer.convert_original_rect_to_current_client(region)
+                self.logger.debug(f"区域坐标转换 | 基准区域: {region} -> 图像区域: {processed_region}")
+            except Exception as e:
+                self.logger.error(f"限定区域参数无效：{str(e)}，自动切换为全图查找")
+                processed_region = None  # 校验失败时回退到全图查找
+
         if processed_region:
             try:
                 r_x, r_y, r_w, r_h = processed_region
@@ -467,12 +579,11 @@ class OCRProcessor:
                     f"子图位置: {result['bbox']} | 原图位置: {orig_bbox}"
                 )
         
-        # 7. 结果坐标转换（图像坐标 -> 基准坐标，如果需要）
+        # 7. 结果坐标转换（图像坐标 -> 原始基准坐标，如果需要）
         final_bbox = best_match
         if best_match and return_base_coord and self.coord_transformer:
-            # 转换左上角坐标，保持宽高不变（对齐新方法名）
-            base_x, base_y = self.coord_transformer.convert_current_client_to_base((best_match[0], best_match[1]))
-            final_bbox = (base_x, base_y, best_match[2], best_match[3])
+            # 使用补充的反向转换方法，转换整个矩形
+            final_bbox = self._convert_current_client_rect_to_base(best_match)
             self.logger.debug(f"结果坐标转换 | 当前客户区坐标: {best_match} -> 原始基准坐标: {final_bbox}")
         
         # 8. 输出最终结果
@@ -488,4 +599,3 @@ class OCRProcessor:
         else:
             self.logger.warning(f"在{'指定区域' if processed_region else '全图'}中未找到匹配的目标文本: '{target_text}'")
             return None
-    

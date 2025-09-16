@@ -24,7 +24,7 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
         (420, 330),  # 第一个奖励位置
         (420, 430),  # 第二个奖励位置
         (420, 530),  # 第三个奖励位置
-        (420, 630)   # 第四个奖励位置
+        # (420, 630)   # 第四个奖励位置
     ]
     current_reward = 0
     
@@ -63,7 +63,7 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                         if auto.click((1590, 680),click_time=2,is_base_coord=True):
                             if auto.text_click("全部获得"):
                                 logger.info(f"领取第{current_reward+1}个奖励")
-                                auto.sleep(1)
+                                auto.sleep(3)
                                 
                                 if click_back(auto):
                                     logger.info("返回通行证界面")

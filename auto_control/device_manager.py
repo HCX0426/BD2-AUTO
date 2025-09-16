@@ -111,7 +111,7 @@ class DeviceManager:
         if lower_uri.startswith("windows://"):
             device_type = "windows"
             # Windows设备必须传入ImageProcessor
-            if not image_processor:
+            if not image_processor and not self.image_processor:
                 self.logger.error("添加Windows设备失败：必须提供ImageProcessor实例")
                 return False
         elif lower_uri.startswith(("android://", "adb://")):
@@ -131,8 +131,11 @@ class DeviceManager:
                     image_processor=image_processor or self.image_processor,
                     coord_transformer=coord_transformer or self.coord_transformer
                 )
-            else:
-                raise ValueError(f"不支持的设备类型: {device_type}")
+            else:  # adb设备
+                device = ADBDevice(
+                    device_uri=device_uri,
+                    logger=logger or self.logger
+                )
 
             # 尝试连接设备
             start_time = time.time()
@@ -179,6 +182,8 @@ class DeviceManager:
                 self.active_device = next(iter(self.devices.keys()), None)
                 if self.active_device:
                     self.logger.info(f"活动设备已切换为: {self.active_device}")
+                    # 切换后更新坐标转换器上下文
+                    self._update_coord_transformer_context()
                 else:
                     self.logger.info("所有设备已移除，无活动设备")
             
@@ -205,11 +210,24 @@ class DeviceManager:
         self.active_device = lower_uri
         self.logger.info(f"活动设备已设置为: {device_uri}（状态: {device.get_state().name}）")
         
-        # 当切换活动设备时，更新坐标转换器的上下文
-        if self.coord_transformer and hasattr(device, '_update_window_info'):
-            device._update_window_info()
+        # 切换活动设备后，更新坐标转换器上下文
+        self._update_coord_transformer_context()
         
         return True
+
+    def _update_coord_transformer_context(self):
+        """更新坐标转换器的上下文（内部方法）"""
+        active_device = self.get_active_device()
+        if not active_device or not self.coord_transformer:
+            return
+            
+        # 对于Windows设备，触发动态窗口信息更新，确保坐标转换器获取最新状态
+        if isinstance(active_device, WindowsDevice):
+            try:
+                active_device._update_dynamic_window_info()
+                self.logger.debug(f"已为活动设备更新坐标转换器上下文: {self.active_device}")
+            except Exception as e:
+                self.logger.error(f"更新坐标转换器上下文失败: {str(e)}")
 
     def disconnect_all(self) -> Tuple[int, int]:
         """断开所有设备连接（返回成功/失败数量）"""
@@ -251,4 +269,3 @@ class DeviceManager:
     def __contains__(self, device_uri: str) -> bool:
         """检查设备是否已存在"""
         return device_uri.lower() in self.devices
-    
