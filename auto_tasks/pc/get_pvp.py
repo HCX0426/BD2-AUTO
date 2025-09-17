@@ -56,6 +56,11 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     auto.click(pos)
                     auto.sleep(5)
                 
+                if auto.check_element_exist("get_pvp/竞技场标识"):
+                    logger.info("进入竞技场")
+                    auto.click((820,600),is_base_coord=True)
+                    auto.sleep(5)
+                
                 # 处理可能的确认弹窗
                 if pos := auto.text_click("确认", click=False):
                     logger.info("点击确认弹窗")

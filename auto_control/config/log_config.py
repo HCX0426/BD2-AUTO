@@ -16,7 +16,7 @@ LOG_CONFIG = {
     "CONSOLE_LOG_LEVEL": "INFO",  # 控制台日志级别
     "WHEN": "midnight",  # 按天轮转
     "INTERVAL": 1,  # 每天轮转一次
-    "BACKUP_COUNT": 2,  # 保留固定天数的日志（压缩后）
+    "BACKUP_COUNT": 1,  # 保留固定天数的日志（压缩后）
     "LOG_FORMAT": "%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(message)s",
     "ASYNC_LOGGING": True,  # 是否启用异步日志
     "COMPRESS_OLD_LOGS": True,  # 是否压缩旧日志

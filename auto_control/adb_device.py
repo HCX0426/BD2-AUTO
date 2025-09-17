@@ -32,9 +32,5 @@ class ADBDevice(BaseDevice):
         """检查元素是否存在"""
         pass
 
-    def paste_text(self, text: str) -> bool:
-        """粘贴文本"""
-        pass
-
     def disconnect(self):
         pass

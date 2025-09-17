@@ -57,7 +57,7 @@ class ImageProcessor:
         return logger
 
     def load_template(self, template_name: str, template_path: Optional[str] = None) -> bool:
-        """加载单个模板图像（保持不变）"""
+        """加载单个模板图像"""
         try:
             # 确定模板路径
             if not template_path:
@@ -81,7 +81,7 @@ class ImageProcessor:
             return False
 
     def load_all_templates(self) -> int:
-        """加载模板目录中的所有PNG模板（包括子目录，保持不变）"""
+        """加载模板目录中的所有PNG模板（包括子目录）"""
         loaded = 0
         if not os.path.isdir(self.template_dir):
             self.logger.warning(f"模板目录不存在: {self.template_dir}")
@@ -104,7 +104,7 @@ class ImageProcessor:
         return loaded
 
     def get_template(self, template_name: str) -> Optional[np.ndarray]:
-        """获取已加载的模板（保持不变）"""
+        """获取已加载的模板"""
         loaded_names = list(self.templates.keys())
         self.logger.debug(f"尝试获取模板: {template_name} | 已加载模板数: {len(loaded_names)}")
         
@@ -129,7 +129,7 @@ class ImageProcessor:
         return template
 
     def save_template(self, template_name: str, image: np.ndarray) -> bool:
-        """保存图像作为模板（保持不变）"""
+        """保存图像作为模板"""
         try:
             template_path = os.path.join(self.template_dir, f"{template_name}.png")
             # 确保是灰度图
@@ -149,7 +149,7 @@ class ImageProcessor:
             return False
 
     def remove_template(self, template_name: str) -> bool:
-        """删除模板（保持不变）"""
+        """删除模板"""
         if template_name in self.templates:
             del self.templates[template_name]
             # 删除文件
@@ -165,9 +165,9 @@ class ImageProcessor:
     def _scale_template_to_current_size(
         self, 
         template: np.ndarray, 
-        current_dpi: float, 
-        hwnd: Optional[int] = None,
-        physical_screen_res: Optional[Tuple[int, int]] = None  # 新增：物理屏幕分辨率
+        current_dpi: float, # 当前DPI
+        hwnd: Optional[int] = None, # 窗口句柄
+        physical_screen_res: Optional[Tuple[int, int]] = None  # 物理屏幕分辨率
     ) -> Optional[np.ndarray]:
         """
         核心修正：按窗口状态选择缩放基准
@@ -259,7 +259,7 @@ class ImageProcessor:
         physical_screen_res: Optional[Tuple[int, int]] = None
     ) -> Optional[Tuple[int, int, int, int]]:
         """
-        单模板匹配（修正逻辑）：
+        单模板匹配：
         - 需传入hwnd（窗口句柄）以判断全屏状态
         - 全屏时必须传入physical_screen_res（物理屏幕分辨率），否则匹配失败
         - 非全屏时使用客户端尺寸作为缩放基准，无需物理屏参数
@@ -286,7 +286,7 @@ class ImageProcessor:
                     return None
             else:
                 template_img = template
-                # 转换为灰度图（与后续处理统一）
+                # 转换为灰度图
                 if len(template_img.shape) == 3:
                     template_img = cv2.cvtColor(template_img, cv2.COLOR_BGR2GRAY)
                 if template_img is None:
@@ -308,7 +308,7 @@ class ImageProcessor:
                 return None
             gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
             
-            # 4. 计算标题栏高度（关键修正）- 使用您提供的方法
+            # 4. 计算标题栏高度
             title_bar_height = 0
             if not is_fullscreen and hwnd:
                 try:
@@ -375,10 +375,6 @@ class ImageProcessor:
                 original_y = match_y
                 match_y = max(0, match_y - title_bar_height)  # 确保不会变成负数
                 self.logger.debug(f"标题栏高度修正: Y坐标 {original_y} -> {match_y} (减去{title_bar_height}px)")
-
-            # self._save_match_debug_image(
-            #     image, template_img, match_x, match_y, templ_w, templ_h, 
-            #     max_val, "debug_match_result.png")
             
             self.logger.info(
                 f"模板匹配成功 | 模板: {template if isinstance(template, str) else '自定义'} | "
@@ -396,7 +392,6 @@ class ImageProcessor:
     def _save_match_debug_image(
         self,
         original_image: np.ndarray,
-        template_img: np.ndarray,
         match_x: int,
         match_y: int,
         templ_w: int,
@@ -485,7 +480,7 @@ class ImageProcessor:
         roi: Tuple[int, int, int, int],
         is_base_roi: bool = False
     ) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
-        """修复ROI转换方法名错误，保持不变"""
+        """获取ROI区域"""
         try:
             if image is None:
                 self.logger.error("获取ROI失败：输入图像为None")
@@ -630,7 +625,7 @@ class ImageProcessor:
         block_size: int = 11,
         c: int = 2
     ) -> np.ndarray:
-        """图像预处理（保持不变，确保模板与截图处理一致）"""
+        """图像预处理（确保模板与截图处理一致）"""
         try:
             if image is None:
                 self.logger.error("预处理失败：输入图像为None")
@@ -667,7 +662,7 @@ class ImageProcessor:
             return image if image is not None else np.array([])
 
     def get_center(self, rect: Union[Tuple[int, int, int, int], np.ndarray]) -> Tuple[int, int]:
-        """计算矩形中心坐标（保持不变）"""
+        """计算矩形中心坐标"""
         if rect is None:
             self.logger.warning("计算中心失败：矩形参数为None")
             return (0, 0)
@@ -690,5 +685,5 @@ class ImageProcessor:
             return (0, 0)
 
     def __len__(self) -> int:
-        """返回已加载模板数量（保持不变）"""
+        """返回已加载模板数量"""
         return len(self.templates)

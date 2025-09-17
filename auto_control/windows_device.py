@@ -1,7 +1,7 @@
 import ctypes
 import time
 from typing import Dict, Optional, Tuple, Union
-from ctypes import c_int, wintypes
+from ctypes import wintypes
 import cv2
 import numpy as np
 import pydirectinput
@@ -89,7 +89,7 @@ class WindowsDevice(BaseDevice):
         self._window_rect: Tuple[int, int, int, int] = (0, 0, 0, 0)  # 窗口矩形
         self.is_fullscreen: bool = False  # 是否全屏（动态变化）
 
-        # 激活状态缓存（核心新增：避免频繁激活）
+        # 激活状态缓存
         self._last_activate_time = 0.0   # 上次激活时间（秒级时间戳）
 
         # 解析URI参数
@@ -372,7 +372,7 @@ class WindowsDevice(BaseDevice):
             client_w_logic = max(800, client_w_logic)
             client_h_logic = max(600, client_h_logic)
 
-            # 使用坐标转换器判断是否全屏（关键修改）
+            # 使用坐标转换器判断是否全屏
             if self.coord_transformer:
                 self.is_fullscreen = self.coord_transformer._is_current_window_fullscreen(self.hwnd)
             else:
@@ -527,7 +527,7 @@ class WindowsDevice(BaseDevice):
             return False
 
     def set_foreground(self) -> bool:
-        """优化：窗口激活逻辑（冷却+前台验证，避免频繁激活）"""
+        """窗口激活逻辑（冷却+前台验证，避免频繁激活）"""
         if not self.hwnd:
             self.last_error = f"未连接到窗口或状态异常: {self.hwnd}|{self.state}"
             return False

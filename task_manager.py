@@ -2,7 +2,6 @@ import os
 import json
 import inspect
 from PyQt6.QtCore import QThread, pyqtSignal
-from auto_control.auto import Auto
 from auto_control.config.auto_config import PROJECT_ROOT
 
 # 任务模块路径
@@ -146,14 +145,6 @@ class TaskWorker(QThread):
     
     def run(self):
         try:
-            # if "login" not in self.selected_tasks:
-            #     self.log_signal.emit("执行登录流程...")
-            #     from auto_tasks.pc.login import login
-            #     if not login(self.auto_instance):
-            #         self.log_signal.emit("登录失败，终止任务执行")
-            #         self.finished.emit()
-            #         return
-            
             total_tasks = len(self.selected_tasks)
             for index, task_id in enumerate(self.selected_tasks):
                 if self.auto_instance.check_should_stop():

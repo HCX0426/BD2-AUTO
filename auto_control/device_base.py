@@ -196,7 +196,7 @@ class BaseDevice(ABC):
 
     def set_foreground(self) -> bool:
         """将窗口置前"""
-        return True
+        pass
 
     def get_resolution(self) -> Tuple[int, int]:
         """获取设备分辨率"""

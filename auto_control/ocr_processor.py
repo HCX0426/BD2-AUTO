@@ -196,7 +196,7 @@ class OCRProcessor:
         # 调用引擎的检测方法（确保与BaseOCR接口一致）
         results = self.engine.detect_text(processed_image, target_lang)
         
-        # 如果需要转换为基准坐标（调用补充的反向转换方法）
+        # 如果需要转换为基准坐标（调用反向转换方法）
         if is_base_coord and self.coord_transformer:
             converted_results = []
             for result in results:
@@ -244,7 +244,7 @@ class OCRProcessor:
             self.logger.error("无效的输入图像（空图像或尺寸为0）")
             return ""
         
-        # 处理区域坐标转换（修正方法名：convert_base_rect_to_client → convert_original_rect_to_current_client）
+        # 处理区域坐标转换
         processed_region = region
         if region and is_base_region and self.coord_transformer:
             try:
@@ -320,7 +320,7 @@ class OCRProcessor:
         # 调用引擎方法（确保与BaseOCR接口一致）
         results = self.engine.detect_and_recognize(processed_image, target_lang)
         
-        # 坐标转换处理（使用补充的反向转换方法）
+        # 坐标转换处理（使用反向转换方法）
         if is_base_coord and self.coord_transformer:
             converted_results = []
             for result in results:
@@ -386,7 +386,7 @@ class OCRProcessor:
         # 调用引擎的批量处理方法（确保与BaseOCR接口一致）
         batch_results = self.engine.batch_process(processed_images, target_lang)
         
-        # 坐标转换处理（使用补充的反向转换方法）
+        # 坐标转换处理（使用反向转换方法）
         if is_base_coord and self.coord_transformer:
             converted_batch = []
             for results in batch_results:
@@ -467,10 +467,9 @@ class OCRProcessor:
         region_offset = (0, 0)     # 裁剪区域在原图中的偏移量（x, y）
         processed_region = region
         
-        # 区域坐标转换（基准坐标 -> 图像坐标，修正方法名）
+        # 区域坐标转换（基准坐标 -> 图像坐标）
         if region and is_base_region and self.coord_transformer:
             try:
-                # 使用正确的方法名：convert_original_rect_to_current_client
                 processed_region = self.coord_transformer.convert_original_rect_to_current_client(region)
                 self.logger.debug(f"区域坐标转换 | 基准区域: {region} -> 图像区域: {processed_region}")
             except Exception as e:
@@ -582,7 +581,7 @@ class OCRProcessor:
         # 7. 结果坐标转换（图像坐标 -> 原始基准坐标，如果需要）
         final_bbox = best_match
         if best_match and return_base_coord and self.coord_transformer:
-            # 使用补充的反向转换方法，转换整个矩形
+            # 使用反向转换方法，转换整个矩形
             final_bbox = self._convert_current_client_rect_to_base(best_match)
             self.logger.debug(f"结果坐标转换 | 当前客户区坐标: {best_match} -> 原始基准坐标: {final_bbox}")
         
