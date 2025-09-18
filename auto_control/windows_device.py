@@ -527,13 +527,13 @@ class WindowsDevice(BaseDevice):
             return False
 
     def set_foreground(self) -> bool:
-        """窗口激活逻辑（冷却+前台验证，避免频繁激活）"""
+        """窗口激活逻辑"""
         if not self.hwnd:
             self.last_error = f"未连接到窗口或状态异常: {self.hwnd}|{self.state}"
             return False
 
         current_time = time.time()
-        # 1. 冷却时间判断：1秒内已激活过，直接返回成功（跳过重复操作）
+        # 1. 冷却时间判断：已激活过，直接返回成功（跳过重复操作）
         if current_time - self._last_activate_time < self.ACTIVATE_COOLDOWN:
             self.logger.debug(
                 f"窗口激活跳过（冷却期内）| 句柄: {self.hwnd} | "
@@ -548,40 +548,99 @@ class WindowsDevice(BaseDevice):
             self.logger.debug(f"窗口已在前台 | 句柄: {self.hwnd} | 无需激活")
             return True
 
-        # 3. 执行激活操作（仅当冷却过期且不在前台时）
+        # 3. 优化的激活策略：先尝试标准方法，失败后再尝试高级方法，减少不必要的重试
+        activation_methods = [
+            self._activate_with_standard_method,
+            self._activate_with_thread_attach,
+            # 移除或重构最小化恢复方法，它是导致闪烁的主要原因
+            self._optimized_minimize_restore
+        ]
+        
         try:
             # 先恢复窗口（防止最小化导致激活无效）
             if self.is_minimized():
                 self.logger.info("检测到窗口最小化，先恢复...")
                 win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
                 time.sleep(self.WINDOW_RESTORE_DELAY)
-
-            # 激活窗口并等待生效
-            win32gui.ShowWindow(self.hwnd, win32con.SW_SHOW)
-            win32gui.SetForegroundWindow(self.hwnd)
-            time.sleep(self.WINDOW_ACTIVATE_DELAY)
-
-            # 4. 二次验证：确保激活成功
-            final_foreground = win32gui.GetForegroundWindow()
-            if final_foreground == self.hwnd and not self.is_minimized():
-                self._last_activate_time = current_time  # 更新激活时间
-                self.logger.info(f"窗口激活成功 | 句柄: {self.hwnd} | 标题: {self.window_title}")
-                return True
-            else:
-                error_msg = (
-                    f"窗口激活失败 | 目标句柄: {self.hwnd} | "
-                    f"实际前台句柄: {final_foreground} | 最小化: {self.is_minimized()}"
-                )
-                self.last_error = error_msg
-                self.logger.error(error_msg)
-                return False
                 
+                # 恢复后立即检查是否已经在前台
+                foreground_hwnd = win32gui.GetForegroundWindow()
+                if foreground_hwnd == self.hwnd:
+                    self._last_activate_time = current_time
+                    self.logger.info(f"窗口恢复后自动激活成功 | 句柄: {self.hwnd}")
+                    return True
+            
+            # 按顺序尝试激活方法
+            for method in activation_methods:
+                try:
+                    success = method()
+                    time.sleep(self.WINDOW_ACTIVATE_DELAY / 2)  # 减少等待时间
+                    
+                    # 验证激活成功
+                    final_foreground = win32gui.GetForegroundWindow()
+                    if success and final_foreground == self.hwnd and not self.is_minimized():
+                        self._last_activate_time = current_time
+                        self.logger.info(f"窗口激活成功 | 句柄: {self.hwnd} | 方法: {method.__name__}")
+                        return True
+                except Exception as e:
+                    self.logger.warning(f"激活方法 {method.__name__} 失败: {str(e)}")
+                    
         except Exception as e:
-            error_msg = f"窗口激活异常: {str(e)} | 句柄: {self.hwnd}"
-            self.last_error = error_msg
-            self.logger.error(error_msg, exc_info=True)
+            self.logger.error(f"窗口激活异常: {str(e)} | 句柄: {self.hwnd}")
+        
+        # 所有方法尝试失败
+        error_msg = (
+            f"窗口激活失败 | 目标句柄: {self.hwnd} | "
+            f"实际前台句柄: {win32gui.GetForegroundWindow()} | 最小化: {self.is_minimized()}"
+        )
+        self.last_error = error_msg
+        self.logger.error(error_msg)
+        return False
+        
+    def _activate_with_standard_method(self) -> bool:
+        """标准激活方法：使用ShowWindow + SetForegroundWindow"""
+        win32gui.ShowWindow(self.hwnd, win32con.SW_SHOW)
+        return win32gui.SetForegroundWindow(self.hwnd)
+        
+    def _activate_with_thread_attach(self) -> bool:
+        """高级激活方法：使用AttachThreadInput绕过Windows前台限制"""
+        # 获取当前线程ID和目标窗口线程ID
+        current_thread_id = win32api.GetCurrentThreadId()
+        target_thread_id, _ = win32process.GetWindowThreadProcessId(self.hwnd)
+        
+        # 如果线程ID相同，直接激活
+        if current_thread_id == target_thread_id:
+            return self._activate_with_standard_method()
+        
+        # 否则，附加线程输入上下文
+        try:
+            win32process.AttachThreadInput(current_thread_id, target_thread_id, True)
+            result = self._activate_with_standard_method()
+            return result
+        finally:
+            # 无论如何都要分离线程输入上下文
+            try:
+                win32process.AttachThreadInput(current_thread_id, target_thread_id, False)
+            except Exception as e:
+                self.logger.debug(f"分离线程输入上下文异常: {str(e)}")
+        
+    def _optimized_minimize_restore(self) -> bool:
+        """优化版最小化恢复方法：减少不必要的状态切换"""
+        # 只在其他方法都失败时才使用
+        try:
+            # 尝试不经过最小化直接激活
+            if self._activate_with_standard_method():
+                return True
+                
+            # 作为最后的备选方案，再尝试最小化恢复（但减少延迟）
+            win32gui.ShowWindow(self.hwnd, win32con.SW_MINIMIZE)
+            time.sleep(self.WINDOW_RESTORE_DELAY / 2)  # 减少延迟
+            win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
+            time.sleep(self.WINDOW_RESTORE_DELAY / 2)  # 减少延迟
+            return self._activate_with_standard_method()
+        except:
             return False
-
+    
     def get_resolution(self) -> Tuple[int, int]:
         """获取当前客户区分辨率"""
         return self._client_size

@@ -43,7 +43,7 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                             auto.sleep(2)
 
                             # 检测是否进入成功
-                            if auto.text_click("基础",click=False):
+                            if auto.text_click("基础",click=False,roi=(1235,300,69,37)):
                                 logger.info("已进入通行证界面")
                                 state = "entered"
                             else:
@@ -61,7 +61,7 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                         auto.click((x, y))
                         # 点击领取按钮位置
                         if auto.click((1590, 680),click_time=2,is_base_coord=True):
-                            if auto.text_click("全部获得"):
+                            if auto.text_click("全部获得",roi=(1390,750,100,30)):
                                 logger.info(f"领取第{current_reward+1}个奖励")
                                 auto.sleep(3)
                                 

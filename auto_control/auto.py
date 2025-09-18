@@ -494,7 +494,7 @@ class Auto:
             lang=lang,
             fuzzy_match=DEFAULT_TEXT_FUZZY_MATCH,
             region=region,  # 缩放后的当前客户区绝对坐标
-            preprocess=False  # 不预处理
+            preprocess=True  # 不预处理
         )
 
         if not text_pos:
