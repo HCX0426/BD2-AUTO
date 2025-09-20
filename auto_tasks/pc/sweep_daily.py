@@ -42,7 +42,7 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
             # 进入扫荡界面
             if not state['sweep_entered']:
                 logger.info("开始检测扫荡标识")
-                if pos := auto.text_click("快速狩猎",click=False):
+                if pos := auto.text_click("快速狩猎",click=False,roi=(1713,278,100,44)):
                     logger.info("检测到快速狩猎标识")
                     auto.click(pos,click_time=3)
                     auto.sleep(5)
@@ -110,7 +110,9 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = '第九关', torc
                         return True
                     logger.info("未返回主界面")
                     return False
-            
+            else:
+                state['torch_selected'] = False
+
             auto.sleep(0.5)
 
         logger.info("扫荡完成")
