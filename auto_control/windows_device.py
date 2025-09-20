@@ -1,6 +1,6 @@
 import ctypes
 import time
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 from ctypes import wintypes
 import cv2
 import numpy as np
@@ -12,7 +12,7 @@ import win32ui
 import win32process
 from PIL import Image
 from auto_control.coordinate_transformer import CoordinateTransformer
-from auto_control.device_base import BaseDevice, DeviceState
+from auto_control.base_device import BaseDevice, DeviceState
 from auto_control.image_processor import ImageProcessor
 
 class DCHandle:
@@ -701,13 +701,15 @@ class WindowsDevice(BaseDevice):
 
     def click(
             self,
-            pos: Union[Tuple[int, int], str],
+            pos: Union[Tuple[int, int], str, List[str]],
             click_time: int = 1,
             duration: float = 0.1,
             right_click: bool = False,
-            is_base_coord: bool = False
+            is_base_coord: bool = False,
+            roi: Optional[Tuple[int, int, int, int]] = None,
+            is_base_roi: bool = False
         ) -> bool:
-        """鼠标点击操作"""
+        """鼠标点击操作（支持多个模板匹配）"""
         if not self.hwnd or self.state != DeviceState.CONNECTED:
             self.last_error = "未连接到窗口或状态异常"
             return False
@@ -718,7 +720,7 @@ class WindowsDevice(BaseDevice):
             time.sleep(0.1)
 
             target_pos: Optional[Tuple[int, int]] = None
-            if isinstance(pos, str):
+            if isinstance(pos, (str, list)):
                 if not self.image_processor:
                     self.last_error = "未设置图像处理器，无法模板匹配"
                     return False
@@ -728,16 +730,33 @@ class WindowsDevice(BaseDevice):
                     self.last_error = "截图失败，无法模板匹配"
                     return False
 
-                match_result = self.image_processor.match_template(
-                    image=screen,
-                    template=pos,
-                    current_dpi=self.dpi_scale,
-                    hwnd=self.hwnd,
-                    physical_screen_res=self.physical_screen_res,
-                    threshold=0.6
-                )
+                # 处理单个模板或多个模板
+                if isinstance(pos, str):
+                    templates = [pos]
+                else:
+                    templates = pos
+
+                match_result = None
+                matched_template = None
+                
+                # 尝试每个模板，直到找到匹配
+                for template_name in templates:
+                    match_result = self.image_processor.match_template(
+                        image=screen,
+                        template=template_name,
+                        current_dpi=self.dpi_scale,
+                        hwnd=self.hwnd,
+                        physical_screen_res=self.physical_screen_res,
+                        threshold=0.6,
+                        roi=roi,
+                        is_base_roi=is_base_roi
+                    )
+                    if match_result is not None:
+                        matched_template = template_name
+                        break
+
                 if match_result is None:
-                    self.last_error = f"模板匹配失败: {pos}"
+                    self.last_error = f"所有模板匹配失败: {templates}"
                     return False
 
                 if isinstance(match_result, np.ndarray):
@@ -755,7 +774,7 @@ class WindowsDevice(BaseDevice):
                     self.last_error = f"中心点计算失败: {target_pos}"
                     return False
                 target_pos = (int(target_pos[0]), int(target_pos[1]))
-                self.logger.debug(f"模板 {pos} 中心点坐标: {target_pos}")
+                self.logger.debug(f"模板 {matched_template} 中心点坐标: {target_pos}")
 
                 is_base_coord = False
             else:
@@ -787,7 +806,7 @@ class WindowsDevice(BaseDevice):
 
             self.logger.info(
                 f"点击成功 | 物理坐标: ({screen_physical_x},{screen_physical_y}) | "
-                f"模板: {pos if isinstance(pos, str) else '直接坐标'}"
+                f"模板: {matched_template if isinstance(pos, (str, list)) else '直接坐标'}"
             )
             return True
         except Exception as e:
@@ -921,8 +940,14 @@ class WindowsDevice(BaseDevice):
             self.logger.error(self.last_error, exc_info=True)
             return False
 
-    def exists(self, template_name: str, threshold: float = 0.6) -> Optional[Tuple[int, int]]:
-        """检查模板是否存在"""
+    def exists(
+        self, 
+        template_name: Union[str, List[str]], 
+        threshold: float = 0.6,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        is_base_roi: bool = False
+    ) -> Optional[Tuple[int, int]]:
+        """检查模板是否存在（支持多个模板）"""
         try:
             if not self.hwnd:
                 self.last_error = "未连接到窗口"
@@ -938,59 +963,85 @@ class WindowsDevice(BaseDevice):
                 self.logger.debug(f"截图为空，无法检查模板: {template_name}")
                 return None
 
-            self.logger.debug(f"检查模板: {template_name}（阈值: {threshold}）")
-            match_result = self.image_processor.match_template(
-                image=screen,
-                template=template_name,
-                current_dpi=self.dpi_scale,
-                hwnd=self.hwnd,
-                threshold=threshold,
-                physical_screen_res=self.physical_screen_res
-            )
-
-            if match_result is None:
-                self.logger.debug(f"模板未找到: {template_name}")
-                return None
-
-            if isinstance(match_result, np.ndarray):
-                match_rect = tuple(match_result.tolist())
+            # 处理单个模板或多个模板
+            if isinstance(template_name, str):
+                templates = [template_name]
             else:
-                match_rect = tuple(match_result)
-            if len(match_rect) != 4:
-                self.logger.warning(f"模板结果格式无效: {match_rect}，模板: {template_name}")
-                return None
+                templates = template_name
 
-            center_pos = self.image_processor.get_center(match_rect)
-            if isinstance(center_pos, (list, np.ndarray)):
-                center_pos = tuple(map(int, center_pos))
-            if not isinstance(center_pos, tuple) or len(center_pos) != 2:
-                self.logger.warning(f"模板中心点无效: {center_pos}，模板: {template_name}")
-                return None
+            self.logger.debug(f"检查模板: {templates}（阈值: {threshold}）")
+            
+            # 尝试每个模板，直到找到匹配
+            for template in templates:
+                match_result = self.image_processor.match_template(
+                    image=screen,
+                    template=template,
+                    current_dpi=self.dpi_scale,
+                    hwnd=self.hwnd,
+                    threshold=threshold,
+                    physical_screen_res=self.physical_screen_res,
+                    roi=roi,
+                    is_base_roi=is_base_roi
+                )
 
-            self.logger.debug(
-                f"模板找到: {template_name} | 矩形区域: {match_rect} | "
-                f"中心点: {center_pos}"
-            )
-            return center_pos
+                if match_result is not None:
+                    if isinstance(match_result, np.ndarray):
+                        match_rect = tuple(match_result.tolist())
+                    else:
+                        match_rect = tuple(match_result)
+                    if len(match_rect) != 4:
+                        self.logger.warning(f"模板结果格式无效: {match_rect}，模板: {template}")
+                        continue
+
+                    center_pos = self.image_processor.get_center(match_rect)
+                    if isinstance(center_pos, (list, np.ndarray)):
+                        center_pos = tuple(map(int, center_pos))
+                    if not isinstance(center_pos, tuple) or len(center_pos) != 2:
+                        self.logger.warning(f"模板中心点无效: {center_pos}，模板: {template}")
+                        continue
+
+                    self.logger.debug(
+                        f"模板找到: {template} | 矩形区域: {match_rect} | "
+                        f"中心点: {center_pos}"
+                    )
+                    return center_pos
+
+            self.logger.debug(f"所有模板未找到: {templates}")
+            return None
         except Exception as e:
             self.logger.error(f"模板检查异常: {str(e)}", exc_info=True)
             return None
 
-    def wait(self, template_name: str, timeout: float = 10.0, interval: float = 0.5) -> Optional[Tuple[int, int]]:
-        """等待模板出现"""
+    def wait(
+        self, 
+        template_name: Union[str, List[str]], 
+        timeout: float = 10.0, 
+        interval: float = 0.5,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        is_base_roi: bool = False
+    ) -> Optional[Tuple[int, int]]:
+        """等待模板出现（支持多个模板）"""
         start_time = time.time()
-        self.logger.debug(f"开始等待模板: {template_name}（超时: {timeout}s，间隔: {interval}s）")
+        
+        # 处理单个模板或多个模板
+        if isinstance(template_name, str):
+            templates = [template_name]
+        else:
+            templates = template_name
+            
+        self.logger.debug(f"开始等待模板: {templates}（超时: {timeout}s，间隔: {interval}s）")
 
         while time.time() - start_time < timeout:
-            center_pos = self.exists(template_name)
+            center_pos = self.exists(templates, roi=roi, is_base_roi=is_base_roi)
             if center_pos is not None:
-                self.logger.info(f"模板 {template_name} 已找到（等待耗时: {time.time()-start_time:.1f}s），中心点: {center_pos}")
+                self.logger.info(f"模板 {templates} 已找到（等待耗时: {time.time()-start_time:.1f}s），中心点: {center_pos}")
                 return center_pos
             time.sleep(interval)
 
-        self.last_error = f"等待模板超时: {template_name}（{timeout}s）"
+        self.last_error = f"等待模板超时: {templates}（{timeout}s）"
         self.logger.error(self.last_error)
         return None
+
 
     def get_state(self) -> DeviceState:
         """获取设备状态"""

@@ -6,7 +6,7 @@ import logging
 import win32gui
 
 # 导入坐标转换器
-from auto_control.config.image_config import TEMPLATE_DIR,TEMPLATE_EXTENSIONS
+from auto_control.config.image_config import TEMPLATE_DIR, TEMPLATE_EXTENSIONS
 from auto_control.coordinate_transformer import CoordinateTransformer
 
 
@@ -148,20 +148,6 @@ class ImageProcessor:
             self.logger.error(f"保存模板失败: {str(e)}", exc_info=True)
             return False
 
-    def remove_template(self, template_name: str) -> bool:
-        """删除模板"""
-        if template_name in self.templates:
-            del self.templates[template_name]
-            # 删除文件
-            template_path = os.path.join(self.template_dir, f"{template_name}.png")
-            if os.path.exists(template_path):
-                os.remove(template_path)
-                self.logger.info(f"模板文件已删除: {template_path}")
-            self.logger.info(f"模板已移除: {template_name}")
-            return True
-        self.logger.warning(f"无法删除模板: {template_name}（不存在）")
-        return False
-
     def _scale_template_to_current_size(
         self, 
         template: np.ndarray, 
@@ -256,14 +242,18 @@ class ImageProcessor:
         threshold: float = 0.6,
         is_base_template: bool = True,
         preprocess_params: Optional[Dict] = None,
-        physical_screen_res: Optional[Tuple[int, int]] = None
+        physical_screen_res: Optional[Tuple[int, int]] = None,
+        # 新增ROI参数
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        is_base_roi: bool = False
     ) -> Optional[Tuple[int, int, int, int]]:
         """
-        单模板匹配：
+        单模板匹配（增加ROI支持）：
         - 需传入hwnd（窗口句柄）以判断全屏状态
         - 全屏时必须传入physical_screen_res（物理屏幕分辨率），否则匹配失败
         - 非全屏时使用客户端尺寸作为缩放基准，无需物理屏参数
         - 修正：返回的坐标已减去标题栏高度，为纯客户区坐标
+        - 新增：支持ROI区域匹配，可指定基准坐标或图像坐标
         """
         try:
             # -------------------------- 前置校验：确保关键参数存在 --------------------------
@@ -293,7 +283,15 @@ class ImageProcessor:
                     self.logger.error("模板匹配失败：传入的自定义模板图像为None")
                     return None
             
-            # 2. 核心：按窗口状态缩放模板（传入物理屏参数）
+            # 2. 处理ROI区域（如果有）
+            roi_offset = (0, 0)  # ROI偏移量，用于将ROI内坐标转换回原图坐标
+            if roi:
+                # 使用公共方法提取ROI区域
+                image, roi_rect = self.extract_roi_region(image, roi, is_base_roi)
+                roi_offset = (roi_rect[0], roi_rect[1])  # 记录ROI的偏移量
+                self.logger.debug(f"使用ROI区域进行匹配 | ROI: {roi} | ROI偏移: {roi_offset}")
+            
+            # 3. 核心：按窗口状态缩放模板（传入物理屏参数）
             if is_base_template:
                 template_img = self._scale_template_to_current_size(
                     template_img, current_dpi, hwnd, physical_screen_res  # 传递关键参数
@@ -302,13 +300,13 @@ class ImageProcessor:
                     self.logger.error("模板缩放失败，终止匹配")
                     return None
             
-            # 3. 验证待匹配图像（截图）并转为灰度图
+            # 4. 验证待匹配图像（截图）并转为灰度图
             if image is None:
                 self.logger.error("模板匹配失败：待匹配图像（截图）为None")
                 return None
             gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
             
-            # 4. 计算标题栏高度
+            # 5. 计算标题栏高度
             title_bar_height = 0
             if not is_fullscreen and hwnd:
                 try:
@@ -335,7 +333,7 @@ class ImageProcessor:
                 except Exception as e:
                     self.logger.warning(f"计算标题栏高度失败: {str(e)}，使用默认值0")
             
-            # 5. 校验模板尺寸是否小于截图尺寸（匹配前提）
+            # 6. 校验模板尺寸是否小于截图尺寸（匹配前提）
             img_h, img_w = gray_image.shape
             templ_h, templ_w = template_img.shape
             if templ_w > img_w or templ_h > img_h:
@@ -344,7 +342,7 @@ class ImageProcessor:
                 )
                 return None
             
-            # 6. 图像预处理（模板与截图统一处理，避免差异）
+            # 7. 图像预处理（模板与截图统一处理，避免差异）
             default_preprocess = {
                 "blur": True, "blur_ksize": (3, 3),
                 "threshold": True, "adaptive_threshold": True,
@@ -354,11 +352,11 @@ class ImageProcessor:
             processed_image = self.preprocess_image(gray_image, **preprocess_cfg)
             processed_template = self.preprocess_image(template_img, **preprocess_cfg)
             
-            # 7. 执行模板匹配（使用归一化相关系数，适合明暗变化场景）
+            # 8. 执行模板匹配（使用归一化相关系数，适合明暗变化场景）
             result = cv2.matchTemplate(processed_image, processed_template, cv2.TM_CCOEFF_NORMED)
             max_val = np.max(result) if result.size > 0 else 0.0  # 最大匹配度
             
-            # 8. 筛选有效匹配（高于阈值）
+            # 9. 筛选有效匹配（高于阈值）
             if max_val < threshold:
                 self.logger.debug(
                     f"未找到有效匹配 | 模板: {template if isinstance(template, str) else '自定义'} | "
@@ -366,24 +364,28 @@ class ImageProcessor:
                 )
                 return None
             
-            # 9. 定位最佳匹配位置（转换为(x,y)坐标，result默认是(y,x)）
+            # 10. 定位最佳匹配位置（转换为(x,y)坐标，result默认是(y,x)）
             max_loc = np.unravel_index(np.argmax(result), result.shape)
             match_x, match_y = max_loc[1], max_loc[0]
             
-            # 10. 关键修正：减去标题栏高度，得到纯客户区坐标
+            # 11. 关键修正：减去标题栏高度，得到纯客户区坐标
             if not is_fullscreen and title_bar_height > 0:
                 original_y = match_y
                 match_y = max(0, match_y - title_bar_height)  # 确保不会变成负数
                 self.logger.debug(f"标题栏高度修正: Y坐标 {original_y} -> {match_y} (减去{title_bar_height}px)")
             
+            # 12. 将ROI内坐标转换回原图坐标（加上ROI偏移量）
+            match_x += roi_offset[0]
+            match_y += roi_offset[1]
+            
             self.logger.info(
                 f"模板匹配成功 | 模板: {template if isinstance(template, str) else '自定义'} | "
                 f"匹配位置: ({match_x},{match_y}) | 模板尺寸: {templ_w}x{templ_h} | "
                 f"匹配度: {max_val:.4f} | 标题栏修正: -{title_bar_height}px | "
-                f"全屏状态: {is_fullscreen}"
+                f"ROI偏移: +{roi_offset} | 全屏状态: {is_fullscreen}"
             )
             
-            # 11. 返回匹配区域（x, y, 宽, 高），便于后续计算中心坐标
+            # 13. 返回匹配区域（x, y, 宽, 高），便于后续计算中心坐标
             return (match_x, match_y, templ_w, templ_h)
         except Exception as e:
             self.logger.error(f"模板匹配异常失败: {str(e)}", exc_info=True)
@@ -474,21 +476,27 @@ class ImageProcessor:
         except Exception as e:
             self.logger.error(f"保存调试图片失败: {str(e)}", exc_info=True)
 
-    def get_roi_region(
+    def extract_roi_region(
         self,
         image: np.ndarray,
         roi: Tuple[int, int, int, int],
         is_base_roi: bool = False
     ) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
-        """获取ROI区域"""
+        """
+        公共方法：从图像中提取ROI区域（支持基准坐标和客户区坐标）
+        :param image: 输入图像
+        :param roi: ROI区域 (x, y, w, h)
+        :param is_base_roi: ROI是否为基准坐标
+        :return: (ROI图像, 实际ROI坐标)
+        """
         try:
             if image is None:
-                self.logger.error("获取ROI失败：输入图像为None")
+                self.logger.error("提取ROI失败：输入图像为None")
                 raise ValueError("Input image cannot be None")
             
             roi_x, roi_y, roi_w, roi_h = roi
             
-            # 基准ROI（1920×1080）转换为当前客户端尺寸
+            # 基准ROI转换为当前客户端尺寸
             if is_base_roi and self.coord_transformer:
                 try:
                     converted_roi = self.coord_transformer.convert_original_rect_to_current_client(roi)
@@ -506,113 +514,14 @@ class ImageProcessor:
             
             # 提取ROI区域
             roi_image = image[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w]
-            self.logger.debug(f"获取ROI成功 | 最终ROI: ({roi_x},{roi_y},{roi_w},{roi_h}) | ROI尺寸: {roi_image.shape[:2]}")
+            self.logger.debug(f"提取ROI成功 | 最终ROI: ({roi_x},{roi_y},{roi_w},{roi_h}) | ROI尺寸: {roi_image.shape[:2]}")
             return (roi_image, (roi_x, roi_y, roi_w, roi_h))
         except Exception as e:
-            self.logger.error(f"获取ROI异常失败: {str(e)}", exc_info=True)
+            self.logger.error(f"提取ROI异常失败: {str(e)}", exc_info=True)
             if image is not None:
                 full_roi = (0, 0, image.shape[1], image.shape[0])
                 return (image, full_roi)
             raise ValueError("Cannot return ROI: input image is None")
-
-    def find_multiple_matches(
-        self,
-        image: np.ndarray,
-        template: Union[str, np.ndarray],
-        current_dpi: float = 1.0,
-        hwnd: Optional[int] = None,  # 必须传入：判断全屏状态
-        threshold: float = 0.8,
-        max_matches: int = 10,
-        is_base_template: bool = True,
-        physical_screen_res: Optional[Tuple[int, int]] = None  # 全屏时必填
-    ) -> List[Tuple[int, int, int, int]]:
-        """多模板匹配（同步修正逻辑，与单匹配保持一致）"""
-        matches = []
-        try:
-            # -------------------------- 前置校验：关键参数 --------------------------
-            if hwnd is None:
-                self.logger.error("多模板匹配失败：必须传入hwnd（窗口句柄）以判断全屏状态")
-                return matches
-            # 全屏时强制校验物理屏参数
-            is_fullscreen = False
-            if hasattr(self.coord_transformer, '_is_current_window_fullscreen'):
-                is_fullscreen = self.coord_transformer._is_current_window_fullscreen(hwnd)
-                if is_fullscreen and physical_screen_res is None:
-                    self.logger.error("全屏模式下多匹配失败：必须传入physical_screen_res（物理屏幕分辨率）")
-                    return matches
-            # ------------------------------------------------------------------------------
-            
-            # 1. 获取并验证模板
-            if isinstance(template, str):
-                template_img = self.get_template(template)
-                if template_img is None:
-                    self.logger.error(f"多匹配失败：模板「{template}」不存在或加载错误")
-                    return matches
-            else:
-                template_img = template
-                if len(template_img.shape) == 3:
-                    template_img = cv2.cvtColor(template_img, cv2.COLOR_BGR2GRAY)
-                if template_img is None:
-                    self.logger.error("多匹配失败：自定义模板图像为None")
-                    return matches
-            
-            # 2. 按窗口状态缩放模板
-            if is_base_template:
-                template_img = self._scale_template_to_current_size(
-                    template_img, current_dpi, hwnd, physical_screen_res
-                )
-                if template_img is None:
-                    self.logger.error("模板缩放失败，终止多匹配")
-                    return matches
-            
-            # 3. 处理待匹配图像
-            if image is None:
-                self.logger.error("多匹配失败：待匹配图像为None")
-                return matches
-            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-            
-            # 4. 校验模板与截图尺寸
-            img_h, img_w = gray_image.shape
-            templ_h, templ_w = template_img.shape
-            if templ_w > img_w or templ_h > img_h:
-                self.logger.error(
-                    f"多匹配失败：模板尺寸({templ_w}x{templ_h})超过截图尺寸({img_w}x{img_h})"
-                )
-                return matches
-            
-            # 5. 执行模板匹配
-            result = cv2.matchTemplate(gray_image, template_img, cv2.TM_CCOEFF_NORMED)
-            # 筛选所有高于阈值的匹配位置（转换为(x,y)）
-            match_locations = list(zip(*np.where(result >= threshold)[::-1]))
-            if not match_locations:
-                self.logger.debug(f"多匹配未找到有效区域 | 阈值: {threshold} | 模板: {template if isinstance(template, str) else '自定义'}")
-                return matches
-            
-            # 6. 去重（避免重叠匹配，基于模板尺寸的1/2作为重叠阈值）
-            used_positions = []
-            for (x, y) in match_locations:
-                # 检查当前位置是否与已保留位置重叠
-                is_overlap = any(
-                    abs(x - ox) < templ_w//2 and abs(y - oy) < templ_h//2
-                    for (ox, oy, _, _) in used_positions
-                )
-                if not is_overlap:
-                    used_positions.append((x, y, templ_w, templ_h))
-                    self.logger.debug(f"多匹配添加区域: ({x},{y}) | 尺寸: {templ_w}x{templ_h} | 当前数量: {len(used_positions)}")
-                    # 达到最大匹配数则停止
-                    if len(used_positions) >= max_matches:
-                        break
-            
-            # 7. 输出结果日志
-            self.logger.info(
-                f"多模板匹配完成 | 模板: {template if isinstance(template, str) else '自定义'} | "
-                f"有效匹配数: {len(used_positions)}/{len(match_locations)} | 最大匹配数限制: {max_matches} | "
-                f"全屏状态: {is_fullscreen}"
-            )
-            return used_positions
-        except Exception as e:
-            self.logger.error(f"多模板匹配异常失败: {str(e)}", exc_info=True)
-            return matches
 
     def preprocess_image(
         self,

@@ -90,7 +90,7 @@ class CoordinateTransformer:
 
     def convert_original_rect_to_current_client(self, rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """
-        新增：将"基于原始基准的矩形（x,y,w,h）"转换为"当前窗口的客户区矩形"
+        将"基于原始基准的矩形（x,y,w,h）"转换为"当前窗口的客户区矩形"
         :param rect: 原始基准矩形，格式为 (x, y, w, h)（x,y=左上角坐标，w=宽度，h=高度）
         :return: 当前客户区矩形，格式为 (x, y, w, h)
         """
@@ -212,3 +212,78 @@ class CoordinateTransformer:
         except Exception as e:
             self.logger.error(f"判断当前窗口是否全屏失败: {str(e)}")
             return False
+
+
+    def convert_current_client_to_original(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        当前客户区坐标 → 原始基准坐标（反向转换）
+        逻辑：基于原始基准分辨率与当前客户区尺寸的比例推导
+        """
+        if not all(self._original_base_res) or not all(self._current_client_size):
+            self.logger.warning("原始基准或当前窗口上下文未初始化，无法反向转换坐标")
+            return (x, y)
+        
+        # 获取当前客户区尺寸
+        curr_client_w, curr_client_h = self._current_client_size
+        orig_base_w, orig_base_h = self._original_base_res
+        
+        # 校验参数有效性（避免除零错误）
+        if curr_client_w <= 0 or curr_client_h <= 0 or orig_base_w <= 0 or orig_base_h <= 0:
+            self.logger.warning(
+                f"无效参数，无法反向转换坐标 | "
+                f"当前客户区尺寸: ({curr_client_w},{curr_client_h}) | "
+                f"原始基准分辨率: ({orig_base_w},{orig_base_h})"
+            )
+            return (x, y)
+        
+        # 反向转换比例：原始基准尺寸 / 当前客户区尺寸
+        scale_x = orig_base_w / curr_client_w
+        scale_y = orig_base_h / curr_client_h
+        
+        # 计算原始基准坐标（四舍五入为整数）
+        base_x = int(round(x * scale_x))
+        base_y = int(round(y * scale_y))
+        
+        self.logger.debug(
+            f"当前客户区→原始基准坐标转换 | "
+            f"当前坐标: ({x},{y}) | 比例(x:y): {scale_x:.2f}:{scale_y:.2f} | "
+            f"原始基准坐标: ({base_x},{base_y})"
+        )
+        return (base_x, base_y)
+
+    def convert_current_client_rect_to_original(self, rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+        当前客户区矩形 → 原始基准矩形（反向转换，处理ROI）
+        :param rect: 当前客户区矩形 (x, y, w, h)
+        :return: 原始基准矩形 (x, y, w, h)
+        """
+        if not all(self._original_base_res) or not all(self._current_client_size):
+            self.logger.warning("原始基准或当前窗口上下文未初始化，无法反向转换矩形")
+            return rect
+        
+        x, y, w, h = rect
+        # 转换左上角坐标
+        base_x, base_y = self.convert_current_client_to_original(x, y)
+        
+        # 转换宽高（使用相同比例）
+        curr_client_w, curr_client_h = self._current_client_size
+        orig_base_w, orig_base_h = self._original_base_res
+        
+        if curr_client_w <= 0 or curr_client_h <= 0 or orig_base_w <= 0 or orig_base_h <= 0:
+            return (base_x, base_y, w, h)
+            
+        scale_x = orig_base_w / curr_client_w
+        scale_y = orig_base_h / curr_client_h
+        base_w = int(round(w * scale_x))
+        base_h = int(round(h * scale_y))
+        
+        # 确保尺寸为正
+        base_w = max(1, base_w)
+        base_h = max(1, base_h)
+        
+        self.logger.debug(
+            f"当前客户区→原始基准矩形转换 | "
+            f"当前矩形: {rect} | 比例(x:y): {scale_x:.2f}:{scale_y:.2f} | "
+            f"原始基准矩形: ({base_x},{base_y},{base_w},{base_h})"
+        )
+        return (base_x, base_y, base_w, base_h)

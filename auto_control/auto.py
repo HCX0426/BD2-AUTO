@@ -1,7 +1,7 @@
 import logging
 import threading
 import time
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -13,7 +13,7 @@ from .config import (DEFAULT_BASE_RESOLUTION, DEFAULT_CHECK_ELEMENT_DELAY,
                      DEFAULT_TASK_TIMEOUT, DEFAULT_TEXT_FUZZY_MATCH,
                      DEFAULT_WINDOW_OPERATION_DELAY, LOG_CONFIG)
 from .coordinate_transformer import CoordinateTransformer
-from .device_base import BaseDevice, DeviceState
+from .base_device import BaseDevice, DeviceState
 from .device_manager import DeviceManager
 from .image_processor import ImageProcessor
 from .logger import Logger
@@ -67,7 +67,10 @@ class Auto:
 
         # OCR处理器初始化
         self.ocr_processor = OCRProcessor(
-            engine=ocr_engine, logger=self.logger, coord_transformer=self.coord_transformer)
+            engine=ocr_engine, 
+            logger=self.logger, 
+            coord_transformer=self.coord_transformer
+        )
 
         # 设备配置
         self.default_device_uri = device_uri
@@ -394,14 +397,16 @@ class Auto:
 
     def template_click(
         self,
-        template_name: str,
+        template_name: Union[str, List[str]],
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
         duration: float = 0.1,
         click_time: int = 1,
-        right_click: bool = False
+        right_click: bool = False,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        is_base_roi: bool = False
     ) -> bool:
-        """模板匹配点击"""
+        """模板匹配点击（支持多个模板和ROI）"""
         if self.check_should_stop():
             self.logger.info("模板点击任务被中断")
             self.last_result = False
@@ -409,19 +414,42 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
+        if not device:
+            self.last_result = False
+            return False
+
+        # 处理单个模板或多个模板
+        if isinstance(template_name, str):
+            templates = [template_name]
+        else:
+            templates = template_name
+
+        # 记录使用的参数
+        params_info = []
+        if roi:
+            roi_type = "基准ROI" if is_base_roi else "客户区ROI"
+            params_info.append(f"{roi_type}: {roi}")
+        if len(templates) > 1:
+            params_info.append(f"模板数量: {len(templates)}")
+            
+        param_log = f" | {', '.join(params_info)}" if params_info else ""
+        
+        self.logger.debug(f"模板点击参数: {templates}{param_log}")
 
         self.last_result = device.click(
-            pos=template_name,
+            pos=templates,
             duration=duration,
             click_time=click_time,
-            right_click=right_click
+            right_click=right_click,
+            roi=roi,
+            is_base_roi=is_base_roi
         )
 
         if not self.last_result:
-            self.last_error = device.last_error or f"模板 {template_name} 点击失败"
+            self.last_error = device.last_error or f"模板 {templates} 点击失败"
             self.logger.error(f"错误: {self.last_error}")
         else:
-            self.logger.info(f"模板点击成功: {template_name} | 右键={right_click}")
+            self.logger.info(f"模板点击成功: {templates}{param_log} | 右键={right_click}")
 
         return self.last_result
 
@@ -469,8 +497,7 @@ class Auto:
                         f"roi参数无效：x={rx}, y={ry}（需非负）；w={rw}, h={rh}（需正数）")
 
                 # 步骤2：使用坐标转换器转换ROI
-                region = self.coord_transformer.convert_original_rect_to_current_client(
-                    roi)
+                region = self.coord_transformer.convert_original_rect_to_current_client(roi)
                 if not region or len(region) != 4:
                     raise ValueError("ROI转换后无效（可能超出客户区或尺寸为0）")
                 rx2, ry2, rw2, rh2 = region
@@ -494,7 +521,6 @@ class Auto:
             lang=lang,
             fuzzy_match=DEFAULT_TEXT_FUZZY_MATCH,
             region=region,  # 缩放后的当前客户区绝对坐标
-            preprocess=False  # 不预处理
         )
 
         if not text_pos:
@@ -591,11 +617,13 @@ class Auto:
     # ======================== 图像相关方法 ========================
     def check_element_exist(
         self,
-        template_name: str,
+        template_name: Union[str, List[str]],
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
-        device_uri: Optional[str] = None
+        device_uri: Optional[str] = None,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        is_base_roi: bool = False
     ) -> bool:
-        """检查模板元素是否存在——修复返回值类型"""
+        """检查模板元素是否存在（支持多个模板和ROI）"""
         if self.check_should_stop():
             self.logger.info("检查元素任务被中断")
             self.last_result = False
@@ -610,22 +638,40 @@ class Auto:
             return False
 
         try:
+            # 处理单个模板或多个模板
+            if isinstance(template_name, str):
+                templates = [template_name]
+            else:
+                templates = template_name
+
+            # 记录使用的参数
+            params_info = []
+            if roi:
+                roi_type = "基准ROI" if is_base_roi else "客户区ROI"
+                params_info.append(f"{roi_type}: {roi}")
+            if len(templates) > 1:
+                params_info.append(f"模板数量: {len(templates)}")
+                
+            param_log = f" | {', '.join(params_info)}" if params_info else ""
+            
+            self.logger.debug(f"检查元素参数: {templates}{param_log}")
+
             # device.exists返回：存在则返回中心点坐标（Tuple），不存在则返回None
-            result = device.exists(template_name)
+            result = device.exists(templates, roi=roi, is_base_roi=is_base_roi)
             self.last_result = result
 
             if device.last_error:
                 self.last_error = f"检查元素异常: {device.last_error}"
                 self.logger.warning(f"警告: {self.last_error}")
 
-            self.logger.info(f"元素 {template_name} 存在: {self.last_result}")
+            self.logger.info(f"元素 {templates}{param_log} 存在: {self.last_result}")
             return self.last_result
         except Exception as e:
             self.last_error = f"检查元素异常: {str(e)}"
             self.logger.error(f"错误: {self.last_error}", exc_info=True)
             self.last_result = False
             return False
-
+        
     def screenshot(
         self,
         save_path: str = None,
@@ -678,12 +724,14 @@ class Auto:
 
     def wait_element(
         self,
-        template_name: str,
+        template_name: Union[str, List[str]],
         timeout: float = DEFAULT_TASK_TIMEOUT,
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
-        device_uri: Optional[str] = None
+        device_uri: Optional[str] = None,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        is_base_roi: bool = False
     ) -> bool:
-        """等待模板元素出现—"""
+        """等待模板元素出现（支持多个模板和ROI）"""
         if self.check_should_stop():
             self.logger.info("等待元素任务被中断")
             self.last_result = False
@@ -697,20 +745,38 @@ class Auto:
             self.last_result = False
             return False
 
+        # 处理单个模板或多个模板
+        if isinstance(template_name, str):
+            templates = [template_name]
+        else:
+            templates = template_name
+
+        # 记录使用的参数
+        params_info = []
+        if roi:
+            roi_type = "基准ROI" if is_base_roi else "客户区ROI"
+            params_info.append(f"{roi_type}: {roi}")
+        if len(templates) > 1:
+            params_info.append(f"模板数量: {len(templates)}")
+            
+        param_log = f" | {', '.join(params_info)}" if params_info else ""
+        
+        self.logger.debug(f"等待元素参数: {templates}{param_log} | 超时: {timeout}s")
+
         start_time = time.time()
         # device.wait 返回：超时返回None，成功返回中心点坐标（Tuple）
-        center_pos = device.wait(template_name, timeout=timeout)
+        center_pos = device.wait(templates, timeout=timeout, roi=roi, is_base_roi=is_base_roi)
         self.last_result = center_pos
 
         if not self.last_result:
             # 同步device的错误信息
-            self.last_error = device.last_error or f"等待 {template_name} 超时（{timeout}s）"
+            self.last_error = device.last_error or f"等待 {templates}{param_log} 超时（{timeout}s）"
             self.logger.error(f"错误: {self.last_error}")
         else:
             # 计算实际等待耗时
             elapsed = time.time() - start_time
             self.logger.info(
-                f"等待 {template_name} 成功（耗时{elapsed:.1f}s）| 中心点: {center_pos}"
+                f"等待 {templates}{param_log} 成功（耗时{elapsed:.1f}s）| 中心点: {center_pos}"
             )
 
         return self.last_result

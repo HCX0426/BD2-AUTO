@@ -37,9 +37,8 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
                 
                 if state == "bag_opened":
-                    if pos := auto.check_element_exist("intensive_decomposition/装备标识"):
+                    if pos := auto.check_element_exist("intensive_decomposition/装备标识",roi=(149,222,60,60)):
                         logger.info("进入装备界面")
-                        auto.click(pos, click_time=2)
                         auto.click(pos, click_time=2)
                         auto.sleep(0.5)
                         state = "filter_set"
@@ -49,7 +48,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
                 
                 if state == "filter_set":
-                    if pos := auto.check_element_exist("intensive_decomposition/筛选标识"):
+                    if pos := auto.check_element_exist("intensive_decomposition/筛选标识",roi=(1680,73,60,60)):
                         logger.info("打开筛选界面")
                         auto.click(pos)
                         auto.sleep(2)
@@ -67,15 +66,15 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
                 
                 if state == "confirm":
-                    if auto.text_click("一键分解"):
+                    if auto.text_click("一键分解",roi=(1645,986,125,35)):
                         logger.info("执行一键分解")
                         auto.sleep(2)
                         if auto.click((785, 200),is_base_coord=True):  # 选择装备位置
                             auto.sleep(1)
-                    if pos := auto.check_element_exist("intensive_decomposition/确认"):
+                    if pos := auto.check_element_exist("intensive_decomposition/确认",roi=(1748,973,65,62)):
                         auto.click(pos)
                         auto.sleep(2)
-                        if pos := auto.check_element_exist("intensive_decomposition/分解按钮"):
+                        if pos := auto.check_element_exist("intensive_decomposition/分解按钮",roi=(960,672,177,58)):
                             auto.click(pos)
                             logger.info("确认分解")
                             auto.sleep(3)
@@ -105,7 +104,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
                 
                 if state == "bag_opened":
-                    if pos := auto.check_element_exist("intensive_decomposition/装备标识"):
+                    if pos := auto.check_element_exist("intensive_decomposition/装备标识",roi=(149,222,60,60)):
                         logger.info("进入装备界面")
                         auto.click(pos, click_time=2)
                         auto.click(pos, click_time=2)
@@ -117,22 +116,22 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
                 
                 if state == "filter_set":
-                    if pos := auto.check_element_exist("intensive_decomposition/筛选标识"):
+                    if pos := auto.check_element_exist("intensive_decomposition/筛选标识",roi=(1680,73,60,60)):
                         logger.info("打开筛选界面")
                         auto.click(pos)
                         auto.sleep(1)
-                        if pos := auto.check_element_exist("intensive_decomposition/UR"):
+                        if pos := auto.check_element_exist("intensive_decomposition/18加"):
                             auto.click(pos)
                             auto.sleep(1)
-                            if pos := auto.check_element_exist("intensive_decomposition/满等级"):
+                            # if pos := auto.check_element_exist("intensive_decomposition/满等级"):
+                            #     auto.click(pos)
+                            #     auto.sleep(1)
+                            if pos := auto.check_element_exist("intensive_decomposition/制作"):
                                 auto.click(pos)
                                 auto.sleep(1)
-                                if pos := auto.check_element_exist("intensive_decomposition/制作"):
-                                    auto.click(pos)
+                                if auto.text_click("确认",click_time=3):
                                     auto.sleep(1)
-                                    if auto.text_click("确认",click_time=3):
-                                        auto.sleep(1)
-                                        state = "confirm"
+                                    state = "confirm"
                     continue
                 
                 if state == "confirm":

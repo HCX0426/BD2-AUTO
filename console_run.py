@@ -15,11 +15,10 @@ def console_execute():
             return False
         auto.start()
         # click_success = auto.click((179,158))
-        click_success = auto.check_element_exist("public/主界面")
-        if click_success:
-            auto.logger.info(f"公会标识点击成功:{click_success}")
-        else:
-            auto.logger.warning("公会标识点击失败或未找到")
+        if pos := auto.check_element_exist(["get_pvp/pvp地图2","get_pvp/pvp地图"], roi=(153,598,235,165)):
+
+            print(pos)
+
 
         return True
     except Exception as e:

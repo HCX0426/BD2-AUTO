@@ -2,7 +2,7 @@ import time
 from typing import Dict, Optional, List, Tuple
 
 from auto_control.adb_device import ADBDevice
-from auto_control.device_base import BaseDevice, DeviceState
+from auto_control.base_device import BaseDevice, DeviceState
 from auto_control.windows_device import WindowsDevice
 from auto_control.image_processor import ImageProcessor
 # 导入CoordinateTransformer

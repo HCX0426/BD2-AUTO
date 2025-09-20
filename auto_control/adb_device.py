@@ -1,4 +1,4 @@
-from .device_base import BaseDevice
+from .base_device import BaseDevice
 
 class ADBDevice(BaseDevice):
     def connect(self):
