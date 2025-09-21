@@ -24,6 +24,11 @@ def login(auto: Auto, timeout: int = 300) -> bool:
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
+
+            if auto.text_click("确认",roi=(795,613,340,70)):
+                logger.info("检测到确认按钮，点击")
+                auto.sleep(2)
+                continue
             
             # 处理开始游戏界面
             if state == "start_screen":
@@ -31,16 +36,12 @@ def login(auto: Auto, timeout: int = 300) -> bool:
                     logger.info("检测到开始游戏按钮，点击进入")
                     auto.click(pos,click_time=3)
                     auto.sleep(3)
-                state = "main_check"
-                continue
-                
-            # 检查主界面状态
-            if state == "main_check":
+
                 if back_to_main(auto):
                     logger.info("成功进入主界面")
                     state = "popup_handling"
                 continue
-                
+
             # 处理各种弹窗
             if state == "popup_handling":
                 if back_to_map(auto):

@@ -30,9 +30,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
             if phase == "decomposition":
                 if state == "init":
                     if back_to_main(auto):
-                        if auto.text_click("背包",click_time=2):
+                        if auto.text_click("背包",click_time=2,roi=(330,1000,57,43)):
                             logger.info("打开背包")
-                            auto.sleep(1)
+                            auto.sleep(3)
                             state = "bag_opened"
                     continue
                 
@@ -97,9 +97,9 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
             elif phase == "enhancement":
                 if state == "init":
                     if back_to_main(auto):
-                        if auto.text_click("背包",click_time=2):
+                        if auto.text_click("背包",click_time=2,roi=(330,1000,57,43)):
                             logger.info("打开背包")
-                            auto.sleep(1)
+                            auto.sleep(3)
                             state = "bag_opened"
                     continue
                 

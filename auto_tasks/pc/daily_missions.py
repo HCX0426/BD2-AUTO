@@ -28,15 +28,20 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
             # 初始状态：检查主界面
             if state == "init":
                 if back_to_main(auto):
-                    if pos := auto.text_click("任务", click=False):
+                    if pos := auto.text_click("任务", click=False,roi=(635,1000,90,35)):
                         logger.info(f"进入任务界面")
-                        auto.click(pos)
+                        auto.click(pos, click_time=2)
                         auto.sleep(2)
                         state = "main_checked"
                 continue
                 
             # 领取每日任务奖励
             if state == "main_checked":
+                if not auto.text_click("每日任务",click=False):
+                    logger.info("未在任务界面，返回主界面重试")
+                    state = "init"
+                    continue
+
                 if pos := auto.text_click("全部获得",click=False):
                     logger.info("领取每日任务奖励")
                     auto.click(pos,click_time=2)
