@@ -1,0 +1,28 @@
+/* 浅色主题 - 覆盖公用样式中的特定属性 */
+QWidget {
+    background-color: #f9f9f9;
+}
+
+QGroupBox {
+    background-color: #ffffff;
+}
+
+QListWidget, QTableWidget {
+    background-color: #ffffff;
+}
+
+QPushButton {
+    background-color: #f0f0f0;
+}
+
+QPushButton:hover {
+    background-color: #e5e5e5;
+}
+
+QTabBar::tab {
+    background-color: #f0f0f0;
+}
+
+QTabBar::tab:selected {
+    background-color: #f9f9f9;
+}

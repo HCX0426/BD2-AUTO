@@ -15,8 +15,8 @@ def console_execute():
             return False
         auto.start()
         # click_success = auto.click((179,158))
-        if pos := auto.check_element_exist(["get_pvp/pvp地图2","get_pvp/pvp地图"], roi=(153,598,235,165)):
-
+        if pos := auto.check_element_exist(["lucky_draw/12"], roi=(421,252,42,500)):
+            auto.click(pos)
             print(pos)
 
 

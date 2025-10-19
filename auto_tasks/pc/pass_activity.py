@@ -3,7 +3,7 @@ from auto_control import Auto
 from auto_tasks.pc.public import back_to_main, click_back
 
 
-def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") -> bool:
+def pass_activity(auto: Auto, timeout: int = 600, difficulty: str = "普通战斗", level_name: str = "第15关") -> bool:
     """活动关卡扫荡
     
     Args:
@@ -36,35 +36,35 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                 
             # 进入挑战战斗
             if state == "entered":
-                if auto.text_click("挑战战斗",click_time=3):
-                    logger.info("进入挑战战斗界面")
+                if auto.text_click(difficulty,click_time=3,roi=(595,930,360,60)):
+                    logger.info(f"进入{difficulty}战斗界面")
                     state = "challenge_selected"
                 else:
-                    logger.error("未找到挑战战斗按钮,尝试点击坐标")
+                    logger.error(f"未找到{difficulty}按钮,尝试点击坐标")
                     auto.click((1700, 480), click_time=2, is_base_coord=True)
                 continue
                 
-            # 选择困难第15关
+            # 选择第15关
             if state == "challenge_selected":
                 # 检查是否仍在挑战战斗界面
-                if auto.text_click("行程", click=False):
+                if auto.text_click("行程", click=False,roi=(484,23,70,40)):
                     logger.info("仍在挑战战斗界面")
                     state = "entered"
                     continue
-                
-                if pos := auto.check_element_exist(f"pass_activity/{level_name}"):
-                    logger.info(f"选择{level_name}")
-                    auto.click(pos, click_time=2)
-                    auto.sleep(1)
+
+                # if pos := auto.check_element_exist(f"pass_activity/{level_name}", roi=(235,1000,205,80)):
+                #     logger.info(f"选择{level_name}")
+                #     auto.click(pos, click_time=2)
+                #     auto.sleep(1)
                     
-                    if pos := auto.text_click("快速战斗",click=False):
-                        logger.info("进入快速战斗界面")
-                        auto.click(pos)
-                        auto.sleep(1)
-                        state = "quick_battle"
-                    else:
-                        logger.error("未找到快速战斗按钮,跳过")
-                        state = "battle_confirmed"
+                if pos := auto.text_click("快速战斗",click=False):
+                    logger.info("进入快速战斗界面")
+                    auto.click(pos)
+                    auto.sleep(1)
+                    state = "quick_battle"
+                else:
+                    logger.error("未找到快速战斗按钮,跳过")
+                    state = "battle_confirmed"
 
                 continue
                 
@@ -98,7 +98,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                 continue
 
             if state == "boss":
-                if auto.text_click("魔物追踪者",click_time=2):
+                if auto.text_click("魔物追踪者",click_time=2,roi=(976,930,170,60)):
                     logger.info("进入魔物追踪者界面")
                     auto.sleep(2)
                 if auto.text_click("快速战斗"):

@@ -1,0 +1,81 @@
+/* 深色主题 - 覆盖公用样式中的特定属性 */
+QWidget {
+    background-color: #2d2d2d;
+    color: #e0e0e0;
+}
+
+QPushButton {
+    background-color: #3d3d3d;
+    border-color: #555555;
+    color: #e0e0e0;
+}
+
+QPushButton:hover {
+    background-color: #4d4d4d;
+    border-color: #666666;
+}
+
+QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background-color: #3d3d3d;
+    border-color: #555555;
+    color: #e0e0e0;
+}
+
+QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border-color: #4a90e2;
+}
+
+QGroupBox {
+    border-color: #444444;
+    background-color: #333333;
+}
+
+QListWidget, QTableWidget {
+    border-color: #444444;
+    background-color: #333333;
+}
+
+QListWidget::item, QTableWidget::item {
+    border-bottom-color: #444444;
+}
+
+QListWidget::item:selected, QTableWidget::item:selected {
+    background-color: #3a5f8f;
+    color: #ffffff;
+}
+
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: #333333;
+}
+
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: #555555;
+}
+
+QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
+    background: #666666;
+}
+
+QTabWidget::pane {
+    border-color: #444444;
+}
+
+QTabBar::tab {
+    background-color: #333333;
+    border-color: #444444;
+    color: #bbbbbb;
+}
+
+QTabBar::tab:selected {
+    background-color: #2d2d2d;
+    border-top-color: #4a90e2;
+    color: #ffffff;
+}
+
+QProgressBar {
+    border-color: #444444;
+}
+
+QProgressBar::chunk {
+    background-color: #4a90e2;
+}

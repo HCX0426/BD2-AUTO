@@ -1,0 +1,10 @@
+{
+  "resources": [
+    {
+      "name": "资源_1",
+      "path": "C:/Users/hcx/Desktop/BD2-AUTO/auto_tasks/pc",
+      "enabled": true
+    }
+  ],
+  "current_index": 0
+}

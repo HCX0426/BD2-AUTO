@@ -4,13 +4,11 @@ from auto_control import Auto
 from auto_tasks.pc.public import back_to_main
 
 
-def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
+def lucky_draw(auto: Auto, timeout: int = 400):
     """抽抽乐
     
     Args:
         timeout: 任务超时时间(秒)
-        target_count: 目标抽奖次数
-    
     Returns:
         bool: 是否成功完成抽抽乐流程
     """
@@ -19,12 +17,28 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
         logger.info("开始抽抽乐")
         start_time = time.time()
         first = True
-        last_count = target_count
+        state = "init"
 
         while time.time() - start_time < timeout:
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
+
+            if state == "init":
+                if back_to_main(auto):
+                    auto.text_click("抽抽乐",click_time=2)
+                    logger.info("进入抽抽乐")
+                    auto.sleep(3)
+                    state = "in_lucky_draw"
+                continue
+
+            if state == "in_lucky_draw":
+                if pos := auto.check_element_exist("lucky_draw/未抽标识"):
+                    auto.click(pos)
+                    logger.info("检测到未抽标识，开始抽奖")
+                
+                
+
             # 检测是否在主界面
             if first:
                 if back_to_main(auto):

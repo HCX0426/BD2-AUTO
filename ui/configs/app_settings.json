@@ -1,0 +1,20 @@
+{
+    "appearance": {
+        "theme": "light",
+        "font_size": 12,
+        "compact_mode": true
+    },
+    "paths": {
+        "log": "c:\\Users\\hcx\\Desktop\\BD2-AUTO\\logs",
+        "cache": "c:\\Users\\hcx\\Desktop\\BD2-AUTO\\cache"
+    },
+    "logging": {
+        "level": "INFO",
+        "save_days": 7,
+        "save_to_file": true
+    },
+    "execution": {
+        "auto_continue": false,
+        "retry_count": 1
+    }
+}
