@@ -15,8 +15,10 @@ from auto_control.coordinate_transformer import CoordinateTransformer
 from auto_control.base_device import BaseDevice, DeviceState
 from auto_control.image_processor import ImageProcessor
 
+
 class DCHandle:
     """DC资源上下文管理器：仅获取客户区DC，排除标题栏/边框"""
+
     def __init__(self, hwnd, logger):
         self.hwnd = hwnd
         self.hdc = None
@@ -40,6 +42,7 @@ class DCHandle:
 
 class BitmapHandle:
     """位图资源上下文管理器，自动释放资源"""
+
     def __init__(self, bitmap):
         self.bitmap = bitmap
 
@@ -58,19 +61,19 @@ class WindowsDevice(BaseDevice):
     """Windows设备控制器：使用CoordinateTransformer判断全屏状态"""
 
     # 类常量
-    WINDOW_RESTORE_DELAY = 0.5        # 窗口恢复后的等待时间
-    WINDOW_ACTIVATE_DELAY = 0.1       # 窗口激活后的验证等待时间
-    ACTIVATE_COOLDOWN = 5.0           # 激活冷却时间（5秒内不重复激活）
+    WINDOW_RESTORE_DELAY = 0.5  # 窗口恢复后的等待时间
+    WINDOW_ACTIVATE_DELAY = 0.1  # 窗口激活后的验证等待时间
+    ACTIVATE_COOLDOWN = 5.0  # 激活冷却时间（5秒内不重复激活）
+    FOREGROUND_CHECK_INTERVAL = 5.0 # 新增：前台检查间隔
 
     def __init__(
-        self,
-        device_uri: str,
-        logger = None,
-        image_processor: Optional[ImageProcessor] = None,
-        coord_transformer: Optional[CoordinateTransformer] = None
+            self,
+            device_uri: str,
+            logger=None,
+            image_processor: Optional[ImageProcessor] = None,
+            coord_transformer: Optional[CoordinateTransformer] = None,
     ):
         super().__init__(device_uri)
-
         self.logger = logger
         self.device_uri = device_uri
         self.image_processor: ImageProcessor = image_processor
@@ -78,23 +81,27 @@ class WindowsDevice(BaseDevice):
 
         # 窗口基础信息（连接时初始化，稳定属性）
         self.hwnd: Optional[int] = None  # 窗口句柄
-        self.window_title: str = ""      # 窗口标题
-        self.window_class: str = ""      # 窗口类名（如UnityWndClass）
-        self.process_id: int = 0         # 窗口所属进程ID
+        self.window_title: str = ""  # 窗口标题
+        self.window_class: str = ""  # 窗口类名（如UnityWndClass）
+        self.process_id: int = 0  # 窗口所属进程ID
         self.physical_screen_res: Tuple[int, int] = (0, 0)  # 物理屏幕分辨率（稳定值）
 
         # 窗口动态信息（状态变化时更新）
         self._client_size: Tuple[int, int] = (0, 0)  # 客户区大小
-        self.dpi_scale: float = 1.0      # 当前窗口DPI缩放因子
+        self.dpi_scale: float = 1.0  # 当前窗口DPI缩放因子
         self._window_rect: Tuple[int, int, int, int] = (0, 0, 0, 0)  # 窗口矩形
         self.is_fullscreen: bool = False  # 是否全屏（动态变化）
 
         # 激活状态缓存
-        self._last_activate_time = 0.0   # 上次激活时间（秒级时间戳）
+        self._last_activate_time = 0.0  # 上次激活时间（秒级时间戳）
+        
+        # --- 新增：控制前台激活行为的标志 ---
+        self._foreground_activation_allowed = True # 是否允许尝试将窗口激活到前台
 
         # 解析URI参数
         self.uri_params = self._parse_uri(device_uri)
         self.logger.debug(f"Windows设备URI参数: {self.uri_params}")
+
         # 启用DPI感知
         self._enable_dpi_awareness()
 
@@ -112,7 +119,6 @@ class WindowsDevice(BaseDevice):
     def _get_window_handle(self) -> Optional[int]:
         """根据URI参数查找窗口句柄"""
         self.logger.info("开始查找窗口...")
-
         # 1. 精确标题匹配
         if "title" in self.uri_params:
             title = self.uri_params["title"]
@@ -129,18 +135,16 @@ class WindowsDevice(BaseDevice):
             import re
             pattern_str = self.uri_params["title_re"]
             self.logger.info(f"尝试正则匹配: '{pattern_str}'")
-
             if '*' in pattern_str and not (pattern_str.startswith('.*') or pattern_str.endswith('.*')):
                 pattern_str = pattern_str.replace('*', '.*')
-                self.logger.info(f"修正后的正则表达式: '{pattern_str}'")
-
+            self.logger.info(f"修正后的正则表达式: '{pattern_str}'")
             try:
                 pattern = re.compile(pattern_str, re.IGNORECASE)
             except re.error as e:
                 self.logger.error(f"正则表达式编译错误: {e}")
                 return None
-
             matches = []
+
             def callback(hwnd, ctx):
                 if win32gui.IsWindow(hwnd):
                     title = win32gui.GetWindowText(hwnd)
@@ -148,8 +152,8 @@ class WindowsDevice(BaseDevice):
                         matches.append((hwnd, title))
                         self.logger.info(f"正则匹配找到窗口: 句柄={hwnd}, 标题='{title}'")
                 return True
-            win32gui.EnumWindows(callback, None)
 
+            win32gui.EnumWindows(callback, None)
             if matches:
                 self.logger.info(f"找到 {len(matches)} 个匹配窗口")
                 hwnd, title = matches[0]
@@ -158,12 +162,14 @@ class WindowsDevice(BaseDevice):
             else:
                 self.logger.info("正则匹配未找到窗口，枚举所有带标题窗口...")
                 all_windows = []
+
                 def debug_callback(hwnd, ctx):
                     if win32gui.IsWindow(hwnd):
                         title = win32gui.GetWindowText(hwnd)
                         if title:
                             all_windows.append((hwnd, title))
                             self.logger.info(f"窗口句柄: {hwnd}, 标题: '{title}'")
+
                 win32gui.EnumWindows(debug_callback, None)
                 self.logger.info(f"系统中共有 {len(all_windows)} 个带标题的窗口")
 
@@ -193,8 +199,8 @@ class WindowsDevice(BaseDevice):
                 if proc.info['name'].lower() == process_name.lower():
                     pid = proc.info['pid']
                     self.logger.info(f"找到进程: {process_name}, PID: {pid}")
-
                     target_hwnd = None
+
                     def callback(hwnd, pid):
                         nonlocal target_hwnd
                         if win32gui.IsWindow(hwnd):
@@ -204,7 +210,8 @@ class WindowsDevice(BaseDevice):
                                 if title:
                                     target_hwnd = hwnd
                                     self.logger.info(f"找到进程窗口: 句柄={hwnd}, 标题='{title}'")
-                        return True
+                                return True
+
                     win32gui.EnumWindows(callback, pid)
                     if target_hwnd:
                         return target_hwnd
@@ -220,7 +227,6 @@ class WindowsDevice(BaseDevice):
             import ctypes
             shcore = ctypes.windll.shcore
             result = shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-            
             if result == 0:
                 self.logger.debug("已成功启用Per-Monitor DPI感知模式")
                 try:
@@ -231,7 +237,6 @@ class WindowsDevice(BaseDevice):
                     pass
             else:
                 self.logger.warning(f"SetProcessDpiAwareness失败，错误码: {result}")
-                
         except Exception as e:
             self.logger.error(f"启用DPI感知失败: {e}")
             try:
@@ -245,19 +250,16 @@ class WindowsDevice(BaseDevice):
         if not self.hwnd:
             self.logger.warning("窗口句柄不存在，默认DPI=1.0")
             return 1.0
-
         try:
             if hasattr(ctypes.windll.user32, 'GetDpiForWindow'):
                 dpi = ctypes.windll.user32.GetDpiForWindow(self.hwnd)
                 if dpi > 0:
                     return dpi / 96.0
-
             monitor = ctypes.windll.user32.MonitorFromWindow(self.hwnd, win32con.MONITOR_DEFAULTTONEAREST)
             dpi_x = wintypes.UINT()
             if hasattr(ctypes.windll.shcore, 'GetDpiForMonitor'):
                 ctypes.windll.shcore.GetDpiForMonitor(monitor, win32con.MDT_EFFECTIVE_DPI, ctypes.byref(dpi_x), None)
                 return dpi_x.value / 96.0
-
             hdc = ctypes.windll.user32.GetDC(0)
             dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, win32con.LOGPIXELSX)
             ctypes.windll.user32.ReleaseDC(0, hdc)
@@ -305,7 +307,6 @@ class WindowsDevice(BaseDevice):
 
             devmode = DEVMODE()
             devmode.dmSize = ctypes.sizeof(DEVMODE)
-            
             result = ctypes.windll.user32.EnumDisplaySettingsW(None, -1, ctypes.byref(devmode))
             if result:
                 return (devmode.dmPelsWidth, devmode.dmPelsHeight)
@@ -323,7 +324,6 @@ class WindowsDevice(BaseDevice):
         if not self.hwnd:
             self.logger.error("无法更新窗口信息：窗口句柄不存在")
             return False
-
         try:
             if self.is_minimized():
                 self.logger.debug("检测到窗口最小化，执行恢复操作")
@@ -377,19 +377,16 @@ class WindowsDevice(BaseDevice):
                 self.is_fullscreen = self.coord_transformer._is_current_window_fullscreen(self.hwnd)
             else:
                 # 备用方案：如果没有坐标转换器，使用简单判断
-                is_borderless = (abs(window_w_phys - client_w_phys) <= 2) and (abs(window_h_phys - client_h_phys) <= 2)
+                is_borderless = (abs(window_w_phys - client_w_phys) <= 2) and (
+                        abs(window_h_phys - client_h_phys) <= 2)
                 is_visual_fullscreen = (
-                    win_left == 0 and win_top == 0 
-                    and abs(win_right - scaled_screen_w) <= 2 
-                    and abs(win_bottom - scaled_screen_h) <= 2 
-                    and is_borderless
-                )
+                        win_left == 0 and win_top == 0 and abs(win_right - scaled_screen_w) <= 2 and abs(
+                    win_bottom - scaled_screen_h) <= 2 and is_borderless)
                 self.is_fullscreen = is_visual_fullscreen
                 self.logger.warning("未使用坐标转换器判断全屏状态，可能存在误差")
 
             # 更新客户区尺寸
-            self._client_size = (self.physical_screen_res if self.is_fullscreen 
-                               else (client_w_logic, client_h_logic))
+            self._client_size = (self.physical_screen_res if self.is_fullscreen else (client_w_logic, client_h_logic))
 
             # 更新坐标转换器
             if self.coord_transformer:
@@ -398,13 +395,11 @@ class WindowsDevice(BaseDevice):
                     current_dpi=self.dpi_scale,
                     handle=self.hwnd
                 )
-
             self.logger.debug(
                 f"动态信息更新完成 | 模式: {'全屏' if self.is_fullscreen else '窗口'} | "
                 f"客户区尺寸: {self._client_size} | DPI: {self.dpi_scale:.2f}"
             )
             return True
-
         except Exception as e:
             self.last_error = f"动态窗口信息更新失败: {str(e)}"
             self.logger.error(self.last_error, exc_info=True)
@@ -424,12 +419,14 @@ class WindowsDevice(BaseDevice):
             if self.hwnd:
                 # 缓存稳定属性（仅连接时计算一次）
                 self.physical_screen_res = self._get_screen_hardware_res()  # 物理屏幕分辨率（稳定）
-                self.window_class = win32gui.GetClassName(self.hwnd)       # 窗口类名（稳定）
+                self.window_class = win32gui.GetClassName(self.hwnd)  # 窗口类名（稳定）
                 _, self.process_id = win32process.GetWindowThreadProcessId(self.hwnd)  # 进程ID（稳定）
-                
+
                 # 激活窗口并更新动态属性
                 self.restore_window()
+                # --- 修改：连接后调用 set_foreground 触发首次激活逻辑 ---
                 self.set_foreground()
+                # ---
                 time.sleep(0.5)
                 if self._update_dynamic_window_info():  # 只更新动态属性
                     self.state = DeviceState.CONNECTED
@@ -440,7 +437,6 @@ class WindowsDevice(BaseDevice):
                     )
                     return True
             time.sleep(0.5)
-
         self.last_error = f"超时未找到匹配窗口（{timeout}s）"
         self.state = DeviceState.DISCONNECTED
         self.logger.error(f"连接失败: {self.last_error}")
@@ -461,6 +457,7 @@ class WindowsDevice(BaseDevice):
             self._window_rect = (0, 0, 0, 0)
             self.is_fullscreen = False
             self._last_activate_time = 0.0  # 重置激活缓存
+            self._foreground_activation_allowed = True # 重置前台激活标志
             self.state = DeviceState.DISCONNECTED
             return True
         return False
@@ -476,25 +473,24 @@ class WindowsDevice(BaseDevice):
         if not self.hwnd:
             self.last_error = "未连接到窗口"
             return False
-
         try:
             if self.is_minimized():
                 win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
                 time.sleep(self.WINDOW_RESTORE_DELAY)
-            self._update_dynamic_window_info()  # 状态变化，更新动态属性
-            self.logger.debug(f"窗口已恢复: {self.window_title}")
-            return True
+                self._update_dynamic_window_info()  # 状态变化，更新动态属性
+                self.logger.debug(f"窗口已恢复: {self.window_title}")
+                return True
         except Exception as e:
             self.last_error = f"恢复窗口失败: {str(e)}"
             self.logger.error(self.last_error)
             return False
+        return True # 如果不是最小化的，也算恢复成功
 
     def minimize_window(self) -> bool:
         """最小化窗口"""
         if not self.hwnd:
             self.last_error = "未连接到窗口"
             return False
-
         try:
             win32gui.ShowWindow(self.hwnd, win32con.SW_MINIMIZE)
             self.logger.info(f"窗口已最小化: {self.window_title}")
@@ -509,13 +505,11 @@ class WindowsDevice(BaseDevice):
         if not self.hwnd:
             self.last_error = "未连接到窗口"
             return False
-
         try:
             is_max = win32gui.IsZoomed(self.hwnd)
             if is_max:
                 self.logger.debug("窗口已处于最大化状态，无需重复操作")
                 return True
-            
             win32gui.ShowWindow(self.hwnd, win32con.SW_MAXIMIZE)
             time.sleep(self.WINDOW_RESTORE_DELAY)
             self._update_dynamic_window_info()  # 状态变化，更新动态属性
@@ -527,91 +521,98 @@ class WindowsDevice(BaseDevice):
             return False
 
     def set_foreground(self) -> bool:
-        """窗口激活逻辑"""
+        """
+        窗口激活逻辑：首次调用时可以尝试激活，之后如果不在前台则循环等待。
+        """
         if not self.hwnd:
             self.last_error = f"未连接到窗口或状态异常: {self.hwnd}|{self.state}"
             return False
 
         current_time = time.time()
-        # 1. 冷却时间判断：已激活过，直接返回成功（跳过重复操作）
-        if current_time - self._last_activate_time < self.ACTIVATE_COOLDOWN:
-            self.logger.debug(
-                f"窗口激活跳过（冷却期内）| 句柄: {self.hwnd} | "
-                f"上次激活: {current_time - self._last_activate_time:.2f}s前"
-            )
-            return True
-
-        # 2. 前台验证：当前前台窗口就是目标窗口，无需激活
+        
+        # 1. 前台验证：当前前台窗口就是目标窗口，无需激活
         foreground_hwnd = win32gui.GetForegroundWindow()
         if foreground_hwnd == self.hwnd:
             self._last_activate_time = current_time  # 更新激活时间（刷新冷却）
             self.logger.debug(f"窗口已在前台 | 句柄: {self.hwnd} | 无需激活")
             return True
 
-        # 3. 优化的激活策略：先尝试标准方法，失败后再尝试高级方法，减少不必要的重试
-        activation_methods = [
-            self._activate_with_standard_method,
-            self._activate_with_thread_attach,
-            # 移除或重构最小化恢复方法，它是导致闪烁的主要原因
-            self._optimized_minimize_restore
-        ]
-        
-        try:
-            # 先恢复窗口（防止最小化导致激活无效）
-            if self.is_minimized():
-                self.logger.info("检测到窗口最小化，先恢复...")
-                win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
-                time.sleep(self.WINDOW_RESTORE_DELAY)
+        # 2. 如果允许激活（通常是首次）
+        if self._foreground_activation_allowed:
+            self.logger.info(f"首次尝试将窗口激活到前台 | 句柄: {self.hwnd}")
+            # --- 简化的激活逻辑 ---
+            try:
+                # 先恢复窗口（防止最小化导致激活无效）
+                if self.is_minimized():
+                    self.logger.info("检测到窗口最小化，先恢复...")
+                    win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
+                    time.sleep(self.WINDOW_RESTORE_DELAY)
+                    # 恢复后立即检查是否已经在前台
+                    foreground_hwnd = win32gui.GetForegroundWindow()
+                    if foreground_hwnd == self.hwnd:
+                        self._last_activate_time = current_time
+                        self._foreground_activation_allowed = False # 成功激活后禁止后续自动激活
+                        self.logger.info(f"窗口恢复后自动激活成功 | 句柄: {self.hwnd}")
+                        return True
+
+                # 尝试标准激活方法
+                win32gui.ShowWindow(self.hwnd, win32con.SW_SHOW)
+                success = win32gui.SetForegroundWindow(self.hwnd)
                 
-                # 恢复后立即检查是否已经在前台
+                time.sleep(self.WINDOW_ACTIVATE_DELAY)
+                final_foreground = win32gui.GetForegroundWindow()
+                
+                if success and final_foreground == self.hwnd and not self.is_minimized():
+                    self._last_activate_time = current_time
+                    self._foreground_activation_allowed = False # 成功激活后禁止后续自动激活
+                    self.logger.info(f"窗口激活成功 | 句柄: {self.hwnd}")
+                    return True
+                else:
+                    self.logger.warning(f"窗口激活尝试失败 | 句柄: {self.hwnd}")
+            except Exception as e:
+                self.logger.error(f"窗口激活尝试异常: {str(e)} | 句柄: {self.hwnd}")
+            # --- 激活逻辑结束 ---
+            
+            # 如果激活尝试失败，也禁止后续自动激活，并进入等待循环
+            self._foreground_activation_allowed = False
+            self.logger.warning(f"首次窗口激活失败，进入前台检查等待循环 | 句柄: {self.hwnd}")
+
+        # 3. 如果不允许激活或激活失败，则进入循环等待
+        self.logger.info(f"窗口不在前台，进入等待循环，每 {self.FOREGROUND_CHECK_INTERVAL} 秒检查一次 | 句柄: {self.hwnd}")
+        while True:
+            time.sleep(self.FOREGROUND_CHECK_INTERVAL)
+            try:
+                # 检查用户是否关闭了程序或有中断信号 (简化处理)
+                # ...
                 foreground_hwnd = win32gui.GetForegroundWindow()
                 if foreground_hwnd == self.hwnd:
-                    self._last_activate_time = current_time
-                    self.logger.info(f"窗口恢复后自动激活成功 | 句柄: {self.hwnd}")
+                    self.logger.info(f"检测到窗口回到前台，退出等待循环 | 句柄: {self.hwnd}")
                     return True
-            
-            # 按顺序尝试激活方法
-            for method in activation_methods:
-                try:
-                    success = method()
-                    time.sleep(self.WINDOW_ACTIVATE_DELAY / 2)  # 减少等待时间
-                    
-                    # 验证激活成功
-                    final_foreground = win32gui.GetForegroundWindow()
-                    if success and final_foreground == self.hwnd and not self.is_minimized():
-                        self._last_activate_time = current_time
-                        self.logger.info(f"窗口激活成功 | 句柄: {self.hwnd} | 方法: {method.__name__}")
-                        return True
-                except Exception as e:
-                    self.logger.warning(f"激活方法 {method.__name__} 失败: {str(e)}")
-                    
-        except Exception as e:
-            self.logger.error(f"窗口激活异常: {str(e)} | 句柄: {self.hwnd}")
-        
-        # 所有方法尝试失败
-        error_msg = (
-            f"窗口激活失败 | 目标句柄: {self.hwnd} | "
-            f"实际前台句柄: {win32gui.GetForegroundWindow()} | 最小化: {self.is_minimized()}"
-        )
-        self.last_error = error_msg
-        self.logger.error(error_msg)
+                else:
+                    self.logger.debug(f"窗口仍未在前台，继续等待 | 句柄: {self.hwnd}")
+            except Exception as e:
+                self.logger.error(f"检查前台窗口时出错: {e}")
+                # 如果检查本身出错，可以选择继续等待或退出
+                # 这里选择继续等待
+                continue
+
+        # 理论上不会执行到这里
         return False
-        
+
+
     def _activate_with_standard_method(self) -> bool:
         """标准激活方法：使用ShowWindow + SetForegroundWindow"""
         win32gui.ShowWindow(self.hwnd, win32con.SW_SHOW)
         return win32gui.SetForegroundWindow(self.hwnd)
-        
+
     def _activate_with_thread_attach(self) -> bool:
         """高级激活方法：使用AttachThreadInput绕过Windows前台限制"""
         # 获取当前线程ID和目标窗口线程ID
         current_thread_id = win32api.GetCurrentThreadId()
         target_thread_id, _ = win32process.GetWindowThreadProcessId(self.hwnd)
-        
         # 如果线程ID相同，直接激活
         if current_thread_id == target_thread_id:
             return self._activate_with_standard_method()
-        
         # 否则，附加线程输入上下文
         try:
             win32process.AttachThreadInput(current_thread_id, target_thread_id, True)
@@ -623,7 +624,7 @@ class WindowsDevice(BaseDevice):
                 win32process.AttachThreadInput(current_thread_id, target_thread_id, False)
             except Exception as e:
                 self.logger.debug(f"分离线程输入上下文异常: {str(e)}")
-        
+
     def _optimized_minimize_restore(self) -> bool:
         """优化版最小化恢复方法：减少不必要的状态切换"""
         # 只在其他方法都失败时才使用
@@ -631,7 +632,6 @@ class WindowsDevice(BaseDevice):
             # 尝试不经过最小化直接激活
             if self._activate_with_standard_method():
                 return True
-                
             # 作为最后的备选方案，再尝试最小化恢复（但减少延迟）
             win32gui.ShowWindow(self.hwnd, win32con.SW_MINIMIZE)
             time.sleep(self.WINDOW_RESTORE_DELAY / 2)  # 减少延迟
@@ -640,60 +640,151 @@ class WindowsDevice(BaseDevice):
             return self._activate_with_standard_method()
         except:
             return False
-    
+
     def get_resolution(self) -> Tuple[int, int]:
         """获取当前客户区分辨率"""
         return self._client_size
 
     def capture_screen(self, roi: Optional[Tuple[int, int, int, int]] = None) -> Optional[np.ndarray]:
-        """截取客户区屏幕"""
+        """
+        截取窗口客户区屏幕（彻底排除标题栏/边框，窗口模式精准裁剪）
+        Args:
+            roi: 可选，基于原始全屏物理像素定义的ROI，格式 (x, y, width, height)。
+                 注意：这里的(x,y)是相对于原始全屏左上角(0,0)的物理坐标。
+        Returns:
+            截取的图像（BGR格式），None表示失败
+        """
         if not self.hwnd or self.state != DeviceState.CONNECTED:
             self.last_error = "未连接到窗口或状态异常"
             return None
-
         try:
             if self.is_minimized():
                 self.restore_window()
-            if not self.set_foreground():
-                raise RuntimeError("窗口激活失败，无法截图")
+            # --- 修改：不再在此处调用 set_foreground，由上层逻辑保证 ---
+            # if not self.set_foreground():
+            #     raise RuntimeError("窗口激活失败，无法截图")
+            # ---
             time.sleep(0.1)
 
-            cap_w, cap_h = self.physical_screen_res if self.is_fullscreen else self._client_size
-            self.logger.debug(f"{'全屏' if self.is_fullscreen else '窗口'}模式 | 截图尺寸: {cap_w}x{cap_h}")
+            # ========== 1. 基础尺寸/位置获取 ==========
+            # 获取窗口整体在屏幕上的矩形（包含标题栏/边框）
+            window_rect = win32gui.GetWindowRect(self.hwnd)
+            win_left, win_top, win_right, win_bottom = window_rect
+            window_w = win_right - win_left
+            window_h = win_bottom - win_top
 
-            with DCHandle(self.hwnd, self.logger) as hwndDC:
-                mfcDC = win32ui.CreateDCFromHandle(hwndDC)
+            # 获取客户区相对窗口的偏移（关键：标题栏/边框的宽度）
+            client_rect = win32gui.GetClientRect(self.hwnd)
+            client_w_phys = client_rect[2] - client_rect[0]  # 客户区物理宽度
+            client_h_phys = client_rect[3] - client_rect[1]  # 客户区物理高度
+            if client_w_phys <= 0 or client_h_phys <= 0:
+                raise RuntimeError(f"客户区物理尺寸无效: {client_w_phys}x{client_h_phys}")
+
+            # 计算客户区相对屏幕的真实位置（排除标题栏/边框）
+            # 方法：通过ClientToScreen转换客户区左上角(0,0)到屏幕坐标
+            client_screen_x, client_screen_y = win32gui.ClientToScreen(self.hwnd, (0, 0))
+
+            # 验证：标题栏高度 = 客户区Y偏移 - 窗口顶部Y
+            title_bar_height = client_screen_y - win_top
+            border_left = client_screen_x - win_left
+            self.logger.debug(
+                f"窗口位置: ({win_left},{win_top})-{window_w}x{window_h} | "
+                f"客户区偏移: 左={border_left}px, 上={title_bar_height}px | "
+                f"客户区物理尺寸: {client_w_phys}x{client_h_phys}"
+            )
+
+            # ========== 2. 区分全屏/窗口模式 ==========
+            if self.is_fullscreen:
+                # 全屏模式：保留原有逻辑（你反馈正常）
+                cap_w, cap_h = self.physical_screen_res  # 截图尺寸等于物理屏幕分辨率
+                self.logger.debug(f"全屏模式 | 截图尺寸: {cap_w}x{cap_h}")
+                # 全屏模式直接截取屏幕
+                hdc_screen = win32gui.GetDC(0)
+                mfcDC = win32ui.CreateDCFromHandle(hdc_screen)
                 saveDC = mfcDC.CreateCompatibleDC()
                 saveBitMap = win32ui.CreateBitmap()
                 saveBitMap.CreateCompatibleBitmap(mfcDC, cap_w, cap_h)
                 saveDC.SelectObject(saveBitMap)
-
-                print_flag = 0x00000002  # 仅截取客户区
-                result = ctypes.windll.user32.PrintWindow(self.hwnd, saveDC.GetSafeHdc(), print_flag)
-                if result != 1:
-                    raise RuntimeError(f"PrintWindow截取客户区失败 | 返回值: {result}")
-
-                bmpinfo = saveBitMap.GetInfo()
-                bmpstr = saveBitMap.GetBitmapBits(True)
-                im = Image.frombuffer(
-                    'RGB',
-                    (cap_w, cap_h),
-                    bmpstr, 'raw', 'BGRX', 0, 1
+                # BitBlt截取整个屏幕
+                ctypes.windll.gdi32.BitBlt(
+                    saveDC.GetSafeHdc(), 0, 0, cap_w, cap_h, hdc_screen, 0, 0, win32con.SRCCOPY
                 )
-                img_np = np.array(im)
+            else:
+                # 窗口模式：精准截取客户区（核心修复）
+                cap_w, cap_h = client_w_phys, client_h_phys  # 截图尺寸等于客户区物理尺寸
+                self.logger.debug(f"窗口模式 | 客户区物理尺寸: {cap_w}x{cap_h}")
+                # 截取屏幕上的客户区范围（避开标题栏/边框）
+                hdc_screen = win32gui.GetDC(0)
+                mfcDC = win32ui.CreateDCFromHandle(hdc_screen)
+                saveDC = mfcDC.CreateCompatibleDC()
+                saveBitMap = win32ui.CreateBitmap()
+                saveBitMap.CreateCompatibleBitmap(mfcDC, cap_w, cap_h)
+                saveDC.SelectObject(saveBitMap)
+                # BitBlt：只截取屏幕上的客户区部分（排除标题栏/边框）
+                ctypes.windll.gdi32.BitBlt(
+                    saveDC.GetSafeHdc(), 0, 0, cap_w, cap_h,  # 目标位图尺寸（客户区）
+                    hdc_screen, client_screen_x, client_screen_y,  # 屏幕上的客户区左上角
+                    win32con.SRCCOPY
+                )
 
-                saveDC.DeleteDC()
-                mfcDC.DeleteDC()
-                win32gui.DeleteObject(saveBitMap.GetHandle())
+            # ========== 3. 位图转numpy数组 ==========
+            bmpstr = saveBitMap.GetBitmapBits(True)
+            im = Image.frombuffer(
+                'RGB', (cap_w, cap_h), bmpstr, 'raw', 'BGRX', 0, 1
+            )
+            img_np = np.array(im)
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
+            # ========== 4. 资源释放 ==========
+            saveDC.DeleteDC()
+            mfcDC.DeleteDC()
+            win32gui.DeleteObject(saveBitMap.GetHandle())
+            win32gui.ReleaseDC(0, hdc_screen)
+
+            # ========== 5. ROI裁剪（统一处理：基于原始全屏物理坐标） ==========
+            # 核心思想：无论全屏还是窗口，传入的roi都是基于原始全屏物理分辨率定义的。
+            # 全屏模式下，截图就是全屏，roi可以直接应用。
+            # 窗口模式下，需要将roi转换到当前客户区的坐标系下进行裁剪。
             if roi:
-                rx, ry, rw, rh = roi
-                if rx < 0 or ry < 0 or rx + rw > cap_w or ry + rh > cap_h:
-                    self.logger.warning(f"ROI超出客户区范围 | ROI: {roi} | 忽略ROI")
+                roi_x, roi_y, roi_w, roi_h = roi
+                if self.is_fullscreen:
+                    # 全屏模式：ROI直接用物理像素（和原逻辑一致）
+                    if roi_x < 0 or roi_y < 0 or roi_x + roi_w > cap_w or roi_y + roi_h > cap_h:
+                        self.logger.warning(f"ROI超出全屏范围 | ROI: {roi} | 忽略ROI")
+                    else:
+                        img_np = img_np[roi_y:roi_y + roi_h, roi_x:roi_x + roi_w]
+                        self.logger.debug(f"全屏模式裁剪ROI: {roi}")
                 else:
-                    img_np = img_np[ry:ry+rh, rx:rx+rw]
-
-            return cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+                    # 窗口模式：将基于原始全屏物理坐标的ROI，转换为客户区内物理坐标的裁剪区域
+                    if not self.coord_transformer:
+                        self.logger.warning("窗口模式下裁剪ROI需要CoordinateTransformer，但未提供。忽略ROI。")
+                    else:
+                        # 1. 将ROI的两个对角顶点从原始坐标系转换到当前客户区坐标系（逻辑坐标）
+                        top_left_logical = self.coord_transformer.convert_original_to_current_client(roi_x, roi_y)
+                        bottom_right_logical = self.coord_transformer.convert_original_to_current_client(roi_x + roi_w,
+                                                                                                       roi_y + roi_h)
+                        # 2. 将逻辑坐标转换为客户区内的物理坐标（考虑当前DPI缩放）
+                        top_left_physical = (
+                            int(round(top_left_logical[0] / self.dpi_scale)),
+                            int(round(top_left_logical[1] / self.dpi_scale))
+                        )
+                        bottom_right_physical = (
+                            int(round(bottom_right_logical[0] / self.dpi_scale)),
+                            int(round(bottom_right_logical[1] / self.dpi_scale))
+                        )
+                        # 3. 计算在当前客户区物理图像中的裁剪区域
+                        crop_x = max(0, top_left_physical[0])
+                        crop_y = max(0, top_left_physical[1])
+                        crop_w = min(cap_w, bottom_right_physical[0]) - crop_x
+                        crop_h = min(cap_h, bottom_right_physical[1]) - crop_y
+                        # 4. 执行裁剪（确保区域有效）
+                        if crop_w > 0 and crop_h > 0:
+                            img_np = img_np[crop_y:crop_y + crop_h, crop_x:crop_x + crop_w]
+                            self.logger.debug(
+                                f"窗口模式裁剪ROI: 原始({roi}) -> 客户区物理({crop_x}, {crop_y}, {crop_w}, {crop_h})")
+                        else:
+                            self.logger.warning(f"转换后的ROI无效，忽略裁剪。原始ROI: {roi}")
+            return img_np
         except Exception as e:
             self.last_error = f"截图失败: {str(e)}"
             self.logger.error(self.last_error, exc_info=True)
@@ -708,23 +799,25 @@ class WindowsDevice(BaseDevice):
             is_base_coord: bool = False,
             roi: Optional[Tuple[int, int, int, int]] = None,
             is_base_roi: bool = False
-        ) -> bool:
+    ) -> bool:
         """鼠标点击操作（支持多个模板匹配）"""
         if not self.hwnd or self.state != DeviceState.CONNECTED:
             self.last_error = "未连接到窗口或状态异常"
             return False
-
         try:
             self.restore_window()
-            self.set_foreground()
+            # --- 修改：调用 set_foreground 确保前台，但遵循新规则 ---
+            if not self.set_foreground():
+                 self.last_error = "无法将窗口置于前台，点击操作终止"
+                 self.logger.error(self.last_error)
+                 return False
+            # ---
             time.sleep(0.1)
-
             target_pos: Optional[Tuple[int, int]] = None
             if isinstance(pos, (str, list)):
                 if not self.image_processor:
                     self.last_error = "未设置图像处理器，无法模板匹配"
                     return False
-
                 screen = self.capture_screen()
                 if screen is None:
                     self.last_error = "截图失败，无法模板匹配"
@@ -735,10 +828,9 @@ class WindowsDevice(BaseDevice):
                     templates = [pos]
                 else:
                     templates = pos
-
                 match_result = None
                 matched_template = None
-                
+
                 # 尝试每个模板，直到找到匹配
                 for template_name in templates:
                     match_result = self.image_processor.match_template(
@@ -754,11 +846,9 @@ class WindowsDevice(BaseDevice):
                     if match_result is not None:
                         matched_template = template_name
                         break
-
                 if match_result is None:
                     self.last_error = f"所有模板匹配失败: {templates}"
                     return False
-
                 if isinstance(match_result, np.ndarray):
                     match_rect = tuple(match_result.tolist())
                 else:
@@ -766,7 +856,6 @@ class WindowsDevice(BaseDevice):
                 if len(match_rect) != 4:
                     self.last_error = f"模板结果格式错误: {match_rect}"
                     return False
-
                 target_pos = self.image_processor.get_center(match_rect)
                 if isinstance(target_pos, (list, np.ndarray)):
                     target_pos = tuple(map(int, target_pos))
@@ -775,35 +864,30 @@ class WindowsDevice(BaseDevice):
                     return False
                 target_pos = (int(target_pos[0]), int(target_pos[1]))
                 self.logger.debug(f"模板 {matched_template} 中心点坐标: {target_pos}")
-
-                is_base_coord = False
+                is_base_coord = False  # 如果是模板匹配，pos已经是客户区坐标了
             else:
                 target_pos = tuple(map(int, pos))
-
-            if not target_pos or len(target_pos) != 2:
-                self.last_error = f"无效的点击位置: {target_pos}"
-                return False
+                if not target_pos or len(target_pos) != 2:
+                    self.last_error = f"无效的点击位置: {target_pos}"
+                    return False
 
             client_pos = target_pos
             if is_base_coord and self.coord_transformer:
                 client_pos = self.coord_transformer.convert_original_to_current_client(*target_pos)
                 self.logger.debug(f"原始坐标 {target_pos} → 当前客户区坐标 {client_pos}")
 
-            screen_physical_x, screen_physical_y = self.coord_transformer.convert_current_client_to_screen(*client_pos)
-
+            screen_physical_x, screen_physical_y = self.coord_transformer.convert_current_client_to_screen(
+                *client_pos)
             win32api.SetCursorPos((screen_physical_x, screen_physical_y))
             time.sleep(0.1)
-
             down_event = win32con.MOUSEEVENTF_RIGHTDOWN if right_click else win32con.MOUSEEVENTF_LEFTDOWN
             up_event = win32con.MOUSEEVENTF_RIGHTUP if right_click else win32con.MOUSEEVENTF_LEFTUP
-
             for _ in range(click_time):
                 win32api.mouse_event(down_event, 0, 0, 0, 0)
                 time.sleep(duration)
                 win32api.mouse_event(up_event, 0, 0, 0, 0)
                 if click_time > 1:
                     time.sleep(0.1)
-
             self.logger.info(
                 f"点击成功 | 物理坐标: ({screen_physical_x},{screen_physical_y}) | "
                 f"模板: {matched_template if isinstance(pos, (str, list)) else '直接坐标'}"
@@ -814,27 +898,29 @@ class WindowsDevice(BaseDevice):
             self.logger.error(self.last_error, exc_info=True)
             return False
 
-
     def swipe(
-        self,
-        start_x: int,
-        start_y: int,
-        end_x: int,
-        end_y: int,
-        duration: float = 0.3,
-        steps: int = 10,
-        is_base_coord: bool = False
+            self,
+            start_x: int,
+            start_y: int,
+            end_x: int,
+            end_y: int,
+            duration: float = 0.3,
+            steps: int = 10,
+            is_base_coord: bool = False
     ) -> bool:
         """鼠标滑动操作"""
         if not self.hwnd or self.state != DeviceState.CONNECTED:
             self.last_error = "未连接到窗口或状态异常"
             return False
-
         try:
             self.restore_window()
-            self.set_foreground()
+            # --- 修改：调用 set_foreground 确保前台，但遵循新规则 ---
+            if not self.set_foreground():
+                 self.last_error = "无法将窗口置于前台，滑动操作终止"
+                 self.logger.error(self.last_error)
+                 return False
+            # ---
             time.sleep(0.1)
-
             start_pos = (start_x, start_y)
             end_pos = (end_x, end_y)
             if is_base_coord and self.coord_transformer:
@@ -860,7 +946,6 @@ class WindowsDevice(BaseDevice):
                 win32api.SetCursorPos((x, y))
                 time.sleep(step_delay)
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
             self.logger.debug(
                 f"滑动成功 | 客户区: {start_pos} → {end_pos} | 时长: {duration}s | 步数: {steps}"
             )
@@ -875,16 +960,18 @@ class WindowsDevice(BaseDevice):
         if not self.hwnd or self.state != DeviceState.CONNECTED:
             self.last_error = "未连接到窗口或状态异常"
             return False
-
         try:
             self.restore_window()
-            self.set_foreground()
+            # --- 修改：调用 set_foreground 确保前台，但遵循新规则 ---
+            if not self.set_foreground():
+                 self.last_error = "无法将窗口置于前台，按键操作终止"
+                 self.logger.error(self.last_error)
+                 return False
+            # ---
             time.sleep(0.1)
-
             pydirectinput.keyDown(key)
             time.sleep(duration)
             pydirectinput.keyUp(key)
-
             self.logger.debug(f"按键成功: {key}（时长: {duration}s）")
             return True
         except Exception as e:
@@ -897,12 +984,15 @@ class WindowsDevice(BaseDevice):
         if not self.hwnd or self.state != DeviceState.CONNECTED:
             self.last_error = "未连接到窗口或状态异常"
             return False
-
         try:
             self.restore_window()
-            self.set_foreground()
+            # --- 修改：调用 set_foreground 确保前台，但遵循新规则 ---
+            if not self.set_foreground():
+                 self.last_error = "无法将窗口置于前台，文本输入操作终止"
+                 self.logger.error(self.last_error)
+                 return False
+            # ---
             time.sleep(0.1)
-
             if len(text) > 5:
                 import pyperclip
                 pyperclip.copy(text)
@@ -914,7 +1004,6 @@ class WindowsDevice(BaseDevice):
                 time.sleep(0.1)
                 self.logger.debug(f"文本粘贴成功: {text[:20]}...（长度: {len(text)}）")
                 return True
-
             for char in text:
                 if char == ' ':
                     self.key_press("space", 0.02)
@@ -931,8 +1020,7 @@ class WindowsDevice(BaseDevice):
                     win32api.keybd_event(ord(char.upper()), 0, win32con.KEYEVENTF_KEYUP, 0)
                     if shift_pressed:
                         win32api.keybd_event(win32con.VK_SHIFT, 0, win32con.KEYEVENTF_KEYUP, 0)
-                time.sleep(interval)
-
+                    time.sleep(interval)
             self.logger.debug(f"文本输入成功: {text}")
             return True
         except Exception as e:
@@ -941,23 +1029,27 @@ class WindowsDevice(BaseDevice):
             return False
 
     def exists(
-        self, 
-        template_name: Union[str, List[str]], 
-        threshold: float = 0.6,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-        is_base_roi: bool = False
+            self,
+            template_name: Union[str, List[str]],
+            threshold: float = 0.6,
+            roi: Optional[Tuple[int, int, int, int]] = None,
+            is_base_roi: bool = False
     ) -> Optional[Tuple[int, int]]:
         """检查模板是否存在（支持多个模板）"""
         try:
             if not self.hwnd:
                 self.last_error = "未连接到窗口"
                 return None
-
-            self.set_foreground()
+            # --- 修改：调用 set_foreground 确保前台，但遵循新规则 ---
+            if not self.set_foreground():
+                 self.logger.debug(f"无法将窗口置于前台，exists检查可能不准确")
+                 # 这里可以选择返回None或继续尝试截图
+                 # 为了兼容性，暂时选择继续
+                 # return None 
+            # ---
             if not self.image_processor:
                 self.last_error = "未设置图像处理器"
                 return None
-
             screen = self.capture_screen()
             if screen is None:
                 self.logger.debug(f"截图为空，无法检查模板: {template_name}")
@@ -968,9 +1060,8 @@ class WindowsDevice(BaseDevice):
                 templates = [template_name]
             else:
                 templates = template_name
-
             self.logger.debug(f"检查模板: {templates}（阈值: {threshold}）")
-            
+
             # 尝试每个模板，直到找到匹配
             for template in templates:
                 match_result = self.image_processor.match_template(
@@ -983,7 +1074,6 @@ class WindowsDevice(BaseDevice):
                     roi=roi,
                     is_base_roi=is_base_roi
                 )
-
                 if match_result is not None:
                     if isinstance(match_result, np.ndarray):
                         match_rect = tuple(match_result.tolist())
@@ -992,20 +1082,17 @@ class WindowsDevice(BaseDevice):
                     if len(match_rect) != 4:
                         self.logger.warning(f"模板结果格式无效: {match_rect}，模板: {template}")
                         continue
-
                     center_pos = self.image_processor.get_center(match_rect)
                     if isinstance(center_pos, (list, np.ndarray)):
                         center_pos = tuple(map(int, center_pos))
                     if not isinstance(center_pos, tuple) or len(center_pos) != 2:
                         self.logger.warning(f"模板中心点无效: {center_pos}，模板: {template}")
                         continue
-
                     self.logger.debug(
                         f"模板找到: {template} | 矩形区域: {match_rect} | "
                         f"中心点: {center_pos}"
                     )
                     return center_pos
-
             self.logger.debug(f"所有模板未找到: {templates}")
             return None
         except Exception as e:
@@ -1013,41 +1100,36 @@ class WindowsDevice(BaseDevice):
             return None
 
     def wait(
-        self, 
-        template_name: Union[str, List[str]], 
-        timeout: float = 10.0, 
-        interval: float = 0.5,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-        is_base_roi: bool = False
+            self,
+            template_name: Union[str, List[str]],
+            timeout: float = 10.0,
+            interval: float = 0.5,
+            roi: Optional[Tuple[int, int, int, int]] = None,
+            is_base_roi: bool = False
     ) -> Optional[Tuple[int, int]]:
         """等待模板出现（支持多个模板）"""
         start_time = time.time()
-        
         # 处理单个模板或多个模板
         if isinstance(template_name, str):
             templates = [template_name]
         else:
             templates = template_name
-            
         self.logger.debug(f"开始等待模板: {templates}（超时: {timeout}s，间隔: {interval}s）")
-
         while time.time() - start_time < timeout:
             center_pos = self.exists(templates, roi=roi, is_base_roi=is_base_roi)
             if center_pos is not None:
-                self.logger.info(f"模板 {templates} 已找到（等待耗时: {time.time()-start_time:.1f}s），中心点: {center_pos}")
+                self.logger.info(
+                    f"模板 {templates} 已找到（等待耗时: {time.time() - start_time:.1f}s），中心点: {center_pos}")
                 return center_pos
             time.sleep(interval)
-
         self.last_error = f"等待模板超时: {templates}（{timeout}s）"
         self.logger.error(self.last_error)
         return None
-
 
     def get_state(self) -> DeviceState:
         """获取设备状态"""
         if not self.hwnd:
             return DeviceState.DISCONNECTED
-
         try:
             if not win32gui.IsWindow(self.hwnd):
                 self.hwnd = None
@@ -1064,7 +1146,6 @@ class WindowsDevice(BaseDevice):
         if secs <= 0:
             self.logger.warning(f"无效睡眠时间: {secs}秒")
             return False
-
         try:
             time.sleep(secs)
             self.logger.debug(f"设备睡眠完成: {secs}秒")
