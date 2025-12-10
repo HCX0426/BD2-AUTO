@@ -8,7 +8,7 @@ import numpy as np
 
 from .config import (DEFAULT_BASE_RESOLUTION, DEFAULT_CHECK_ELEMENT_DELAY,
                      DEFAULT_CLICK_DELAY, DEFAULT_DEVICE_URI,
-                     DEFAULT_DPI_SCALE, DEFAULT_KEY_DURATION,
+                     DEFAULT_KEY_DURATION,
                      DEFAULT_OCR_ENGINE, DEFAULT_SCREENSHOT_DELAY,
                      DEFAULT_TASK_TIMEOUT, DEFAULT_TEXT_FUZZY_MATCH,
                      DEFAULT_WINDOW_OPERATION_DELAY, LOG_CONFIG)
@@ -26,8 +26,7 @@ class Auto:
         self,
         ocr_engine: str = DEFAULT_OCR_ENGINE,
         device_uri: str = DEFAULT_DEVICE_URI,
-        base_resolution: Tuple[int, int] = DEFAULT_BASE_RESOLUTION,
-        dpi_scale: float = DEFAULT_DPI_SCALE
+        base_resolution: Tuple[int, int] = DEFAULT_BASE_RESOLUTION
     ):
         # 线程安全控制
         self.lock = threading.Lock()
@@ -46,14 +45,12 @@ class Auto:
         # 坐标转换初始化
         self.coord_transformer = CoordinateTransformer(
             original_base_res=base_resolution,
-            original_dpi=dpi_scale,
             logger=self.logger
         )
 
         # 图像处理器初始化
         self.image_processor = ImageProcessor(
             original_base_res=base_resolution,
-            original_dpi=dpi_scale,
             logger=self.logger,
             coord_transformer=self.coord_transformer
         )

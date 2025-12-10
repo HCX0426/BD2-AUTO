@@ -3,7 +3,6 @@ import numpy as np
 import os
 from typing import Optional, Tuple, Dict, List, Union
 import logging
-import win32gui
 
 # 导入坐标转换器
 from auto_control.config.image_config import TEMPLATE_DIR, TEMPLATE_EXTENSIONS
@@ -11,12 +10,16 @@ from auto_control.coordinate_transformer import CoordinateTransformer
 
 
 class ImageProcessor:
-    """图像处理器：通用模板匹配优化（支持窗口化 + DPI缩放 + 多尺度匹配）"""
+    """
+    图像处理器：通用模板匹配优化（支持窗口化 + DPI缩放 + 多尺度匹配）
+    注意：所有模板必须在目标应用全屏运行时录制，
+    且 original_base_res 必须设置为录制时的物理屏幕分辨率（如 1920x1080）。
+    窗口模式下运行时会自动根据 DPI 和客户区尺寸进行适配。
+    """
 
     def __init__(
         self,
         original_base_res: Tuple[int, int],
-        original_dpi: float,
         logger: Optional[logging.Logger] = None,
         coord_transformer: Optional[CoordinateTransformer] = None,
         template_dir: str = TEMPLATE_DIR
@@ -26,10 +29,9 @@ class ImageProcessor:
         self.templates: Dict[str, np.ndarray] = {}
         self.coord_transformer = coord_transformer
         self.original_base_res = original_base_res
-        self.original_dpi = original_dpi
 
         # 调试目录
-        self.debug_img_dir = os.path.join(os.getcwd(), "debug", "image")
+        self.debug_img_dir = os.path.join(os.getcwd(), "debug", "template_image")
         os.makedirs(self.debug_img_dir, exist_ok=True)
         self.logger.info(f"调试图片保存目录: {self.debug_img_dir}")
 
@@ -47,7 +49,7 @@ class ImageProcessor:
         self.load_all_templates()
         self.logger.info(
             f"初始化完成 | 加载模板数: {len(self.templates)} | "
-            f"原始基准分辨率: {self.original_base_res} | 原始DPI: {self.original_dpi}"
+            f"原始基准分辨率: {self.original_base_res}"
         )
 
     # ========== 1. 通用模板加载（灰度+梯度融合） ==========
@@ -82,53 +84,70 @@ class ImageProcessor:
     def _scale_template_to_current_size(
         self,
         template: np.ndarray,
-        current_dpi_scale: float,
+        dpi_scale: float,
         hwnd: Optional[int] = None,
     ) -> Optional[np.ndarray]:
+        """
+        将模板缩放到匹配当前显示大小和 DPI 的尺寸。
+
+        注意：此方法假设 coord_transformer._current_client_size 存储的是逻辑像素尺寸。
+        """
         if not self.coord_transformer:
+            self.logger.warning("_scale_template_to_current_size: 未设置 coord_transformer。")
             return template
 
-        logical_w, logical_h = self.coord_transformer._current_client_size
+        try:
+            # === 1. 判断窗口是否为全屏 ===
+            is_fullscreen = self.coord_transformer._is_current_window_fullscreen(hwnd)
 
-        # === 关键：使用 CoordinateTransformer 判断是否全屏 ===
-        is_fullscreen = self.coord_transformer._is_current_window_fullscreen(hwnd)
+            # === 2. 获取当前的逻辑客户区尺寸 ===
+            logical_client_w, logical_client_h = self.coord_transformer._current_client_size
 
-        # === 确定物理客户区尺寸 ===
-        if is_fullscreen:
-            physical_w, physical_h = logical_w, logical_h
-            self.logger.debug("检测到全屏模式，物理尺寸 = 逻辑尺寸")
-        else:
-            # 窗口化：逻辑尺寸 / DPI = 物理像素尺寸
-            physical_w = int(round(logical_w / current_dpi_scale))
-            physical_h = int(round(logical_h / current_dpi_scale))
+            # === 3. 计算当前窗口的物理尺寸 ===
+            # 这个物理尺寸是用于与原始基准分辨率比较的
+            current_phys_w = logical_client_w * dpi_scale
+            current_phys_h = logical_client_h * dpi_scale
 
-        if physical_w <= 0 or physical_h <= 0:
-            self.logger.error(f"无效物理客户区: ({physical_w}, {physical_h})")
+            # === 4. 获取原始基准分辨率（物理像素）===
+            orig_base_w, orig_base_h = self.original_base_res
+
+            # === 5. 计算缩放比例 ===
+            # 使用当前物理尺寸与原始基准物理尺寸的比例
+            # 我们只关心宽度方向的缩放，因为通常 UI 是等比缩放的
+            total_scale = current_phys_w / orig_base_w
+
+            # 如果是全屏模式，可能需要考虑高度比例，但这里简化处理
+            if is_fullscreen:
+                # 全屏模式下，可以使用更复杂的缩放策略
+                # 但为了简单，我们先保持一致
+                pass
+
+            # === 6. 验证并应用最终缩放 ===
+            if total_scale <= 0:
+                self.logger.error(f"_scale_template_to_current_size: 无效的总缩放因子: {total_scale}")
+                return template
+
+            scaled_w = max(self.min_template_size[0], int(round(template.shape[1] * total_scale)))
+            scaled_h = max(self.min_template_size[1], int(round(template.shape[0] * total_scale)))
+
+            interpolation = cv2.INTER_AREA if total_scale < 1.0 else cv2.INTER_CUBIC
+            scaled_template = cv2.resize(template, (scaled_w, scaled_h), interpolation=interpolation)
+
+            self.logger.debug(
+                f"模板缩放完成 | 模式: {'全屏' if is_fullscreen else '窗口'} | "
+                f"DPI: {dpi_scale:.2f} | "
+                f"逻辑客户区: ({logical_client_w}, {logical_client_h}) | "
+                f"物理客户区: ({current_phys_w:.1f}, {current_phys_h:.1f}) | "
+                f"原始基准分辨率: {self.original_base_res} | "
+                f"总缩放因子: {total_scale:.4f} | "
+                f"缩放后模板尺寸: {scaled_template.shape[:2]}"
+            )
+
+            return scaled_template
+
+        except Exception as e:
+            self.logger.error(f"_scale_template_to_current_size 执行失败: {e}", exc_info=True)
             return template
-
-        orig_base_w, orig_base_h = self.original_base_res
-
-        res_scale_x = physical_w / orig_base_w
-        res_scale_y = physical_h / orig_base_h
-        # 全屏时不需要再乘 DPI（因为物理尺寸已正确）
-        total_scale = min(res_scale_x, res_scale_y) * (1.0 if is_fullscreen else current_dpi_scale)
-
-        scaled_w = max(self.min_template_size[0], int(round(template.shape[1] * total_scale)))
-        scaled_h = max(self.min_template_size[1], int(round(template.shape[0] * total_scale)))
-
-        interpolation = cv2.INTER_CUBIC if total_scale >= 1.0 else cv2.INTER_AREA
-        scaled_template = cv2.resize(template, (scaled_w, scaled_h), interpolation=interpolation)
-
-        self.logger.debug(
-            f"模板缩放完成 | "
-            f"模式: {'全屏' if is_fullscreen else '窗口'} | "
-            f"DPI比例: {current_dpi_scale:.2f} | "
-            f"物理客户区: ({physical_w}, {physical_h}) | "
-            f"分辨率比例: ({res_scale_x:.3f}, {res_scale_y:.3f}) | "
-            f"总比例: {total_scale:.4f} | "
-            f"缩放后尺寸: {scaled_template.shape[:2]}"
-        )
-        return scaled_template
         
 
     # ========== 3. 辅助函数：边缘提取 ==========
@@ -137,7 +156,7 @@ class ImageProcessor:
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
         return cv2.Canny(gray, 30, 120)
 
-    # ========== 4. 辅助函数：形状一致性校验（替代 Hu 矩） ==========
+    # ========== 4. 辅助函数：形状一致性校验 ==========
     def _check_shape_consistency(self, patch: np.ndarray, template: np.ndarray) -> bool:
         try:
             edge_p = self._to_edge(patch)
@@ -158,16 +177,12 @@ class ImageProcessor:
         self,
         image: np.ndarray,
         template: Union[str, np.ndarray],
-        current_dpi: float = 1.0,
+        dpi_scale: float = 1.0,
         hwnd: Optional[int] = None,
-        threshold: float = 0.8,  # 默认提高到 0.8
-        is_base_template: bool = True,
-        preprocess_params: Optional[Dict] = None,
-        physical_screen_res: Optional[Tuple[int, int]] = None,
+        threshold: float = 0.8,
+        scale_template: bool = True,
         roi: Optional[Tuple[int, int, int, int]] = None,
-        is_base_roi: bool = False,
-        use_two_stage: bool = True,
-        top_k_candidates: int = 3,
+        is_base_roi: bool = False
     ) -> Optional[Tuple[int, int, int, int]]:
         try:
             # -------------------------- 1. 初始化 --------------------------
@@ -197,8 +212,8 @@ class ImageProcessor:
 
             # -------------------------- 2. 缩放基础模板（仅一次） --------------------------
             base_template = template_img
-            if is_base_template:
-                base_template = self._scale_template_to_current_size(template_img, current_dpi, hwnd)
+            if scale_template:
+                base_template = self._scale_template_to_current_size(template_img, dpi_scale, hwnd)
                 if base_template is None:
                     base_template = template_img
             base_template = base_template.astype(np.uint8)
@@ -245,9 +260,18 @@ class ImageProcessor:
             if best_match and final_score >= threshold:
                 match_x, match_y, templ_w, templ_h = best_match
             else:
+                # 如果没有找到匹配项 或者 最佳分数低于阈值
                 self.logger.debug(f"所有匹配未达标 | 最高分: {final_score:.4f} | 阈值: {threshold}")
+                
+                # === 关键修改：使用 best_match 的位置来保存调试图 ===
+                if best_match is not None:
+                    match_x, match_y, templ_w, templ_h = best_match
+                else:
+                    # 如果连 best_match 都是 None，则使用默认值
+                    match_x, match_y, templ_w, templ_h = 0, 0, 10, 10
+
                 save_path = os.path.join(self.debug_img_dir, f"{template_name_safe}_unmatched_{final_score:.4f}.png")
-                self._save_match_debug_image(original_image, 0, 0, 10, 10, final_score, save_path)
+                self._save_match_debug_image(original_image, match_x, match_y, templ_w, templ_h, final_score, save_path)
                 return None
 
             # 应用 ROI 偏移
@@ -270,7 +294,6 @@ class ImageProcessor:
             self.logger.error(f"模板匹配异常失败: {str(e)}", exc_info=True)
             return None
 
-    # ========== 保留原有其他方法（无需修改） ==========
     def _create_default_logger(self) -> logging.Logger:
         logger = logging.getLogger("ImageProcessor")
         logger.setLevel(logging.INFO)
@@ -280,20 +303,22 @@ class ImageProcessor:
         logger.addHandler(handler)
         return logger
 
-    def load_all_templates(self) -> int:
-        loaded = 0
+    def load_all_templates(self) -> None:
+        """加载模板目录下所有支持格式的模板文件"""
         if not os.path.isdir(self.template_dir):
             self.logger.warning(f"模板目录不存在: {self.template_dir}")
-            return 0
+            return
+
         for root, dirs, files in os.walk(self.template_dir):
             for filename in files:
                 if filename.lower().endswith(TEMPLATE_EXTENSIONS):
                     rel_path = os.path.relpath(root, self.template_dir)
-                    template_name = os.path.join(rel_path, os.path.splitext(filename)[0]).replace('\\', '/') if rel_path != "." else os.path.splitext(filename)[0]
+                    template_name = (
+                        os.path.join(rel_path, os.path.splitext(filename)[0]).replace('\\', '/')
+                        if rel_path != "." else os.path.splitext(filename)[0]
+                    )
                     template_path = os.path.join(root, filename)
-                    if self.load_template(template_name, template_path):
-                        loaded += 1
-        return loaded
+                    self.load_template(template_name, template_path)
 
     def get_template(self, template_name: str) -> Optional[np.ndarray]:
         loaded_names = list(self.templates.keys())
@@ -384,38 +409,6 @@ class ImageProcessor:
             if image is not None:
                 return (image, (0, 0, image.shape[1], image.shape[0]))
             raise ValueError("Cannot extract ROI: input image is None")
-
-    def preprocess_image(
-        self,
-        image: np.ndarray,
-        gray: bool = True,
-        blur: bool = True,
-        blur_ksize: Tuple[int, int] = (3, 3),
-        threshold: bool = True,
-        adaptive_threshold: bool = True,
-        block_size: int = 11,
-        c: int = 2
-    ) -> np.ndarray:
-        try:
-            if image is None:
-                self.logger.error("预处理失败：图像为None")
-                raise ValueError("Input image cannot be None")
-            result = image.copy()
-            if gray and len(result.shape) == 3:
-                result = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
-            if blur and blur_ksize[0] > 1 and blur_ksize[1] > 1:
-                ksize = (blur_ksize[0] if blur_ksize[0] % 2 == 1 else blur_ksize[0] + 1, blur_ksize[1] if blur_ksize[1] % 2 == 1 else blur_ksize[1] + 1)
-                result = cv2.GaussianBlur(result, ksize, 0)
-            if threshold:
-                if adaptive_threshold:
-                    block_size = block_size if block_size % 2 == 1 else block_size + 1
-                    result = cv2.adaptiveThreshold(result, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, c)
-                else:
-                    _, result = cv2.threshold(result, 127, 255, cv2.THRESH_BINARY)
-            return result
-        except Exception as e:
-            self.logger.error(f"预处理异常: {str(e)}", exc_info=True)
-            return image if image is not None else np.array([])
 
     def get_center(self, rect: Union[Tuple[int, int, int, int], np.ndarray]) -> Tuple[int, int]:
         if rect is None:

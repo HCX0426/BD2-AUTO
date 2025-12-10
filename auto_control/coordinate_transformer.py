@@ -9,7 +9,6 @@ class CoordinateTransformer:
     def __init__(
         self,
         original_base_res: Tuple[int, int],  # 原始基准分辨率（采集坐标时的分辨率，固定不变）
-        original_dpi: float,                 # 原始基准DPI（采集坐标时的DPI，固定不变）
         logger
     ):
         """
@@ -21,15 +20,12 @@ class CoordinateTransformer:
         """
         # -------------------------- 原始固定基准（初始化后不可修改）--------------------------
         self._original_base_res = original_base_res  # 核心：原始采集的基准分辨率
-        self._original_dpi = original_dpi            # 核心：原始采集的基准DPI
         self.logger = logger
         self.logger.info(
-            f"坐标转换器初始化 | 原始基准分辨率: {self._original_base_res} | "
-            f"原始基准DPI: {self._original_dpi:.2f}"
-        )
+            f"坐标转换器初始化 | 原始基准分辨率: {self._original_base_res}")
 
         # -------------------------- 动态窗口参数（随窗口状态实时更新）--------------------------
-        self._current_client_size = (0, 0)    # 当前窗口客户区尺寸 (宽, 高)
+        self._current_client_size = (0, 0)    # 当前窗口客户区尺寸 (宽, 高)(逻辑像素)
         self._current_dpi = 1.0               # 当前窗口的DPI缩放因子（如系统设置的125%）
         self._current_handle = None           # 当前窗口句柄
 
@@ -39,9 +35,8 @@ class CoordinateTransformer:
         current_dpi: float,
         handle: Optional[int] = None
     ) -> None:
-        """
-        更新当前窗口的动态上下文（仅更新当前状态，不影响原始基准）
-        :param client_size: 当前窗口客户区尺寸 (宽, 高)
+        """ 更新当前窗口的动态上下文（仅更新当前状态，不影响原始基准）
+        :param client_size: 当前窗口客户区尺寸 (逻辑像素)
         :param current_dpi: 当前窗口的DPI缩放因子（如1.0=100%）
         :param handle: 当前窗口句柄
         """
@@ -50,37 +45,35 @@ class CoordinateTransformer:
             self.logger.error(f"无效的窗口上下文参数：客户区{client_size}，DPI{current_dpi}")
             return
 
-        self._current_client_size = client_size
+        self._current_client_size = client_size # 存储逻辑像素尺寸
         self._current_dpi = current_dpi
         self._current_handle = handle
         self.logger.debug(
-            f"窗口动态上下文更新 | 当前客户区: {self._current_client_size} | "
+            f"窗口动态上下文更新 | 当前客户区 (逻辑): {self._current_client_size} | "
             f"当前DPI: {self._current_dpi:.2f} | 窗口句柄: {self._current_handle}"
         )
 
-    def get_original_base(self) -> Tuple[Tuple[int, int], float]:
-        """获取原始基准参数（供外部查询，不可修改）"""
-        return self._original_base_res, self._original_dpi
-
     def convert_original_to_current_client(self, x: int, y: int) -> Tuple[int, int]:
-        """
-        核心转换：将"基于原始基准的坐标"转换为"当前窗口的客户区坐标"
-        """
+        """ 核心转换：将"基于原始基准的坐标 (物理)"转换为"当前窗口的客户区坐标 (逻辑)" """
         # 1. 校验必要参数
         if not all(self._original_base_res) or not all(self._current_client_size):
             raise ValueError("原始基准或当前窗口上下文未初始化")
-        # 2. 提取原始基准与当前窗口参数
-        orig_w, orig_h = self._original_base_res
-        curr_w, curr_h = self._current_client_size
-        # 3. 转换逻辑：基于原始基准与当前客户区的比例
+
+        # 2. 提取原始基准 (物理) 与当前窗口参数 (逻辑)
+        orig_w, orig_h = self._original_base_res # 物理像素
+        curr_w, curr_h = self._current_client_size # 逻辑像素
+
+        # 3. 转换逻辑：基于原始基准物理尺寸与当前客户区逻辑尺寸的比例
+        #    这意味着原始坐标系是物理像素，目标坐标系是逻辑像素。
         scale_x = curr_w / orig_w
         scale_y = curr_h / orig_h
         final_x = int(round(x * scale_x))
         final_y = int(round(y * scale_y))
+
         self.logger.debug(
-            f"坐标转换 | 原始基准坐标: ({x},{y}) "
-            f"→ 当前客户区坐标: ({final_x},{final_y}) "
-            f"[原始基准: {orig_w}x{orig_h}, 当前窗口: {curr_w}x{curr_h}]"
+            f"坐标转换 | 原始基准坐标 (物理): ({x},{y}) "
+            f"→ 当前客户区坐标 (逻辑): ({final_x},{final_y}) "
+            f"[原始基准 (物理): {orig_w}x{orig_h}, 当前客户区 (逻辑): {curr_w}x{curr_h}]"
         )
         return final_x, final_y
 
@@ -110,13 +103,11 @@ class CoordinateTransformer:
         # 4. 确保缩放后尺寸有效（避免极端情况导致的0尺寸）
         final_w = max(1, final_w)
         final_h = max(1, final_h)
-        # --- 修改部分：更新日志中的变量名 ---
         self.logger.debug(
-            f"矩形转换 | 原始基准矩形: {rect} "
-            f"→ 当前客户区矩形: ({final_x},{final_y},{final_w},{final_h}) "
-            f"[原始基准: {orig_w}x{orig_h}, 当前窗口: {curr_w}x{curr_h}, 缩放比: {scale_ratio:.2f}]"
+            f"矩形转换 | 原始基准矩形 (物理): {rect} "
+            f"→ 当前客户区矩形 (逻辑): ({final_x},{final_y},{final_w},{final_h}) "
+            f"[原始基准 (物理): {orig_w}x{orig_h}, 当前客户区 (逻辑): {curr_w}x{curr_h}, 缩放比: {scale_ratio:.2f}]"
         )
-        # --- 修改结束 ---
         return (final_x, final_y, final_w, final_h)
 
     def convert_current_client_to_screen(

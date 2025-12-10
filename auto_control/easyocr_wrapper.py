@@ -1,3 +1,4 @@
+import os
 import cv2
 import numpy as np
 from auto_control.base_ocr import BaseOCR
@@ -27,6 +28,11 @@ class EasyOCRWrapper(BaseOCR):
         default_langs = get_default_languages('easyocr').split('+')
         self._lang_list = self._convert_lang_param(default_langs)
         self._current_lang = '+'.join(default_langs)
+
+        # 调试目录
+        self.debug_img_dir = os.path.join(os.getcwd(), "debug", "ocr_image")
+        os.makedirs(self.debug_img_dir, exist_ok=True)
+        self.logger.info(f"调试图片保存目录: {self.debug_img_dir}")
 
         # 创建EasyOCR Reader实例
         self.reader = easyocr.Reader(
@@ -107,6 +113,11 @@ class EasyOCRWrapper(BaseOCR):
                     'bbox': (x, y, w, h),
                     'confidence': float(confidence)
                 })
+            
+            if formatted_results:
+                save_filename = f"easyocr_{lang}_match.png"
+                save_path = os.path.join(self.debug_img_dir, save_filename)
+                self._save_ocr_debug_image(image, formatted_results, save_path)
 
             self.logger.info(f"文本检测完成 | 有效结果数量: {len(formatted_results)}")
             return formatted_results
@@ -157,6 +168,12 @@ class EasyOCRWrapper(BaseOCR):
                     })
                 formatted_batch_results.append(formatted)
                 self.logger.debug(f"批量图像 {idx}/{len(images)} 处理完成 | 结果数: {len(formatted)}")
+            
+            for idx, results in enumerate(formatted_batch_results, 1):
+                if results:
+                    save_filename = f"easyocr_batch_{idx}_{lang}_match.png"
+                    save_path = os.path.join(self.debug_img_dir, save_filename)
+                    self._save_ocr_debug_image(images[idx-1], results, save_path)
 
             self.logger.info("批量处理全部完成")
             return formatted_batch_results
@@ -164,3 +181,29 @@ class EasyOCRWrapper(BaseOCR):
         except Exception as e:
             self.logger.error(f"EasyOCR批量处理失败: {str(e)}", exc_info=True)
             return []
+
+
+    def _save_ocr_debug_image(self, original_image: np.ndarray, results: List[Dict], save_path: str) -> None:
+        """
+        根据OCR结果保存带有标记的调试图像。
+        :param original_image: 原始图像
+        :param results: OCR识别的结果列表
+        :param save_path: 调试图像保存路径
+        """
+        try:
+            debug_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR) if len(original_image.shape) == 2 else original_image.copy()
+            
+            for result in results:
+                x, y, w, h = result['bbox']
+                text = result['text']
+                confidence = result['confidence']
+                
+                # 绘制矩形框和文本信息
+                cv2.rectangle(debug_image, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                cv2.putText(debug_image, f"{text} ({confidence:.2f})", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+
+            cv2.imwrite(save_path, debug_image)
+            self.logger.info(f"OCR调试图片保存成功: {save_path}")
+        except Exception as e:
+            self.logger.error(f"保存OCR调试图片失败: {str(e)}", exc_info=True)
