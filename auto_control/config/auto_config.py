@@ -15,3 +15,7 @@ DEFAULT_CLICK_DELAY = 0.0  # 点击操作默认延迟
 DEFAULT_KEY_DURATION = 0.1  # 默认按键持续时间(秒)
 
 DEFAULT_BASE_RESOLUTION = (1920, 1080)  # 坐标采集默认分辨率
+
+# 路径配置
+TEMPLATE_DIR = os.path.join(PROJECT_ROOT, 'auto_tasks', 'pc', 'images')  # 默认模板路径
+TEMPLATE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp')  # 支持的图片格式
