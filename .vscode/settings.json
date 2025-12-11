@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "C:\\Users\\hcx\\miniconda3\\envs\\py312\\python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.terminal.activateEnvInCurrentTerminal": true,
+  "terminal.integrated.defaultProfile.windows": "Command Prompt"
+}
