@@ -1,16 +1,20 @@
-# 自动化框架全局配置
+"""自动化框架全局配置"""
+from src.core.path_manager import config
 
-DEFAULT_OCR_ENGINE = "easyocr"  # 默认OCR引擎
-DEFAULT_DEVICE_URI = "Windows:///?title_re=.*BrownDust.*" # 默认设备URI
-DEFAULT_TASK_TIMEOUT = 300  # 默认任务超时时间(秒)
-DEFAULT_TEXT_FUZZY_MATCH = True  # 默认使用模糊文本匹配
-DEFAULT_WINDOW_OPERATION_DELAY = 0.0  # 窗口操作默认延迟
-DEFAULT_SCREENSHOT_DELAY = 0.0  # 截图操作默认延迟
-DEFAULT_CHECK_ELEMENT_DELAY = 0.0  # 检查元素默认延迟
-DEFAULT_CLICK_DELAY = 0.0  # 点击操作默认延迟
-DEFAULT_KEY_DURATION = 0.1  # 默认按键持续时间(秒)
 
-DEFAULT_BASE_RESOLUTION = (1920, 1080)  # 坐标采集默认分辨率
+# OCR与设备相关
+DEFAULT_OCR_ENGINE = config.get("framework.default_ocr_engine", "easyocr")  # 默认值兜底
+DEFAULT_DEVICE_URI = config.get("framework.default_device_uri", "Windows:///?title_re=.*BrownDust.*")
 
-# 路径配置
-TEMPLATE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp')  # 支持的图片格式
+# 超时与延迟相关
+DEFAULT_TASK_TIMEOUT = config.get("framework.default_task_timeout", 300)
+DEFAULT_TEXT_FUZZY_MATCH = config.get("framework.default_text_fuzzy_match", True)
+DEFAULT_WINDOW_OPERATION_DELAY = config.get("framework.default_window_operation_delay", 0.0)
+DEFAULT_SCREENSHOT_DELAY = config.get("framework.default_screenshot_delay", 0.0)
+DEFAULT_CHECK_ELEMENT_DELAY = config.get("framework.default_check_element_delay", 0.0)
+DEFAULT_CLICK_DELAY = config.get("framework.default_click_delay", 0.0)
+DEFAULT_KEY_DURATION = config.get("framework.default_key_duration", 0.1)
+
+# 分辨率与路径相关
+DEFAULT_BASE_RESOLUTION = config.get("framework.default_base_resolution", (1920, 1080))
+TEMPLATE_EXTENSIONS = tuple(config.get("framework.template_extensions", ('.png', '.jpg', '.jpeg', '.bmp')))

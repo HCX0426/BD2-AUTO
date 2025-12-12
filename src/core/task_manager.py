@@ -7,7 +7,7 @@ from src.core.path_manager import path_manager
 def load_task_modules():
     """动态加载任务模块"""
     task_mapping = {}
-    for filename in os.listdir(path_manager.get("task")):
+    for filename in os.listdir(path_manager.get("task_path")):
         if filename.endswith('.py') and not filename.startswith('__'):
             module_name = filename[:-3]
             try:

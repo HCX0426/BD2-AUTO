@@ -5,7 +5,7 @@ from src.core.path_manager import path_manager
 
 # 默认日志配置
 LOG_CONFIG = {
-    "BASE_LOG_DIR": os.path.join(path_manager.get("log"), "task.log"),  # 基础日志目录
+    "BASE_LOG_DIR": path_manager.get("log"),  # 基础日志目录
     "LOG_FILE_PREFIX": "task",  # 日志文件前缀
     "FILE_LOG_LEVEL": "DEBUG",  # 文件日志级别
     "CONSOLE_LOG_LEVEL": "INFO",  # 控制台日志级别

@@ -1,0 +1,27 @@
+{
+  "env": "prod",
+  "device": {
+    "windows_app_title": "BD2-游戏窗口",
+    "adb_path": "",
+    "adb_device_ip": ""
+  },
+  "ocr": {
+    "engine": "paddleocr",
+    "confidence": 0.65,
+    "tesseract_path": ""
+  },
+  "log": {
+    "level": "INFO",
+    "max_size": 5,
+    "backup_count": 3
+  },
+  "task": {
+    "timeout": 600,
+    "retry_count": 2,
+    "click_interval": 0.3
+  },
+  "debug": {
+    "debug_mode": false,
+    "skip_sleep": false
+  }
+}
