@@ -1,21 +1,7 @@
 import os
 import sys
 import time
-# 添加项目根目录到 sys.path
-# 区分开发环境和打包环境
-if getattr(sys, 'frozen', False):
-    # 打包环境：使用 sys._MEIPASS 作为根目录
-    project_root = sys._MEIPASS
-else:
-    # 开发环境：基于当前文件位置计算项目根目录
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(current_dir))
 
-# 将项目根目录添加到 sys.path
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-    
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QSplitter, QGroupBox, QListWidget, QListWidgetItem,
@@ -26,8 +12,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QThread, QTimer, pyqtSlot
 from PyQt6.QtGui import QFont, QTextCursor, QIcon
-from src.auto_control.core.auto import Auto
-from src.core.task_manager import AppSettingsManager, TaskConfigManager, load_task_modules
 
 class LogSignal(QWidget):
     log_updated = pyqtSignal(str)
@@ -117,15 +101,22 @@ class TaskWorker(QThread):
     
 
 class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        # 初始化管理器
-        self.config_manager = TaskConfigManager()
-        self.settings_manager = AppSettingsManager()
-        self.task_mapping = load_task_modules()
+    # 构造函数接收外部传递的实例
+    def __init__(
+        self,
+        auto_instance,
+        settings_manager,
+        config_manager,
+        task_mapping,
+        parent=None
+    ):
+        super().__init__(parent)
+        self.config_manager = config_manager
+        self.settings_manager = settings_manager
+        self.task_mapping = task_mapping
+        self.auto_instance = auto_instance  # 核心控制实例
         
         # UI状态变量
-        self.auto_instance = Auto()
         self.task_thread = None
         self.task_worker = None
         self.task_running = False
@@ -1013,9 +1004,3 @@ class MainWindow(QMainWindow):
         self.settings_manager.save_settings()
         
         super().closeEvent(event)
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
