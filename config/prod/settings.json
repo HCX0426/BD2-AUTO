@@ -1,27 +1,16 @@
 {
   "env": "prod",
-  "device": {
-    "windows_app_title": "BD2-游戏窗口",
-    "adb_path": "",
-    "adb_device_ip": ""
-  },
-  "ocr": {
-    "engine": "paddleocr",
-    "confidence": 0.65,
-    "tesseract_path": ""
-  },
-  "log": {
-    "level": "INFO",
-    "max_size": 5,
-    "backup_count": 3
-  },
-  "task": {
-    "timeout": 600,
-    "retry_count": 2,
-    "click_interval": 0.3
-  },
-  "debug": {
-    "debug_mode": false,
-    "skip_sleep": false
+  "framework": {
+    "default_ocr_engine": "easyocr",
+    "default_device_uri": "Windows:///?title_re=.*BrownDust.*",
+    "default_task_timeout": 300,
+    "default_text_fuzzy_match": true,
+    "default_window_operation_delay": 0.0,
+    "default_screenshot_delay": 0.0,
+    "default_check_element_delay": 0.0,
+    "default_click_delay": 0.0,
+    "default_key_duration": 0.1,
+    "default_base_resolution": [1920, 1080],
+    "template_extensions": [".png", ".jpg", ".jpeg", ".bmp"]
   }
 }

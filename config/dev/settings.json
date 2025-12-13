@@ -12,29 +12,5 @@
     "default_key_duration": 0.1,
     "default_base_resolution": [1920, 1080],
     "template_extensions": [".png", ".jpg", ".jpeg", ".bmp"]
-  },
-  "device": {
-    "windows_app_title": "BD2-游戏窗口",
-    "adb_path": "C:/platform-tools/adb.exe",
-    "adb_device_ip": "192.168.1.100:5555"
-  },
-  "ocr": {
-    "engine": "paddleocr",
-    "confidence": 0.7,
-    "tesseract_path": "C:/Tesseract-OCR/tesseract.exe"
-  },
-  "log": {
-    "level": "DEBUG",
-    "max_size": 10,
-    "backup_count": 5
-  },
-  "task": {
-    "timeout": 300,
-    "retry_count": 3,
-    "click_interval": 0.5
-  },
-  "debug": {
-    "debug_mode": true,
-    "skip_sleep": false
   }
 }

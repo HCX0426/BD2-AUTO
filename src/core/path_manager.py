@@ -5,8 +5,9 @@ import json
 class PathManager:
     def __init__(self):
         self.env = self._get_env()  # 自动判断 dev/prod
-        self._init_base_paths()
-        self._init_all_paths()
+        self._init_base_paths()  # 初始化基础路径（static_base/dynamic_base）
+        self._init_all_paths()   # 初始化所有具体路径（包括 task_path）
+        self._print_path_info()  # 最后打印路径信息（确保所有属性已定义）
 
     def _get_env(self) -> str:
         """自动判断环境：打包后=prod，开发环境=dev"""
@@ -15,7 +16,7 @@ class PathManager:
         return "dev"
 
     def _init_base_paths(self):
-        """初始化基础路径"""
+        """初始化基础路径（static_base/dynamic_base）"""
         self.is_packaged = getattr(sys, 'frozen', False)
         self.meipass_path = sys._MEIPASS if self.is_packaged else None
 
@@ -33,24 +34,22 @@ class PathManager:
             self.dynamic_base = os.path.join(self.static_base, "runtime", "dev")
 
         os.makedirs(self.dynamic_base, exist_ok=True)
-        print(f"[PathManager] Static base: {self.static_base} | Env: {self.env}")
-        print(f"[PathManager] Dynamic base: {self.dynamic_base}")
+        # 此处不打印，避免访问未定义的属性
 
     def _init_all_paths(self):
-        """统一定义所有路径"""
+        """统一定义所有路径（包括 task_path）"""
         # 1. 后台配置文件（settings.json）：项目核心默认配置（不暴露给UI）
         self.backend_settings_path = os.path.join(self.static_base, "config", self.env, "settings.json")
         
         # 2. UI用户配置文件（app_settings.json）：用户通过UI修改的配置（持久化）
-        # 开发环境：可放在项目根目录（方便调试）；生产环境：放在runtime（用户可访问）
         if self.is_packaged:
             self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
         else:
-            self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")  # 开发时根目录
+            self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
 
         # 3. 其他原有路径
         self.task_template_path = os.path.join(self.static_base, "src", "auto_tasks", "pc", "templates")
-        self.task_path = os.path.join(self.static_base, "src", "auto_tasks", "pc")
+        self.task_path = os.path.join(self.static_base, "src", "auto_tasks", "pc")  # 定义 task_path
         self.log_path = os.path.join(self.dynamic_base, "logs")
         self.cache_path = os.path.join(self.dynamic_base, "cache")
         self.task_configs_path = os.path.join(self.dynamic_base, "task_configs.json")
@@ -59,7 +58,7 @@ class PathManager:
 
         # 收集所有需要创建的目录路径
         dirs_to_create = [
-            os.path.dirname(self.ui_app_settings_path),  # UI配置文件的父目录
+            os.path.dirname(self.ui_app_settings_path),
             self.log_path,
             self.cache_path,
             self.match_temple_debug_path,
@@ -70,22 +69,25 @@ class PathManager:
         for dir_path in set(dirs_to_create):
             os.makedirs(dir_path, exist_ok=True)
 
-        # 调试打印
+    def _print_path_info(self):
+        """打印路径信息（确保所有属性已定义后执行）"""
+        print(f"[PathManager] Static base: {self.static_base} | Env: {self.env}")
+        print(f"[PathManager] Dynamic base: {self.dynamic_base}")
         print(f"[PathManager] 后台配置: {self.backend_settings_path}")
         print(f"[PathManager] UI用户配置: {self.ui_app_settings_path}")
-        print(f"[PathManager] 任务路径: {self.task_path}")
+        print(f"[PathManager] 任务路径: {self.task_path}")  # 此时 task_path 已定义
 
     def get(self, path_key: str) -> str:
-        """对外提供统一路径接口（补充新路径key）"""
+        """对外提供统一路径接口"""
         path_map = {
-            "backend_settings": self.backend_settings_path,  # 后台默认配置
-            "ui_app_settings": self.ui_app_settings_path,    # UI用户配置
+            "backend_settings": self.backend_settings_path,
+            "ui_app_settings": self.ui_app_settings_path,
             "task_template": self.task_template_path,
             "log": self.log_path,
             "cache": self.cache_path,
             "task_configs": self.task_configs_path,
-            "app_settings": self.ui_app_settings_path, 
-            "task_path": self.task_path,
+            "app_settings": self.ui_app_settings_path,
+            "task_path": self.task_path,  # 对外提供 task_path
             "match_temple_debug": self.match_temple_debug_path,
             "match_ocr_debug": self.match_ocr_debug_path,
         }
@@ -93,7 +95,6 @@ class PathManager:
 
 # 全局路径单例
 path_manager = PathManager()
-
 
 # ------------------------------
 # 配置加载逻辑（明确优先级：UI用户配置 > 后台默认配置）
