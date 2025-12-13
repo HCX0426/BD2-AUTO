@@ -187,3 +187,20 @@ coll = COLLECT(
     upx_exclude=[],
     name="BD2-AUTO",
 )
+
+# ------------------- 自动清理 build 文件夹 -------------------
+print("打包流程完成，开始清理 build 文件夹...") 
+try:
+    import shutil
+    build_dir = project_root / "build" # 构建 build 目录路径
+    if build_dir.exists() and build_dir.is_dir():
+        shutil.rmtree(build_dir) # 删除整个 build 目录及其内容
+        print(f"已成功删除 build 文件夹: {build_dir}")
+    else:
+        print(f"警告：未找到 build 文件夹或路径非目录: {build_dir}")
+except Exception as e:
+    # 捕获可能的异常（如权限不足等），避免中断打包结果
+    print(f"清理 build 文件夹时出错: {e}")
+    print("请注意手动清理 build 文件夹。")
+
+print("清理流程结束")

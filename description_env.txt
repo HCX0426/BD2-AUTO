@@ -14,3 +14,6 @@ pip install easyocr==1.7.2 PyQt6==6.10.1 opencv-contrib-python==4.12.0.88
 pyinstaller packaging/pyinstaller/main.spec
 cd /d D:\BD2-AUTO\dist\BD2-AUTO
 BD2-AUTO.exe > app.log 2>&1
+
+cd /d C:\Users\hcx\Desktop\BD2-AUTO\packaging
+build.bat > build_output.log 2>&1
