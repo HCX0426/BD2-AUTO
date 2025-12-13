@@ -1,0 +1,16 @@
+# 1. 创建 Conda 环境（指定Python 3.12.12）
+conda create -n bd2-auto-cpu python=3.12.12
+conda activate bd2-auto-cpu  # 激活环境
+
+# 2. 安装依赖（优先安装CPU版PyTorch，再装其他库）
+# 安装CPU版PyTorch+torchvision（适配Python 3.12，无CUDA）
+pip install torch==2.4.1 torchvision==0.19.1 -f https://download.pytorch.org/whl/cpu/torch_stable.html
+
+# 安装项目其他依赖
+pip install pywin32==311 pillow==12.0.0 psutil==7.1.3 pyperclip==1.11.0 PyDirectInput==1.0.4
+pip install easyocr==1.7.2 PyQt6==6.10.1 opencv-contrib-python==4.12.0.88
+
+# 打包测试
+pyinstaller packaging/pyinstaller/main.spec
+cd /d D:\BD2-AUTO\dist\BD2-AUTO
+BD2-AUTO.exe > app.log 2>&1

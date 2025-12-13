@@ -7,7 +7,49 @@ project_root = Path(os.getcwd())
 if not (project_root / "src").exists():
     raise FileNotFoundError(f"无法确定项目根目录，请在项目根目录执行打包命令。当前目录: {project_root}")
 
-# 资源文件配置（优化目录整体打包，避免文件遗漏）
+# -------------------------- 获取项目统一的OCR模型路径 --------------------------
+# 开发环境：runtime/dev/ocr_models（本地开发时模型存放目录，与PathManager定义一致）
+dev_ocr_model_dir = project_root / "runtime" / "dev" / "ocr_models"
+# 确保开发环境模型目录存在（避免打包时路径不存在报错，无需手动创建）
+dev_ocr_model_dir.mkdir(parents=True, exist_ok=True)
+
+# 系统默认EasyOCR模型目录（用户本地缓存）
+sys_easyocr_model_dir = Path.home() / ".EasyOCR" / "model"
+
+# -------------------------- 适配模型命名（craft_mlt_25k.pth = detect.pth） --------------------------
+def get_ocr_model_path(model_name: str) -> Path:
+    """
+    获取OCR模型文件路径（适配不同版本的模型命名）
+    - 检测模型：detect.pth → craft_mlt_25k.pth（你的环境中实际名称）
+    - 简体中文模型：ch_sim_g2.pth → zh_sim_g2.pth（你的环境中实际名称）
+    """
+    # 模型名称映射（适配你的环境）
+    model_name_map = {
+        "detect.pth": "craft_mlt_25k.pth",
+        "ch_sim_g2.pth": "zh_sim_g2.pth"
+    }
+    actual_model_name = model_name_map.get(model_name, model_name)
+
+    # 优先检查项目内模型目录
+    project_model_path = dev_ocr_model_dir / actual_model_name
+    if project_model_path.exists():
+        return project_model_path
+    
+    # 其次检查系统默认目录
+    sys_model_path = sys_easyocr_model_dir / actual_model_name
+    if sys_model_path.exists():
+        return sys_model_path
+    
+    # 若都不存在，抛出明确错误
+    raise FileNotFoundError(
+        f"OCR模型文件 {actual_model_name} 未找到！\n"
+        f"请将以下2个模型文件放置到项目内 {dev_ocr_model_dir} 目录：\n"
+        f"1. 检测模型：craft_mlt_25k.pth（对应detect.pth）\n"
+        f"2. 简体中文模型：zh_sim_g2.pth（对应ch_sim_g2.pth）\n"
+        f"当前你的模型目录里已有这两个文件，直接复制到 {dev_ocr_model_dir} 即可。"
+    )
+
+# 资源文件配置
 datas = [
     # 配置文件（开发/生产环境）
     (str(project_root / "config"), "config"),  # 整体打包config目录，包含dev和prod
@@ -18,6 +60,10 @@ datas = [
     # 运行时配置（开发环境的任务配置会覆盖到生产环境路径）
     (str(project_root / "runtime/dev/task_configs.json"), "runtime/prod"),
     (str(project_root / "runtime/dev/app_settings.json"), "runtime/prod"),  # 统一UI配置到prod目录
+    
+    # -------------------------- 使用实际模型名称打包 --------------------------
+    (str(get_ocr_model_path("detect.pth")), "runtime/prod/ocr_models"),  # 实际打包craft_mlt_25k.pth
+    (str(get_ocr_model_path("ch_sim_g2.pth")), "runtime/prod/ocr_models"),  # 实际打包zh_sim_g2.pth
 ]
 
 # 隐藏导入（保持必要模块，移除重复项）
@@ -62,7 +108,6 @@ hiddenimports = [
 # 排除不必要的模块（进一步精简体积）
 excludes = [
     "matplotlib",
-    "numpy.testing",
     "pandas",
     "tensorboard",
     "tkinter",  # 排除未使用的GUI库
@@ -100,6 +145,11 @@ a = Analysis(
     cipher=None,
     noarchive=False,
 )
+
+# 优化：移除重复的二进制文件（避免打包多个副本）
+a.binaries = list(dict.fromkeys(a.binaries))
+# 优化：移除冗余的zipped_data（减少体积）
+a.zipped_data = [(k, v) for k, v in a.zipped_data if not k.startswith(('numpy/testing', 'scipy/test'))]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
