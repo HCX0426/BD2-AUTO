@@ -3,7 +3,7 @@ import numpy as np
 from src.auto_control.ocr.base_ocr import BaseOCR
 from src.auto_control.ocr.easyocr_wrapper import EasyOCRWrapper
 from src.auto_control.config.ocr_config import get_default_languages
-from src.auto_control.until.coordinate_transformer import CoordinateTransformer
+from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 
 class OCRProcessor:
     def __init__(self, 
@@ -77,16 +77,11 @@ class OCRProcessor:
             # 为未来可能的引擎扩展预留接口
             raise ValueError(f"不支持的OCR引擎: {self.engine_type}")
 
-    def set_coord_transformer(self, transformer: CoordinateTransformer) -> None:
-        """设置坐标转换器实例"""
-        self.coord_transformer = transformer
-        self.logger.info("坐标转换器已更新")
-
     def enable_gpu(self, enable: bool = True):
         """
         启用/禁用GPU加速（代理到基类方法）
         """
-        self.engine.enable_gpu(enable)
+        return self.engine.enable_gpu(enable)
 
     def find_text_position(self,
                         image: np.ndarray,

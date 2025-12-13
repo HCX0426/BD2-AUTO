@@ -56,13 +56,17 @@ class PathManager:
         self.match_temple_debug_path = os.path.join(self.dynamic_base, "temple_debug")
         self.match_ocr_debug_path = os.path.join(self.dynamic_base, "ocr_debug")
 
+        self.ocr_model_path = os.path.join(self.dynamic_base, "ocr_models")  # OCR模型存储目录
+
         # 收集所有需要创建的目录路径
         dirs_to_create = [
             os.path.dirname(self.ui_app_settings_path),
             self.log_path,
             self.cache_path,
             self.match_temple_debug_path,
-            self.match_ocr_debug_path
+            self.match_ocr_debug_path,
+            self.ocr_model_path,
+
         ]
 
         # 去重后循环创建目录
@@ -90,6 +94,7 @@ class PathManager:
             "task_path": self.task_path,  # 对外提供 task_path
             "match_temple_debug": self.match_temple_debug_path,
             "match_ocr_debug": self.match_ocr_debug_path,
+            "ocr_model": self.ocr_model_path,
         }
         return path_map.get(path_key, "")
 

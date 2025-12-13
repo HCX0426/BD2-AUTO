@@ -16,7 +16,7 @@ LANGUAGE_CODE_MAP = {
 
 # 各引擎的默认语言组合（使用标准化代码）
 ENGINE_DEFAULT_LANGUAGES = {
-    'easyocr': ['ch_sim', 'en']
+    'easyocr': ['ch_sim']
 }
 
 # 语言强制组合规则（针对特定引擎）
@@ -29,18 +29,12 @@ LANGUAGE_COMBINATION_RULES = {
 # 引擎基础配置
 ENGINE_CONFIGS = {
     'easyocr': {
-        'gpu': True,
+        'gpu': 'auto',  # 改为auto，支持True/False/auto
         'timeout': 60,
         'model_storage': None
     }
 }
 
-# 图像预处理配置
-PREPROCESS_CONFIG = {
-    'denoise': {'h': 10},
-    'clahe': {'clip_limit': 2.0, 'tile_size': (8, 8)},
-    'threshold': {'block_size': 11, 'c': 2}
-}
 
 def get_default_languages(engine: str) -> str:
     """获取指定引擎的默认语言组合"""

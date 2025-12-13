@@ -1,14 +1,17 @@
+import importlib
 import os
-import cv2
-import numpy as np
-from src.auto_control.ocr.base_ocr import BaseOCR
-from src.auto_control.config.ocr_config import (convert_lang_code,
-                     get_default_languages, get_engine_config,
-                     validate_lang_combination)
-
 from typing import Dict, List
 
+import cv2
+import numpy as np
+
+from src.auto_control.config.ocr_config import (convert_lang_code,
+                                                get_default_languages,
+                                                get_engine_config,
+                                                validate_lang_combination)
+from src.auto_control.ocr.base_ocr import BaseOCR
 from src.core.path_manager import path_manager
+
 
 class EasyOCRWrapper(BaseOCR):
     def __init__(self, logger=None):
@@ -17,14 +20,21 @@ class EasyOCRWrapper(BaseOCR):
         :param logger: 日志实例
         """
         super().__init__(logger=logger)
-        
+
         # 延迟导入easyocr
         import easyocr
-        
+
         # 加载引擎配置
         config = get_engine_config('easyocr')
-        self._use_gpu = config['gpu']
+        gpu_config = config['gpu']
+        if gpu_config == 'auto':
+            # 自动检测GPU可用性
+            self._use_gpu = self._check_gpu_available()
+        else:
+            # 强制启用/禁用（但启用前仍需检测可用性）
+            self._use_gpu = gpu_config and self._check_gpu_available()
         self.timeout = config['timeout']
+        self.model_storage = path_manager.get("ocr_models")
 
         # 初始化默认语言
         default_langs = get_default_languages('easyocr').split('+')
@@ -38,7 +48,7 @@ class EasyOCRWrapper(BaseOCR):
         self.reader = easyocr.Reader(
             lang_list=self._lang_list,
             gpu=self._use_gpu,
-            model_storage_directory=config.get('model_storage'),
+            model_storage_directory=self.model_storage,
             download_enabled=True  # 允许自动下载缺失的模型
         )
 
@@ -55,13 +65,18 @@ class EasyOCRWrapper(BaseOCR):
         validated_langs = validate_lang_combination(langs, 'easyocr')
         # 转换语言代码
         converted_langs = [convert_lang_code(lang, 'easyocr') for lang in validated_langs]
-        
+
         self.logger.debug(f"语言参数转换 | 原始: {langs} → 转换后: {converted_langs}")
         return converted_langs
 
     def _check_gpu_available(self) -> bool:
         """检测GPU是否可用（依赖PyTorch）"""
         try:
+            torch_spec = importlib.util.find_spec("torch")
+            if torch_spec is None:
+                # 如果找不到torch模块，则没有GPU支持
+                return False
+
             import torch
             available = torch.cuda.is_available()
             self.logger.debug(f"GPU可用性检测 | 可用: {available} | 设备数: {torch.cuda.device_count()}")
@@ -99,7 +114,7 @@ class EasyOCRWrapper(BaseOCR):
             formatted_results = []
             for result in raw_results:
                 bbox, text, confidence = result[:3]  # 前3个元素为边界框、文本、置信度
-                
+
                 # 从多边形边界框转换为矩形边界框
                 x_coords = [int(point[0]) for point in bbox]
                 y_coords = [int(point[1]) for point in bbox]
@@ -113,7 +128,7 @@ class EasyOCRWrapper(BaseOCR):
                     'bbox': (x, y, w, h),
                     'confidence': float(confidence)
                 })
-            
+
             if formatted_results:
                 save_filename = f"easyocr_{lang}_match.png"
                 save_path = os.path.join(self.debug_img_dir, save_filename)
@@ -168,7 +183,7 @@ class EasyOCRWrapper(BaseOCR):
                     })
                 formatted_batch_results.append(formatted)
                 self.logger.debug(f"批量图像 {idx}/{len(images)} 处理完成 | 结果数: {len(formatted)}")
-            
+
             for idx, results in enumerate(formatted_batch_results, 1):
                 if results:
                     save_filename = f"easyocr_batch_{idx}_{lang}_match.png"
@@ -182,7 +197,6 @@ class EasyOCRWrapper(BaseOCR):
             self.logger.error(f"EasyOCR批量处理失败: {str(e)}", exc_info=True)
             return []
 
-
     def _save_ocr_debug_image(self, original_image: np.ndarray, results: List[Dict], save_path: str) -> None:
         """
         根据OCR结果保存带有标记的调试图像。
@@ -191,13 +205,14 @@ class EasyOCRWrapper(BaseOCR):
         :param save_path: 调试图像保存路径
         """
         try:
-            debug_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR) if len(original_image.shape) == 2 else original_image.copy()
-            
+            debug_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR) if len(
+                original_image.shape) == 2 else original_image.copy()
+
             for result in results:
                 x, y, w, h = result['bbox']
                 text = result['text']
                 confidence = result['confidence']
-                
+
                 # 绘制矩形框和文本信息
                 cv2.rectangle(debug_image, (x, y), (x + w, y + h), (0, 0, 255), 2)
                 cv2.putText(debug_image, f"{text} ({confidence:.2f})", (x, y - 10),

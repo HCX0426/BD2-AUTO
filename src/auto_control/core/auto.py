@@ -12,11 +12,11 @@ from ..config import (DEFAULT_BASE_RESOLUTION, DEFAULT_CHECK_ELEMENT_DELAY,
                      DEFAULT_OCR_ENGINE, DEFAULT_SCREENSHOT_DELAY,
                      DEFAULT_TASK_TIMEOUT, DEFAULT_TEXT_FUZZY_MATCH,
                      DEFAULT_WINDOW_OPERATION_DELAY, LOG_CONFIG)
-from ..until.coordinate_transformer import CoordinateTransformer
+from ..utils.coordinate_transformer import CoordinateTransformer
 from ..devices.base_device import BaseDevice, DeviceState
 from ..devices.device_manager import DeviceManager
 from ..image.image_processor import ImageProcessor
-from ..until.logger import Logger
+from ..utils.logger import Logger
 from ..ocr.ocr_processor import OCRProcessor
 
 

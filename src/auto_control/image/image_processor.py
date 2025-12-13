@@ -7,7 +7,7 @@ import numpy as np
 
 # 导入坐标转换器
 from src.auto_control.config.auto_config import TEMPLATE_EXTENSIONS
-from src.auto_control.until.coordinate_transformer import CoordinateTransformer
+from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.core.path_manager import path_manager
 
 class ImageProcessor:
@@ -84,7 +84,7 @@ class ImageProcessor:
 
             # 以 BGR 格式存储
             self.templates[template_name] = template_color
-            self.logger.debug(f"加载模板成功: {template_name} | 尺寸: {template_color.shape[:2]} (H, W)")
+            # self.logger.debug(f"加载模板成功: {template_name} | 尺寸: {template_color.shape[:2]} (H, W)")
             return True
         except Exception as e:
             self.logger.error(f"加载模板异常: {str(e)}", exc_info=True)

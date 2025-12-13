@@ -5,7 +5,7 @@ from src.auto_control.devices.adb_device import ADBDevice
 from src.auto_control.devices.base_device import BaseDevice, DeviceState
 from src.auto_control.devices.windows_device import WindowsDevice
 from src.auto_control.image.image_processor import ImageProcessor
-from src.auto_control.until.coordinate_transformer import CoordinateTransformer
+from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 
 
 class DeviceManager:

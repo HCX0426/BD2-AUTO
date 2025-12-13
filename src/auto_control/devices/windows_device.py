@@ -13,7 +13,7 @@ import win32ui
 from PIL import Image
 
 from src.auto_control.devices.base_device import BaseDevice, DeviceState
-from src.auto_control.until.coordinate_transformer import CoordinateTransformer
+from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.image.image_processor import ImageProcessor
 
 
