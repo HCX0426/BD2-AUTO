@@ -81,7 +81,7 @@ hiddenimports = [
     "src.auto_tasks.pc.pass_activity",
     "src.auto_tasks.pc.pass_rewards",
     "src.auto_tasks.pc.sweep_daily",
-    "src.auto_tasks.pc.public",  # 公共函数模块
+    "src.auto_tasks.pc.public",
     
     # 核心组件
     "src.core.path_manager",
@@ -105,13 +105,13 @@ hiddenimports = [
     "scipy.special._ufuncs_cxx",
 ]
 
-# 排除不必要的模块（进一步精简体积）
+# 排除不必要的模块（精简体积）
 excludes = [
     "matplotlib",
     "pandas",
     "tensorboard",
-    "tkinter",  # 排除未使用的GUI库
-    "setuptools",  # 运行时不需要的打包工具
+    "tkinter",
+    "setuptools",
 ]
 
 # 手动指定动态库（确保依赖正常加载）
@@ -146,9 +146,9 @@ a = Analysis(
     noarchive=False,
 )
 
-# 优化：移除重复的二进制文件（避免打包多个副本）
+# 移除重复的二进制文件（避免打包多个副本）
 a.binaries = list(dict.fromkeys(a.binaries))
-# 优化：移除冗余的zipped_data（减少体积）
+# 移除冗余的zipped_data（减少体积）
 a.zipped_data = [(k, v) for k, v in a.zipped_data if not k.startswith(('numpy/testing', 'scipy/test'))]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
@@ -185,7 +185,7 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="BD2-AUTO",
+    name="BD2-AUTO", # dist下的文件夹名
 )
 
 # ------------------- 自动清理 build 文件夹 -------------------

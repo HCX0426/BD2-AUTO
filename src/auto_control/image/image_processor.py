@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 from typing import Dict, List, Optional, Tuple, Union
@@ -167,7 +168,7 @@ class ImageProcessor:
         template: Union[str, np.ndarray],
         dpi_scale: float = 1.0,
         hwnd: Optional[int] = None,
-        threshold: float = 0.8,
+        threshold: float = 0.9,
         scale_template: bool = True,
         roi: Optional[Tuple[int, int, int, int]] = None,
         is_base_roi: bool = False
@@ -180,7 +181,7 @@ class ImageProcessor:
             template: 模板名称或模板图像数组
             dpi_scale: DPI缩放因子，默认为1.0
             hwnd: 窗口句柄，默认为None
-            threshold: 匹配阈值，默认为0.8
+            threshold: 匹配阈值，默认为0.9
             scale_template: 是否缩放模板，默认为True
             roi: 感兴趣区域 (x, y, w, h)，默认为None
             is_base_roi: ROI是否基于原始基准分辨率，默认为False
@@ -285,8 +286,10 @@ class ImageProcessor:
 
             match_x += roi_offset[0]
             match_y += roi_offset[1]
-
-            save_filename = f"{template_name_safe}_match_{final_score:.4f}_{method_used}.png"
+            
+            # 获取当前时间并格式化为时分秒
+            current_time = datetime.datetime.now().strftime("%H%M%S")
+            save_filename = f"{template_name_safe}_match_{final_score:.4f}_{method_used}_{current_time}.png"
             save_path = os.path.join(self.debug_img_dir, save_filename)
             self._save_match_debug_image(original_image, match_x, match_y, templ_w, templ_h, final_score, save_path)
 

@@ -1,9 +1,14 @@
-from typing import Optional, Tuple
+import os
+import time
+from typing import Optional, Tuple, List, Dict
 import numpy as np
+import cv2
 from src.auto_control.ocr.base_ocr import BaseOCR
 from src.auto_control.ocr.easyocr_wrapper import EasyOCRWrapper
 from src.auto_control.config.ocr_config import get_default_languages
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
+from src.core.path_manager import path_manager
+
 
 class OCRProcessor:
     def __init__(self, 
@@ -32,6 +37,9 @@ class OCRProcessor:
         
         # 初始化坐标转换器
         self.coord_transformer = coord_transformer
+        
+        # 初始化调试目录（迁移自EasyOCRWrapper）
+        self.debug_img_dir = path_manager.get("match_ocr_debug")
         
         # 初始化指定的OCR引擎（确保与BaseOCR接口兼容）
         self.engine: BaseOCR = self._init_engine(**kwargs)
@@ -88,7 +96,7 @@ class OCRProcessor:
                         target_text: str,
                         lang: Optional[str] = None,
                         fuzzy_match: bool = False,
-                        min_confidence: float = 0.6,
+                        min_confidence: float = 0.9,
                         region: Optional[Tuple[int, int, int, int]] = None,
                         is_base_region: bool = False,
                         return_base_coord: bool = False) -> Optional[Tuple[int, int, int, int]]:
@@ -101,7 +109,7 @@ class OCRProcessor:
                     未指定时使用默认语言
         :param fuzzy_match: 是否启用模糊匹配（默认False，精确匹配）
                         启用后使用字符串相似度（≥0.8）判断匹配
-        :param min_confidence: 最小置信度阈值（默认0.6，仅筛选高于此值的结果）
+        :param min_confidence: 最小置信度阈值（默认0.9，仅筛选高于此值的结果）  # 文档说明同步修改
         :param region: 限定查找的目标区域（格式：(x, y, w, h)）
         :param is_base_region: region是否为基准坐标（默认False，视为图像原始坐标）
         :param return_base_coord: 是否返回基准坐标（默认False，返回图像原始坐标）
@@ -118,7 +126,7 @@ class OCRProcessor:
             return None
         
         # 2. 处理限定区域（坐标转换+裁剪图像+记录偏移量）
-        orig_image = image.copy()  # 保存原图用于最终坐标映射
+        orig_image = image.copy()  # 保存原图用于最终坐标映射和调试保存
         region_offset = (0, 0)     # 裁剪区域在原图中的偏移量（x, y）
         processed_region = region
         
@@ -164,7 +172,7 @@ class OCRProcessor:
             f"目标文本: '{target_text}' | "
             f"语言: {target_lang} | "
             f"模糊匹配: {'是' if fuzzy_match else '否'} | "
-            f"最小置信度: {min_confidence} | "
+            f"最小置信度: {min_confidence} | "  # 日志中会显示修改后的0.9
             f"查找范围: {'指定区域' if processed_region else '全图'} | "
             f"输入坐标类型: {'基准坐标' if is_base_region else '图像坐标'} | "
             f"输出坐标类型: {'基准坐标' if return_base_coord else '图像坐标'} | "
@@ -182,7 +190,7 @@ class OCRProcessor:
         highest_confidence = 0.0  # 记录最高置信度（优先选择置信度高的匹配）
         
         for result in text_results:
-            # 过滤低于最小置信度的结果
+            # 过滤低于最小置信度的结果（现在使用0.9作为阈值）
             current_confidence = result['confidence']
             if current_confidence < min_confidence:
                 self.logger.debug(
@@ -227,14 +235,40 @@ class OCRProcessor:
                     f"子图位置: {result['bbox']} | 原图位置: {orig_bbox}"
                 )
         
-        # 6. 结果坐标转换（图像坐标 -> 原始基准坐标，如果需要）
+        # 6. 保存最高置信度结果（无论是否匹配目标文本）
+        if text_results:
+            max_conf_result = max(text_results, key=lambda x: x['confidence'])
+            max_text = max_conf_result['text']
+            max_confidence = max_conf_result['confidence']
+            
+            # 生成文件名：findtext_时分秒_目标文本_最高置信度文本.png
+            timestamp = time.strftime("%H%M%S", time.localtime())
+            safe_target = ''.join(c if c.isalnum() else '_' for c in target_text)[:10]
+            safe_text = ''.join(c if c.isalnum() else '_' for c in max_text)[:10]
+            conf_str = f"{max_confidence:.2f}"
+            save_filename = f"findtext_{target_lang}_{timestamp}_target_{safe_target}_max_{safe_text}_{conf_str}.png"
+            save_path = os.path.join(self.debug_img_dir, save_filename)
+            
+            # 转换子图结果到原图坐标
+            sub_x, sub_y, sub_w, sub_h = max_conf_result['bbox']
+            orig_max_bbox = (
+                sub_x + region_offset[0],
+                sub_y + region_offset[1],
+                sub_w,
+                sub_h
+            )
+            # 保存标注图（使用原图）
+            self._save_ocr_debug_image(orig_image, [{'bbox': orig_max_bbox, 'text': max_text, 'confidence': max_confidence}], save_path)
+            self.logger.debug(f"已保存最高置信度OCR结果图: {save_filename} | 文本: {max_text} | 置信度: {max_confidence:.2f}")
+        
+        # 7. 结果坐标转换（图像坐标 -> 原始基准坐标，如果需要）
         final_bbox = best_match
         if best_match and return_base_coord and self.coord_transformer:
             # 使用CoordinateTransformer的方法转换坐标
             final_bbox = self.coord_transformer.convert_current_client_rect_to_original(best_match)
             self.logger.debug(f"结果坐标转换 | 当前客户区坐标: {best_match} -> 原始基准坐标: {final_bbox}")
             
-        # 7. 输出最终结果
+        # 8. 输出最终结果
         if final_bbox:
             self.logger.info(
                 f"成功找到目标文本 | "
@@ -247,3 +281,55 @@ class OCRProcessor:
         else:
             self.logger.warning(f"在{'指定区域' if processed_region else '全图'}中未找到匹配的目标文本: '{target_text}'")
             return None
+
+    def batch_process(self, images: List[np.ndarray], lang: Optional[str] = None) -> List[List[Dict]]:
+        """批量处理图像（代理到引擎并添加调试保存）"""
+        target_lang = lang or self._default_lang
+        results = self.engine.batch_process(images, target_lang)
+        
+        # 为批量处理结果添加调试保存
+        for idx, (image, img_results) in enumerate(zip(images, results), 1):
+            if img_results:
+                max_conf_result = max(img_results, key=lambda x: x['confidence'])
+                max_text = max_conf_result['text']
+                max_confidence = max_conf_result['confidence']
+                
+                timestamp = time.strftime("%H%M%S", time.localtime())
+                safe_text = ''.join(c if c.isalnum() else '_' for c in max_text)[:20]
+                conf_str = f"{max_confidence:.2f}"
+                save_filename = f"batch_{self.engine_type}_{idx}_{target_lang}_{timestamp}_{safe_text}_{conf_str}.png"
+                save_path = os.path.join(self.debug_img_dir, save_filename)
+                
+                self._save_ocr_debug_image(image, [max_conf_result], save_path)
+                self.logger.debug(f"批量图像 {idx} 最高置信度结果已保存: {save_filename}")
+        
+        return results
+
+    def _save_ocr_debug_image(self, original_image: np.ndarray, results: List[Dict], save_path: str) -> None:
+        """
+        根据OCR结果保存带有标记的调试图像（迁移自EasyOCRWrapper）
+        :param original_image: 原始图像
+        :param results: OCR识别的结果列表
+        :param save_path: 调试图像保存路径
+        """
+        try:
+            # 处理灰度图转彩色图的情况
+            debug_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR) if len(
+                original_image.shape) == 2 else original_image.copy()
+
+            for result in results:
+                x, y, w, h = result['bbox']
+                text = result['text']
+                confidence = result['confidence']
+
+                # 绘制矩形框和文本信息
+                cv2.rectangle(debug_image, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                cv2.putText(debug_image, f"{text} ({confidence:.2f})", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+
+            # 确保保存目录存在
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            cv2.imwrite(save_path, debug_image)
+            self.logger.info(f"OCR调试图片保存成功: {save_path}")
+        except Exception as e:
+            self.logger.error(f"保存OCR调试图片失败: {str(e)}", exc_info=True)
