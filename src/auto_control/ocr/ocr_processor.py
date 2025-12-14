@@ -7,6 +7,7 @@ from src.auto_control.ocr.base_ocr import BaseOCR
 from src.auto_control.ocr.easyocr_wrapper import EasyOCRWrapper
 from src.auto_control.config.ocr_config import get_default_languages
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
+from src.auto_control.utils.display_context import RuntimeDisplayContext  # 新增导入
 from src.core.path_manager import path_manager
 
 
@@ -14,13 +15,16 @@ class OCRProcessor:
     def __init__(self, 
                  engine: str = 'easyocr', 
                  logger=None, 
-                 coord_transformer: Optional[CoordinateTransformer] = None,** kwargs):
+                 coord_transformer: Optional[CoordinateTransformer] = None,
+                 display_context: Optional[RuntimeDisplayContext] = None,  # 新增：运行时上下文
+                 **kwargs):
         """
         OCR处理器封装类（统一调用不同OCR引擎，支持坐标转换）
         
         :param engine: OCR引擎类型，目前只支持 'easyocr'（默认）
         :param logger: 日志实例（从上层传递，如Auto类）
         :param coord_transformer: 坐标转换器实例（用于处理坐标转换）
+        :param display_context: 运行时显示上下文（提供窗口状态和尺寸信息）
         :param kwargs: 引擎特定参数：
             - languages: 自定义默认语言组合（如 'ch_tra+eng'，可选）
         """
@@ -35,14 +39,22 @@ class OCRProcessor:
         # 处理默认语言参数（优先使用传入的languages，否则用配置默认值）
         self._default_lang = kwargs.pop('languages', None) or get_default_languages(self.engine_type)
         
-        # 初始化坐标转换器
+        # 初始化坐标转换器和运行时上下文（强制校验）
         self.coord_transformer = coord_transformer
+        self.display_context = display_context
         
-        # 初始化调试目录（迁移自EasyOCRWrapper）
+        # 校验必要依赖
+        if not self.coord_transformer:
+            raise ValueError("坐标转换器(coord_transformer)必须初始化后传入")
+        if not self.display_context:
+            raise ValueError("运行时上下文(display_context)必须初始化后传入")
+        
+        # 初始化调试目录
         self.debug_img_dir = path_manager.get("match_ocr_debug")
+        os.makedirs(self.debug_img_dir, exist_ok=True)
         
         # 初始化指定的OCR引擎（确保与BaseOCR接口兼容）
-        self.engine: BaseOCR = self._init_engine(**kwargs)
+        self.engine: BaseOCR = self._init_engine(** kwargs)
         
         # 初始化完成日志
         self.logger.info(
@@ -50,7 +62,7 @@ class OCRProcessor:
             f"引擎: {self.engine_type.upper()} | "
             f"默认语言: {self._default_lang} | "
             f"GPU加速: {'启用' if self.engine._use_gpu else '禁用'} | "
-            f"坐标转换: {'已配置' if self.coord_transformer else '未配置'}"
+            f"坐标系统: 已配置（上下文+转换器）"
         )
 
     def _create_default_logger(self):
@@ -74,7 +86,7 @@ class OCRProcessor:
         
         return DefaultLogger()
 
-    def _init_engine(self,** kwargs) -> BaseOCR:
+    def _init_engine(self, **kwargs) -> BaseOCR:
         """根据引擎类型初始化具体OCR实例（确保返回BaseOCR子类）"""
         self.logger.debug(f"开始初始化{self.engine_type.upper()}引擎 | 参数: {kwargs}")
         
@@ -86,9 +98,7 @@ class OCRProcessor:
             raise ValueError(f"不支持的OCR引擎: {self.engine_type}")
 
     def enable_gpu(self, enable: bool = True):
-        """
-        启用/禁用GPU加速（代理到基类方法）
-        """
+        """启用/禁用GPU加速（代理到基类方法）"""
         return self.engine.enable_gpu(enable)
 
     def find_text_position(self,
@@ -103,17 +113,7 @@ class OCRProcessor:
         """
         查找特定文本在图像中的位置（支持限定区域查找，返回最匹配的边界框）
         
-        :param image: 输入图像（numpy数组，BGR格式）
-        :param target_text: 要查找的目标文本（如 "确认"、"登录"）
-        :param lang: 语言代码（如 'ch_tra' 繁体中文，'eng' 英文，支持组合 'ch_tra+eng'）
-                    未指定时使用默认语言
-        :param fuzzy_match: 是否启用模糊匹配（默认False，精确匹配）
-                        启用后使用字符串相似度（≥0.8）判断匹配
-        :param min_confidence: 最小置信度阈值（默认0.9，仅筛选高于此值的结果）  # 文档说明同步修改
-        :param region: 限定查找的目标区域（格式：(x, y, w, h)）
-        :param is_base_region: region是否为基准坐标（默认False，视为图像原始坐标）
-        :param return_base_coord: 是否返回基准坐标（默认False，返回图像原始坐标）
-        :return: 目标文本在原图中的边界框 (x, y, w, h)，未找到时返回None
+        核心优化：基于display_context提供的客户区尺寸进行坐标校验，确保区域有效性
         """
         target_lang = lang or self._default_lang
         
@@ -125,13 +125,21 @@ class OCRProcessor:
             self.logger.error("查找文本位置失败：目标文本为空")
             return None
         
-        # 2. 处理限定区域（坐标转换+裁剪图像+记录偏移量）
+        # 2. 获取当前客户区尺寸（用于坐标校验）
+        client_logical_w, client_logical_h = self.display_context.client_logical_res
+        img_h, img_w = image.shape[:2]
+        self.logger.debug(
+            f"当前客户区逻辑尺寸: {client_logical_w}x{client_logical_h} | "
+            f"输入图像尺寸: {img_w}x{img_h}"
+        )
+        
+        # 3. 处理限定区域（坐标转换+裁剪图像+记录偏移量）
         orig_image = image.copy()  # 保存原图用于最终坐标映射和调试保存
         region_offset = (0, 0)     # 裁剪区域在原图中的偏移量（x, y）
         processed_region = region
         
         # 区域坐标转换（基准坐标 -> 图像坐标）
-        if region and is_base_region and self.coord_transformer:
+        if region and is_base_region:
             try:
                 processed_region = self.coord_transformer.convert_original_rect_to_current_client(region)
                 self.logger.debug(f"区域坐标转换 | 基准区域: {region} -> 图像区域: {processed_region}")
@@ -142,23 +150,31 @@ class OCRProcessor:
         if processed_region:
             try:
                 r_x, r_y, r_w, r_h = processed_region
-                img_h, img_w = orig_image.shape[:2]  # 原图尺寸（h在前，w在后，OpenCV格式）
                 
-                # 校验region合法性：坐标非负、宽高为正、不超出原图范围
+                # 增强版区域合法性校验（结合客户区尺寸）
                 if r_x < 0 or r_y < 0:
                     raise ValueError(f"区域起始坐标不能为负数：(x={r_x}, y={r_y})")
                 if r_w <= 0 or r_h <= 0:
                     raise ValueError(f"区域宽高必须为正数：(w={r_w}, h={r_h})")
-                if r_x + r_w > img_w or r_y + r_h > img_h:
+                if r_x + r_w > client_logical_w or r_y + r_h > client_logical_h:
                     raise ValueError(
-                        f"区域超出原图范围：原图({img_w}x{img_h})，区域终点({r_x+r_w}, {r_y+r_h})"
+                        f"区域超出客户区范围：客户区({client_logical_w}x{client_logical_h})，"
+                        f"区域终点({r_x+r_w}, {r_y+r_h})"
                     )
+                # 图像尺寸可能小于客户区（如窗口化时），需二次校验
+                if r_x + r_w > img_w or r_y + r_h > img_h:
+                    self.logger.warning(
+                        f"区域超出图像范围，自动裁剪至图像边界 | 图像({img_w}x{img_h})，"
+                        f"区域终点({r_x+r_w}, {r_y+r_h})"
+                    )
+                    r_w = max(1, min(r_w, img_w - r_x))
+                    r_h = max(1, min(r_h, img_h - r_y))
                 
                 # 裁剪子图（OpenCV切片：[y_start:y_end, x_start:x_end]）
                 image = orig_image[r_y:r_y + r_h, r_x:r_x + r_w]
                 region_offset = (r_x, r_y)  # 记录裁剪区域的左上角偏移
                 self.logger.debug(
-                    f"已裁剪限定区域 | 原图尺寸: {img_w}x{img_h} | "
+                    f"已裁剪限定区域 | 客户区尺寸: {client_logical_w}x{client_logical_h} | "
                     f"区域参数: {processed_region} | 裁剪后子图尺寸: {image.shape[1]}x{image.shape[0]}"
                 )
                 
@@ -166,31 +182,30 @@ class OCRProcessor:
                 self.logger.error(f"限定区域参数无效：{str(e)}，自动切换为全图查找")
                 processed_region = None  # 校验失败时回退到全图查找
 
-        # 3. 日志输出查找参数
+        # 4. 日志输出查找参数
         self.logger.debug(
             f"调用文本位置查找接口 | "
             f"目标文本: '{target_text}' | "
             f"语言: {target_lang} | "
             f"模糊匹配: {'是' if fuzzy_match else '否'} | "
-            f"最小置信度: {min_confidence} | "  # 日志中会显示修改后的0.9
+            f"最小置信度: {min_confidence} | "
             f"查找范围: {'指定区域' if processed_region else '全图'} | "
             f"输入坐标类型: {'基准坐标' if is_base_region else '图像坐标'} | "
-            f"输出坐标类型: {'基准坐标' if return_base_coord else '图像坐标'} | "
-            f"图像尺寸: {image.shape[:2]}"
+            f"输出坐标类型: {'基准坐标' if return_base_coord else '图像坐标'}"
         )
         
-        # 4. 检测裁剪后图像中的所有文本
+        # 5. 检测裁剪后图像中的所有文本
         text_results = self.engine.detect_text(image, target_lang)
         if not text_results:
             self.logger.warning(f"在{'指定区域' if processed_region else '全图'}中未检测到任何文本，无法查找目标 '{target_text}'")
             return None
         
-        # 5. 筛选符合条件的匹配结果
+        # 6. 筛选符合条件的匹配结果
         best_match = None
         highest_confidence = 0.0  # 记录最高置信度（优先选择置信度高的匹配）
         
         for result in text_results:
-            # 过滤低于最小置信度的结果（现在使用0.9作为阈值）
+            # 过滤低于最小置信度的结果
             current_confidence = result['confidence']
             if current_confidence < min_confidence:
                 self.logger.debug(
@@ -235,7 +250,7 @@ class OCRProcessor:
                     f"子图位置: {result['bbox']} | 原图位置: {orig_bbox}"
                 )
         
-        # 6. 保存最高置信度结果（无论是否匹配目标文本）
+        # 7. 保存最高置信度结果（无论是否匹配目标文本）
         if text_results:
             max_conf_result = max(text_results, key=lambda x: x['confidence'])
             max_text = max_conf_result['text']
@@ -261,14 +276,14 @@ class OCRProcessor:
             self._save_ocr_debug_image(orig_image, [{'bbox': orig_max_bbox, 'text': max_text, 'confidence': max_confidence}], save_path)
             self.logger.debug(f"已保存最高置信度OCR结果图: {save_filename} | 文本: {max_text} | 置信度: {max_confidence:.2f}")
         
-        # 7. 结果坐标转换（图像坐标 -> 原始基准坐标，如果需要）
+        # 8. 结果坐标转换（图像坐标 -> 原始基准坐标，如果需要）
         final_bbox = best_match
-        if best_match and return_base_coord and self.coord_transformer:
+        if best_match and return_base_coord:
             # 使用CoordinateTransformer的方法转换坐标
             final_bbox = self.coord_transformer.convert_current_client_rect_to_original(best_match)
             self.logger.debug(f"结果坐标转换 | 当前客户区坐标: {best_match} -> 原始基准坐标: {final_bbox}")
             
-        # 8. 输出最终结果
+        # 9. 输出最终结果
         if final_bbox:
             self.logger.info(
                 f"成功找到目标文本 | "
@@ -306,12 +321,7 @@ class OCRProcessor:
         return results
 
     def _save_ocr_debug_image(self, original_image: np.ndarray, results: List[Dict], save_path: str) -> None:
-        """
-        根据OCR结果保存带有标记的调试图像（迁移自EasyOCRWrapper）
-        :param original_image: 原始图像
-        :param results: OCR识别的结果列表
-        :param save_path: 调试图像保存路径
-        """
+        """根据OCR结果保存带有标记的调试图像"""
         try:
             # 处理灰度图转彩色图的情况
             debug_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR) if len(
@@ -333,3 +343,39 @@ class OCRProcessor:
             self.logger.info(f"OCR调试图片保存成功: {save_path}")
         except Exception as e:
             self.logger.error(f"保存OCR调试图片失败: {str(e)}", exc_info=True)
+
+    def get_scaled_bbox(self, bbox: Tuple[int, int, int, int], is_base_coord: bool = False) -> Tuple[int, int, int, int]:
+        """
+        将边界框坐标转换为实际屏幕像素坐标（基于上下文的缩放因子）
+        
+        :param bbox: 输入边界框 (x, y, w, h)
+        :param is_base_coord: 输入是否为基准坐标（默认False为客户区坐标）
+        :return: 缩放后的屏幕像素坐标 (x, y, w, h)
+        """
+        if not bbox:
+            self.logger.error("无效的边界框输入，无法进行缩放转换")
+            return ()
+        
+        # 坐标转换：基准坐标 -> 客户区坐标（如需）
+        processed_bbox = bbox
+        if is_base_coord:
+            processed_bbox = self.coord_transformer.convert_original_rect_to_current_client(bbox)
+        
+        # 获取上下文的缩放因子（客户区逻辑尺寸 -> 屏幕像素尺寸）
+        scale_x, scale_y = self.display_context.scale_factors
+        x, y, w, h = processed_bbox
+        
+        # 计算缩放后的像素坐标（四舍五入为整数）
+        scaled_bbox = (
+            int(round(x * scale_x)),
+            int(round(y * scale_y)),
+            int(round(w * scale_x)),
+            int(round(h * scale_y))
+        )
+        
+        self.logger.debug(
+            f"边界框缩放转换 | 输入坐标: {bbox} | "
+            f"缩放因子: ({scale_x:.2f}, {scale_y:.2f}) | "
+            f"输出像素坐标: {scaled_bbox}"
+        )
+        return scaled_bbox

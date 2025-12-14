@@ -18,6 +18,7 @@ from ..devices.device_manager import DeviceManager
 from ..image.image_processor import ImageProcessor
 from ..utils.logger import Logger
 from ..ocr.ocr_processor import OCRProcessor
+from ..utils.display_context import RuntimeDisplayContext  # 确保导入正确
 
 
 # 此层传递均为客户区坐标
@@ -42,31 +43,41 @@ class Auto:
             console_log_level=logging.INFO     # 控制台只输出重要信息
         )
 
-        # 坐标转换初始化
+        # 初始化运行时显示上下文（核心新增）
+        self.display_context = RuntimeDisplayContext(
+            original_base_width=base_resolution[0],
+            original_base_height=base_resolution[1]
+        )
+        self.logger.info(f"运行时显示上下文初始化完成 | 基准分辨率: {base_resolution}")
+
+        # 坐标转换初始化（注入上下文）
         self.coord_transformer = CoordinateTransformer(
-            original_base_res=base_resolution,
-            logger=self.logger
+            logger=self.logger,
+            display_context=self.display_context  # 传递上下文
         )
 
-        # 图像处理器初始化
+        # 图像处理器初始化（注入上下文）
         self.image_processor = ImageProcessor(
             original_base_res=base_resolution,
             logger=self.logger,
-            coord_transformer=self.coord_transformer
+            coord_transformer=self.coord_transformer,
+            display_context=self.display_context  # 传递上下文
         )
 
-        # 设备管理器初始化
+        # 设备管理器初始化（注入上下文）
         self.device_manager = DeviceManager(
             logger=self.logger,
             image_processor=self.image_processor,
-            coord_transformer=self.coord_transformer
+            coord_transformer=self.coord_transformer,
+            display_context=self.display_context  # 传递上下文
         )
 
-        # OCR处理器初始化
+        # OCR处理器初始化（注入上下文）
         self.ocr_processor = OCRProcessor(
             engine=ocr_engine, 
             logger=self.logger, 
-            coord_transformer=self.coord_transformer
+            coord_transformer=self.coord_transformer,
+            display_context=self.display_context  # 传递上下文
         )
 
         # 设备配置
@@ -77,7 +88,7 @@ class Auto:
         self.last_result = None    # 最后操作结果
         self.last_error = None     # 最后错误信息
 
-        self.logger.info("自动化系统初始化完成")
+        self.logger.info("自动化系统初始化完成（已集成运行时显示上下文）")
 
     def check_should_stop(self) -> bool:
         """线程安全检查任务中断标志"""
@@ -167,7 +178,8 @@ class Auto:
                 timeout=timeout,
                 logger=self.logger,
                 image_processor=self.image_processor,
-                coord_transformer=self.coord_transformer
+                coord_transformer=self.coord_transformer,
+                display_context=self.display_context  # 传递上下文
             )
             self.last_result = result
 
@@ -179,7 +191,7 @@ class Auto:
                     original_active = self.device_manager.active_device
                     self.device_manager.set_active_device(device_uri)
 
-                    # 调用带重试的分辨率更新
+                    # 调用带重试的分辨率更新（同步到上下文）
                     if self._update_resolution_from_device():
                         self.logger.info(f"设备 {device_uri} 添加并更新分辨率成功")
                     else:
@@ -204,7 +216,7 @@ class Auto:
             return False
 
     def set_active_device(self, device_uri: str) -> bool:
-        """设置活动设备（仅允许已连接设备）——删除冗余的坐标更新"""
+        """设置活动设备（仅允许已连接设备）"""
         result = self.device_manager.set_active_device(device_uri)
         self.last_result = result
 
@@ -212,12 +224,14 @@ class Auto:
             self.last_error = f"设置活动设备失败: {device_uri}"
             self.logger.error(f"错误: {self.last_error}")
         else:
+            # 切换活动设备后同步更新上下文分辨率
+            self._update_resolution_from_device()
             self.logger.info(f"活动设备已切换为: {device_uri}")
 
         return result
 
     def _update_resolution_from_device(self, max_retries: int = 3, retry_delay: float = 0.2) -> bool:
-        """从活动设备更新基准分辨率（重试机制）"""
+        """从活动设备更新基准分辨率（同步到上下文和转换器）"""
         for retry in range(max_retries):
             device = self.device_manager.get_active_device()
             # 校验设备是否存在且已连接
@@ -245,10 +259,15 @@ class Auto:
                 self.logger.error(f"错误: {self.last_error}")
                 return False
 
-            # 更新分辨率（同步坐标转换器）
+            # 同步更新上下文和转换器
             self.base_resolution = resolution
+            self.display_context.update_client_size(resolution)  # 核心：更新上下文
+            self.coord_transformer.update_current_client_size(resolution)  # 同步转换器
             device._update_dynamic_window_info()
-            self.logger.debug(f"从设备更新基准分辨率: {self.base_resolution}")
+            self.logger.debug(
+                f"从设备更新分辨率 | 客户区尺寸: {resolution} | "
+                f"上下文同步完成"
+            )
             return True
 
         # 超过最大重试次数
@@ -270,6 +289,8 @@ class Auto:
             self.running = True
             self.should_stop = False  # 重置中断标志
 
+        # 启动时同步一次设备分辨率到上下文
+        self._update_resolution_from_device()
         self.logger.info("BD2-AUTO 自动化系统已启动")
         print("BD2-AUTO 已启动")
 
@@ -292,9 +313,9 @@ class Auto:
         print("BD2-AUTO 已停止")
 
     def get_status(self) -> dict:
-        """获取系统完整状态——补充坐标转换器状态+修复设备URI显示"""
+        """获取系统完整状态（包含上下文信息）"""
         active_device = self.device_manager.get_active_device()
-        # 获取坐标转换器的当前状态（需CoordinateTransformer实现get_status方法，若未实现则返回基础信息）
+        # 坐标转换器状态
         if hasattr(self.coord_transformer, 'get_status'):
             transformer_status = self.coord_transformer.get_status()
         else:
@@ -303,6 +324,14 @@ class Auto:
                 "current_client_size": self.coord_transformer._current_client_size,
                 "current_dpi": self.coord_transformer._current_dpi
             }
+
+        # 运行时上下文状态
+        context_status = self.display_context.get_status() if hasattr(
+            self.display_context, 'get_status') else {
+            "client_size": self.display_context.client_size,
+            "scale_factors": self.display_context.scale_factors,
+            "dpi": self.display_context.dpi
+        }
 
         # 构建设备状态列表
         device_states = {}
@@ -320,8 +349,9 @@ class Auto:
             "active_device_state": active_device.get_state().name if active_device else None,
             "total_devices": len(self.device_manager),
             "device_list": list(self.device_manager.devices.keys()),
-            "device_states": device_states,  # 详细设备状态
-            "coordinate_transformer": transformer_status,  # 坐标转换器详细状态
+            "device_states": device_states,
+            "coordinate_transformer": transformer_status,
+            "display_context": context_status,  # 新增上下文状态
             "base_resolution": self.base_resolution,
             "loaded_templates": len(self.image_processor.templates) if self.image_processor else 0,
             "last_error": self.last_error,
@@ -339,7 +369,7 @@ class Auto:
         device_uri: Optional[str] = None,
         is_base_coord: bool = False
     ) -> bool:
-        """点击操作"""
+        """点击操作（基于上下文坐标转换）"""
         # 中断检查
         if self.check_should_stop():
             self.logger.info("点击任务被中断")
@@ -463,7 +493,7 @@ class Auto:
         click_time: int = 1,
         right_click: bool = False
     ) -> Optional[Tuple[int, int]]:
-        """OCR文本识别并点击（支持ROI）"""
+        """OCR文本识别并点击（支持ROI，基于上下文坐标处理）"""
         if self.check_should_stop():
             self.logger.info("文本点击任务被中断")
             self.last_result = None
@@ -480,7 +510,7 @@ class Auto:
             self.last_result = None
             return None
 
-        # 处理ROI：调用坐标转换器转换基准ROI到客户区ROI（增强校验）
+        # 处理ROI：基于上下文和转换器进行坐标转换（增强校验）
         region = None  # 最终传给find_text_position的区域（相对于当前客户区绝对坐标）
         if roi:
             try:
@@ -493,7 +523,7 @@ class Auto:
                     raise ValueError(
                         f"roi参数无效：x={rx}, y={ry}（需非负）；w={rw}, h={rh}（需正数）")
 
-                # 步骤2：使用坐标转换器转换ROI
+                # 步骤2：使用坐标转换器转换ROI（基于上下文状态）
                 region = self.coord_transformer.convert_original_rect_to_current_client(roi)
                 if not region or len(region) != 4:
                     raise ValueError("ROI转换后无效（可能超出客户区或尺寸为0）")
@@ -501,8 +531,19 @@ class Auto:
                 if rx2 < 0 or ry2 < 0 or rw2 <= 0 or rh2 <= 0:
                     raise ValueError(f"转换后ROI无效：{region}（x/y需非负，w/h需正数）")
 
+                # 步骤3：基于上下文客户区尺寸二次校验
+                client_w, client_h = self.display_context.client_logical_res
+                if rx2 + rw2 > client_w or ry2 + rh2 > client_h:
+                    self.logger.warning(
+                        f"转换后ROI超出客户区范围，自动裁剪 | 客户区: {client_w}x{client_h} | "
+                        f"ROI: {region} → 裁剪后: ({rx2}, {ry2}, {client_w - rx2}, {client_h - ry2})"
+                    )
+                    rw2 = max(1, client_w - rx2)
+                    rh2 = max(1, client_h - ry2)
+                    region = (rx2, ry2, rw2, rh2)
+
                 self.logger.debug(
-                    f"ROI转换完成 | 基准roi: {roi} → 当前客户区roi: {region}"
+                    f"ROI转换完成 | 基准roi: {roi} → 当前客户区roi: {region} | 客户区尺寸: {client_w}x{client_h}"
                 )
 
             except ValueError as e:
@@ -511,13 +552,14 @@ class Auto:
                 self.last_result = None
                 return None
 
-        # 调用OCR识别（传入客户区截图+转换后的region，**启用预处理提高识别率**）
+        # 调用OCR识别（传入上下文相关参数）
         text_pos = self.ocr_processor.find_text_position(
             image=screen,  # 客户区截图（无标题栏/边框）
             target_text=target_text,
             lang=lang,
             fuzzy_match=DEFAULT_TEXT_FUZZY_MATCH,
             region=region,  # 缩放后的当前客户区绝对坐标
+            is_base_region=False  # 已转换为客户区坐标，无需再次转换
         )
 
         if not text_pos:
@@ -531,7 +573,8 @@ class Auto:
         client_center_x = x + w // 2
         client_center_y = y + h // 2
         self.logger.info(
-            f"识别到文本 '{target_text}' | 客户区坐标: ({x},{y},{w},{h}) | 中心: ({client_center_x},{client_center_y})"
+            f"识别到文本 '{target_text}' | 客户区坐标: ({x},{y},{w},{h}) | 中心: ({client_center_x},{client_center_y}) | "
+            f"上下文客户区尺寸: {self.display_context.client_logical_res}"
         )
 
         if click:
@@ -560,7 +603,7 @@ class Auto:
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
     ) -> bool:
-        """最小化窗口"""
+        """最小化窗口（操作后同步上下文状态）"""
         if self.check_should_stop():
             self.logger.info("最小化窗口任务被中断")
             self.last_result = False
@@ -575,11 +618,14 @@ class Auto:
             return False
 
         self.last_result = device.minimize_window()
-        if not self.last_result:
+        if self.last_result:
+            # 窗口状态变化后，延迟更新上下文（确保系统状态同步）
+            time.sleep(0.3)
+            self._update_resolution_from_device(max_retries=1)
+            self.logger.info("窗口最小化成功，上下文状态已同步")
+        else:
             self.last_error = device.last_error or "窗口最小化失败"
             self.logger.error(f"错误: {self.last_error}")
-        else:
-            self.logger.info("窗口最小化成功")
 
         return self.last_result
 
@@ -588,7 +634,7 @@ class Auto:
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
     ) -> bool:
-        """最大化窗口"""
+        """最大化窗口（操作后同步上下文状态）"""
         if self.check_should_stop():
             self.logger.info("最大化窗口任务被中断")
             self.last_result = False
@@ -603,11 +649,14 @@ class Auto:
             return False
 
         self.last_result = device.maximize_window()
-        if not self.last_result:
+        if self.last_result:
+            # 窗口状态变化后，延迟更新上下文（确保系统状态同步）
+            time.sleep(0.3)
+            self._update_resolution_from_device(max_retries=1)
+            self.logger.info("窗口最大化成功，上下文状态已同步")
+        else:
             self.last_error = device.last_error or "窗口最大化失败"
             self.logger.error(f"错误: {self.last_error}")
-        else:
-            self.logger.info("窗口最大化成功")
 
         return self.last_result
 
@@ -620,7 +669,7 @@ class Auto:
         roi: Optional[Tuple[int, int, int, int]] = None,
         is_base_roi: bool = False
     ) -> bool:
-        """检查模板元素是否存在（支持多个模板和ROI）"""
+        """检查模板元素是否存在（支持多个模板和ROI，基于上下文校验）"""
         if self.check_should_stop():
             self.logger.info("检查元素任务被中断")
             self.last_result = False
@@ -641,11 +690,12 @@ class Auto:
             else:
                 templates = template_name
 
-            # 记录使用的参数
+            # 记录使用的参数（包含上下文信息）
             params_info = []
             if roi:
                 roi_type = "基准ROI" if is_base_roi else "客户区ROI"
                 params_info.append(f"{roi_type}: {roi}")
+            params_info.append(f"客户区尺寸: {self.display_context.client_logical_res}")
             if len(templates) > 1:
                 params_info.append(f"模板数量: {len(templates)}")
                 
@@ -675,7 +725,7 @@ class Auto:
         delay: float = DEFAULT_SCREENSHOT_DELAY,
         device_uri: str = None
     ) -> Optional[np.ndarray]:
-        """截图并可选保存（删除冗余颜色转换+补充保存异常捕获）"""
+        """截图并可选保存（补充上下文信息日志）"""
         if self.check_should_stop():
             self.logger.info("截图任务被中断")
             self.last_result = None
@@ -690,7 +740,7 @@ class Auto:
             return None
 
         try:
-            # 执行截图（WindowsDevice.capture_screen 已返回 BGR 格式，无需转换）
+            # 执行截图（WindowsDevice.capture_screen 已返回 BGR 格式）
             screen = device.capture_screen()
             self.last_result = screen
 
@@ -699,16 +749,21 @@ class Auto:
                 self.logger.error(f"错误: {self.last_error}")
                 return None
 
-            # 保存截图（如果指定路径，补充异常捕获）
+            # 输出截图相关上下文信息
+            client_w, client_h = self.display_context.client_logical_res
+            self.logger.debug(
+                f"截图成功 | 图像尺寸: {screen.shape[1]}x{screen.shape[0]} | "
+                f"上下文客户区尺寸: {client_w}x{client_h}"
+            )
+
+            # 保存截图（如果指定路径）
             if save_path:
                 try:
-                    # 直接保存（screen 已为 BGR 格式，cv2.imwrite 兼容）
                     cv2.imwrite(save_path, screen)
                     self.logger.info(f"截图保存成功: {save_path}")
                 except Exception as save_e:
                     self.last_error = f"截图保存失败: {str(save_e)}"
                     self.logger.error(f"错误: {self.last_error}")
-                    # 保存失败不影响截图返回（仍返回图像数据）
             else:
                 self.logger.info("截图成功（未保存）")
 
@@ -728,7 +783,7 @@ class Auto:
         roi: Optional[Tuple[int, int, int, int]] = None,
         is_base_roi: bool = False
     ) -> bool:
-        """等待模板元素出现（支持多个模板和ROI）"""
+        """等待模板元素出现（支持多个模板和ROI，基于上下文）"""
         if self.check_should_stop():
             self.logger.info("等待元素任务被中断")
             self.last_result = False
@@ -748,11 +803,12 @@ class Auto:
         else:
             templates = template_name
 
-        # 记录使用的参数
+        # 记录使用的参数（包含上下文信息）
         params_info = []
         if roi:
             roi_type = "基准ROI" if is_base_roi else "客户区ROI"
             params_info.append(f"{roi_type}: {roi}")
+        params_info.append(f"客户区尺寸: {self.display_context.client_logical_res}")
         if len(templates) > 1:
             params_info.append(f"模板数量: {len(templates)}")
             
@@ -773,7 +829,8 @@ class Auto:
             # 计算实际等待耗时
             elapsed = time.time() - start_time
             self.logger.info(
-                f"等待 {templates}{param_log} 成功（耗时{elapsed:.1f}s）| 中心点: {center_pos}"
+                f"等待 {templates}{param_log} 成功（耗时{elapsed:.1f}s）| 中心点: {center_pos} | "
+                f"上下文客户区尺寸: {self.display_context.client_logical_res}"
             )
 
         return self.last_result
@@ -788,7 +845,7 @@ class Auto:
         device_uri: Optional[str] = None,
         is_base_coord: bool = False
     ) -> bool:
-        """滑动操作（支持基准坐标/客户区坐标）"""
+        """滑动操作（支持基准坐标/客户区坐标，基于上下文校验）"""
         if self.check_should_stop():
             self.logger.info("滑动任务被中断")
             self.last_result = False
@@ -796,7 +853,7 @@ class Auto:
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
-        # 校验坐标合法性
+        # 校验坐标合法性（结合上下文）
         if not (isinstance(start_pos, (tuple, list)) and len(start_pos) == 2):
             self.last_error = f"滑动失败: 起始坐标格式无效（{start_pos}）"
             self.logger.error(f"错误: {self.last_error}")
@@ -807,6 +864,16 @@ class Auto:
             self.logger.error(f"错误: {self.last_error}")
             self.last_result = False
             return False
+
+        # 基于上下文校验坐标范围（如果是客户区坐标）
+        if not is_base_coord:
+            client_w, client_h = self.display_context.client_logical_res
+            sx, sy = start_pos
+            ex, ey = end_pos
+            if sx < 0 or sy < 0 or sx > client_w or sy > client_h:
+                self.logger.warning(f"起始坐标超出客户区范围: {start_pos} | 客户区: {client_w}x{client_h}")
+            if ex < 0 or ey < 0 or ex > client_w or ey > client_h:
+                self.logger.warning(f"结束坐标超出客户区范围: {end_pos} | 客户区: {client_w}x{client_h}")
 
         # 执行滑动（device.swipe已通过CoordinateTransformer转换坐标）
         self.last_result = device.swipe(
@@ -822,7 +889,8 @@ class Auto:
         else:
             coord_type = "基准坐标" if is_base_coord else "客户区坐标"
             self.logger.info(
-                f"滑动成功: 从{start_pos}到{end_pos} | 类型:{coord_type} | 时长{duration}s"
+                f"滑动成功: 从{start_pos}到{end_pos} | 类型:{coord_type} | 时长{duration}s | "
+                f"上下文客户区尺寸: {self.display_context.client_logical_res}"
             )
 
         return self.last_result

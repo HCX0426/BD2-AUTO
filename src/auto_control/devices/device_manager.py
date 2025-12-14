@@ -6,12 +6,14 @@ from src.auto_control.devices.base_device import BaseDevice, DeviceState
 from src.auto_control.devices.windows_device import WindowsDevice
 from src.auto_control.image.image_processor import ImageProcessor
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
+from src.auto_control.utils.display_context import RuntimeDisplayContext
+
 
 
 class DeviceManager:
     """设备管理器：负责设备的添加、移除、状态跟踪和活动设备管理"""
     
-    def __init__(self, logger=None, image_processor: Optional[ImageProcessor] = None, coord_transformer: Optional[CoordinateTransformer] = None):
+    def __init__(self, logger=None, image_processor: Optional[ImageProcessor] = None, coord_transformer: Optional[CoordinateTransformer] = None, display_context: Optional[RuntimeDisplayContext] = None):
         """初始化设备管理器"""
         # 设备存储：URI -> 设备实例
         self.devices: Dict[str, BaseDevice] = {}
@@ -23,6 +25,8 @@ class DeviceManager:
         self.coord_transformer = coord_transformer
         # 图像处理器实例（从上层接收）
         self.image_processor = image_processor
+        # 上下文容器（从上层接收）
+        self.display_context = display_context
         self.logger.info("设备管理器初始化完成")
 
     def _create_default_logger(self):
@@ -82,7 +86,8 @@ class DeviceManager:
         timeout: float = 10.0, 
         logger=None,
         image_processor: Optional[ImageProcessor] = None,
-        coord_transformer: Optional[CoordinateTransformer] = None
+        coord_transformer: Optional[CoordinateTransformer] = None,
+        display_context: Optional[RuntimeDisplayContext] = None
     ) -> bool:
         """
         添加设备并连接（支持Windows和ADB设备）
@@ -128,7 +133,8 @@ class DeviceManager:
                     device_uri=device_uri,
                     logger=logger or self.logger,
                     image_processor=image_processor or self.image_processor,
-                    coord_transformer=coord_transformer or self.coord_transformer
+                    coord_transformer=coord_transformer or self.coord_transformer,
+                    display_context=display_context or self.display_context
                 )
             else:  # adb设备
                 device = ADBDevice(

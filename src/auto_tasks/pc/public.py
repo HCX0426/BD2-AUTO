@@ -43,7 +43,7 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
 
             end_game_pos = auto.text_click("结束游戏", click=False)
             if end_game_pos:
-                cancel_pos = auto.text_click("取消", click=False)
+                cancel_pos = auto.text_click("取消", click=False,roi=(850,600,60,40))
                 if cancel_pos:
                     auto.click(cancel_pos)
                     auto.sleep(1)
@@ -66,9 +66,9 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
 def _handle_return_identifiers(auto: Auto) -> bool:
     """处理返回主界面相关的标识（闪避标识/地图标识）"""
     dodge_pos = auto.check_element_exist("public/闪避标识")
-    map_pos = auto.check_element_exist("public/地图标识")
+    # map_pos = auto.check_element_exist("public/地图标识")
     
-    if dodge_pos or map_pos:
+    if dodge_pos:
         if daily_pos := auto.check_element_exist("public/每日收集"):
             auto.key_press("a",1)
             auto.click(daily_pos)
@@ -121,9 +121,9 @@ def back_to_map(auto: Auto, timeout: int = 30) -> bool:
                 return True
             
             dodge_pos = auto.check_element_exist("public/闪避标识")
-            map_pos = auto.check_element_exist("public/地图标识")
+            # map_pos = auto.check_element_exist("public/地图标识")
 
-            if dodge_pos or map_pos:
+            if dodge_pos:
                 logger.info("已在地图")
                 return True
             else:
