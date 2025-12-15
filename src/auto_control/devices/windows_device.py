@@ -283,7 +283,7 @@ class WindowsDevice(BaseDevice):
             client_origin_x, client_origin_y = win32gui.ClientToScreen(self.hwnd, (0, 0))
 
             # 判断全屏状态（通过转换器）
-            is_fullscreen = self.coord_transformer.is_fullscreen() if self.coord_transformer else False
+            is_fullscreen = self.coord_transformer.is_fullscreen if self.coord_transformer else False
 
             # 更新全局上下文（直接修改上下文属性）
             self.display_context.update_from_window(

@@ -261,8 +261,6 @@ class Auto:
 
             # 同步更新上下文和转换器
             self.base_resolution = resolution
-            self.display_context.update_client_size(resolution)  # 核心：更新上下文
-            self.coord_transformer.update_current_client_size(resolution)  # 同步转换器
             device._update_dynamic_window_info()
             self.logger.debug(
                 f"从设备更新分辨率 | 客户区尺寸: {resolution} | "
@@ -315,23 +313,6 @@ class Auto:
     def get_status(self) -> dict:
         """获取系统完整状态（包含上下文信息）"""
         active_device = self.device_manager.get_active_device()
-        # 坐标转换器状态
-        if hasattr(self.coord_transformer, 'get_status'):
-            transformer_status = self.coord_transformer.get_status()
-        else:
-            transformer_status = {
-                "original_base_res": self.coord_transformer._original_base_res,
-                "current_client_size": self.coord_transformer._current_client_size,
-                "current_dpi": self.coord_transformer._current_dpi
-            }
-
-        # 运行时上下文状态
-        context_status = self.display_context.get_status() if hasattr(
-            self.display_context, 'get_status') else {
-            "client_size": self.display_context.client_size,
-            "scale_factors": self.display_context.scale_factors,
-            "dpi": self.display_context.dpi
-        }
 
         # 构建设备状态列表
         device_states = {}
@@ -350,8 +331,6 @@ class Auto:
             "total_devices": len(self.device_manager),
             "device_list": list(self.device_manager.devices.keys()),
             "device_states": device_states,
-            "coordinate_transformer": transformer_status,
-            "display_context": context_status,  # 新增上下文状态
             "base_resolution": self.base_resolution,
             "loaded_templates": len(self.image_processor.templates) if self.image_processor else 0,
             "last_error": self.last_error,
@@ -480,19 +459,19 @@ class Auto:
 
         return self.last_result
 
+
     def text_click(
-        self,
-        target_text: str,
-        click: bool = True,
-        lang: str = None,
-        # 格式：(x, y, w, h)，基于 BASE_RESOLUTION 的绝对坐标
-        roi: Optional[tuple] = None,
-        delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None,
-        duration: float = 0.1,
-        click_time: int = 1,
-        right_click: bool = False
-    ) -> Optional[Tuple[int, int]]:
+            self,
+            target_text: str,
+            click: bool = True,
+            lang: str = None,
+            roi: Optional[tuple] = None,
+            delay: float = DEFAULT_CLICK_DELAY,
+            device_uri: Optional[str] = None,
+            duration: float = 0.1,
+            click_time: int = 1,
+            right_click: bool = False
+        ) -> Optional[Tuple[int, int]]:
         """OCR文本识别并点击（支持ROI，基于上下文坐标处理）"""
         if self.check_should_stop():
             self.logger.info("文本点击任务被中断")
@@ -502,7 +481,7 @@ class Auto:
         self._apply_delay(delay)
         device = self._get_device(device_uri)
 
-        # 截图（WindowsDevice.capture_screen 已返回客户区截图）
+        # 截图（WindowsDevice.capture_screen 已返回客户区物理截图）
         screen = device.capture_screen()
         if screen is None:
             self.last_error = "文本点击失败: 截图失败"
@@ -510,41 +489,37 @@ class Auto:
             self.last_result = None
             return None
 
-        # 处理ROI：基于上下文和转换器进行坐标转换（增强校验）
-        region = None  # 最终传给find_text_position的区域（相对于当前客户区绝对坐标）
+        # 处理ROI：核心修改！全屏模式直接用基准ROI（物理坐标），窗口才转换
+        region = None  # 传给find_text_position的区域（物理坐标，全屏）/逻辑坐标（窗口）
+        is_fullscreen = self.coord_transformer.is_fullscreen  # 获取全屏状态
         if roi:
             try:
-                # 步骤1：校验用户传入的roi格式和数值合法性
+                # 步骤1：校验roi格式
                 if not isinstance(roi, (tuple, list)) or len(roi) != 4:
-                    raise ValueError(
-                        f"roi必须是4元组/列表（x, y, w, h），当前为{type(roi)}且长度{len(roi)}")
+                    raise ValueError(f"roi必须是4元组/列表（x, y, w, h），当前为{type(roi)}且长度{len(roi)}")
                 rx, ry, rw, rh = roi
                 if rx < 0 or ry < 0 or rw <= 0 or rh <= 0:
-                    raise ValueError(
-                        f"roi参数无效：x={rx}, y={ry}（需非负）；w={rw}, h={rh}（需正数）")
+                    raise ValueError(f"roi参数无效：x={rx}, y={ry}（需非负）；w={rw}, h={rh}（需正数）")
 
-                # 步骤2：使用坐标转换器转换ROI（基于上下文状态）
-                region = self.coord_transformer.convert_original_rect_to_current_client(roi)
-                if not region or len(region) != 4:
-                    raise ValueError("ROI转换后无效（可能超出客户区或尺寸为0）")
-                rx2, ry2, rw2, rh2 = region
-                if rx2 < 0 or ry2 < 0 or rw2 <= 0 or rh2 <= 0:
-                    raise ValueError(f"转换后ROI无效：{region}（x/y需非负，w/h需正数）")
-
-                # 步骤3：基于上下文客户区尺寸二次校验
-                client_w, client_h = self.display_context.client_logical_res
-                if rx2 + rw2 > client_w or ry2 + rh2 > client_h:
-                    self.logger.warning(
-                        f"转换后ROI超出客户区范围，自动裁剪 | 客户区: {client_w}x{client_h} | "
-                        f"ROI: {region} → 裁剪后: ({rx2}, {ry2}, {client_w - rx2}, {client_h - ry2})"
-                    )
-                    rw2 = max(1, client_w - rx2)
-                    rh2 = max(1, client_h - ry2)
-                    region = (rx2, ry2, rw2, rh2)
-
-                self.logger.debug(
-                    f"ROI转换完成 | 基准roi: {roi} → 当前客户区roi: {region} | 客户区尺寸: {client_w}x{client_h}"
-                )
+                if is_fullscreen:
+                    # 全屏模式：基准ROI是物理坐标，直接使用（不转换）
+                    region = roi
+                    self.logger.debug(f"全屏模式 | 直接使用基准ROI（物理坐标）: {region} | 截图物理尺寸: {screen.shape[1]}x{screen.shape[0]}")
+                else:
+                    # 窗口模式：基准ROI（物理）→ 客户区逻辑坐标
+                    region = self.coord_transformer.convert_original_rect_to_current_client(roi)
+                    if not region or len(region) != 4:
+                        raise ValueError("ROI转换后无效")
+                    rx2, ry2, rw2, rh2 = region
+                    client_w, client_h = self.display_context.client_logical_res
+                    if rx2 < 0 or ry2 < 0 or rw2 <= 0 or rh2 <= 0:
+                        raise ValueError(f"转换后ROI无效：{region}")
+                    if rx2 + rw2 > client_w or ry2 + rh2 > client_h:
+                        self.logger.warning(f"窗口模式 | ROI超出客户区，自动裁剪: {region} → ({rx2}, {ry2}, {client_w - rx2}, {client_h - ry2})")
+                        rw2 = max(1, client_w - rx2)
+                        rh2 = max(1, client_h - ry2)
+                        region = (rx2, ry2, rw2, rh2)
+                    self.logger.debug(f"窗口模式 | 基准ROI: {roi} → 逻辑ROI: {region} | 客户区逻辑尺寸: {client_w}x{client_h}")
 
             except ValueError as e:
                 self.last_error = f"文本点击失败: ROI参数无效 - {str(e)}"
@@ -552,14 +527,14 @@ class Auto:
                 self.last_result = None
                 return None
 
-        # 调用OCR识别（传入上下文相关参数）
+        # 调用OCR识别：关键！全屏时传is_base_region=True（告知是物理坐标），窗口传False
         text_pos = self.ocr_processor.find_text_position(
-            image=screen,  # 客户区截图（无标题栏/边框）
+            image=screen,  # 物理截图
             target_text=target_text,
             lang=lang,
             fuzzy_match=DEFAULT_TEXT_FUZZY_MATCH,
-            region=region,  # 缩放后的当前客户区绝对坐标
-            is_base_region=False  # 已转换为客户区坐标，无需再次转换
+            region=region,
+            is_base_region=is_fullscreen  # 全屏：region是物理坐标（基准ROI）；窗口：region是逻辑坐标
         )
 
         if not text_pos:
@@ -568,30 +543,28 @@ class Auto:
             self.last_result = None
             return None
 
-        # 计算点击坐标（文本框中心，客户区绝对坐标）
+        # 计算点击坐标（text_pos是逻辑坐标，适配device.click）
         x, y, w, h = text_pos
         client_center_x = x + w // 2
         client_center_y = y + h // 2
         self.logger.info(
-            f"识别到文本 '{target_text}' | 客户区坐标: ({x},{y},{w},{h}) | 中心: ({client_center_x},{client_center_y}) | "
-            f"上下文客户区尺寸: {self.display_context.client_logical_res}"
+            f"识别到文本 '{target_text}' | 客户区逻辑坐标: ({x},{y},{w},{h}) | 中心: ({client_center_x},{client_center_y}) | "
+            f"模式: {'全屏' if is_fullscreen else '窗口'}"
         )
 
         if click:
-            # 调用WindowsDevice.click（is_base_coord=False表示传入的是客户区坐标）
             click_result = device.click(
                 pos=(client_center_x, client_center_y),
                 duration=duration,
                 click_time=click_time,
                 right_click=right_click,
-                is_base_coord=False  # 客户区坐标，无需再转换
+                is_base_coord=False  # text_pos是逻辑坐标，无需转换
             )
-
             if not click_result:
                 self.last_error = device.last_error or "文本点击执行失败"
                 self.logger.error(f"错误: {self.last_error}")
                 return None
-            return (client_center_x, client_center_y)  # 返回客户区坐标
+            return (client_center_x, client_center_y)
         else:
             self.last_result = (client_center_x, client_center_y)
             return (client_center_x, client_center_y)

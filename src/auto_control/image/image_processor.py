@@ -263,6 +263,14 @@ class ImageProcessor:
 
             match_x += roi_offset[0]
             match_y += roi_offset[1]
+
+            # 调用转换器转换坐标
+            is_fullscreen = self.display_context.is_fullscreen
+            if not is_fullscreen:
+                # 窗口模式：截图像素（客户区物理）→ 客户区逻辑
+                final_bbox_physical = (match_x, match_y, templ_w, templ_h)
+                final_bbox_logical = self.coord_transformer.convert_client_physical_rect_to_logical(final_bbox_physical)
+                match_x, match_y, templ_w, templ_h = final_bbox_logical
             
             # 保存调试图像
             current_time = datetime.datetime.now().strftime("%H%M%S")
@@ -369,7 +377,6 @@ class ImageProcessor:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
             info_text = f"Image: {debug_image.shape[1]}x{debug_image.shape[0]}"
             cv2.putText(debug_image, info_text, (debug_image.shape[1] - 200, debug_image.shape[0] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
             cv2.imwrite(save_path, debug_image)
             self.logger.info(f"调试图保存: {save_path} | 匹配度: {match_confidence:.4f}")

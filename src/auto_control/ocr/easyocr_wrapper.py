@@ -91,8 +91,9 @@ class EasyOCRWrapper(BaseOCR):
 
             # EasyOCR需要RGB格式图像
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            height, width = image.shape[:2]  # 获取图像的高度和宽度
             self.logger.debug(
-                f"开始文本检测 | 语言: {lang} | 图像尺寸: {image.shape[:2]} | "
+                f"开始文本检测 | 语言: {lang} | 图像尺寸: ({width}, {height}) | "
                 f"GPU加速: {'启用' if self._use_gpu else '禁用'}"
             )
 

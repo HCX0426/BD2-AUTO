@@ -1,5 +1,8 @@
-from typing import Tuple, Optional
+from typing import Tuple
 import win32gui
+import win32con
+import win32api
+
 
 from src.auto_control.utils.display_context import RuntimeDisplayContext
 
@@ -7,7 +10,7 @@ from src.auto_control.utils.display_context import RuntimeDisplayContext
 class CoordinateTransformer:
     """坐标转换工具类：基于 RuntimeDisplayContext 完成各类坐标转换"""
 
-    def __init__(self, display_context: "RuntimeDisplayContext", logger):
+    def __init__(self, display_context: RuntimeDisplayContext, logger):
         """
         初始化坐标转换器
         
@@ -19,11 +22,92 @@ class CoordinateTransformer:
         self.logger.info(
             f"坐标转换器初始化 | 原始基准分辨率: {display_context.original_base_res}"
         )
+        # 全屏判定误差容忍度（保持原有值，如需兼容更多场景可改为10）
+        self.FULLSCREEN_ERROR_TOLERANCE = 5
 
     @property
     def display_context(self) -> "RuntimeDisplayContext":
         """获取当前显示上下文（便于外部查看或验证）"""
         return self._display_context
+
+    @property
+    def is_fullscreen(self) -> bool:
+        """
+        判断当前窗口是否为全屏状态（属性方式，兼容外部调用）
+        外部调用：self.coord_transformer.is_fullscreen
+        """
+        return self._check_fullscreen()
+
+    def is_fullscreen_method(self) -> bool:
+        """
+        判断当前窗口是否为全屏状态（方法方式，兼容外部调用）
+        外部调用：self.coord_transformer.is_fullscreen_method()
+        """
+        return self._check_fullscreen()
+
+    def _check_fullscreen(self) -> bool:
+        """
+        内部实现：检查窗口是否为全屏（优化判定逻辑，不依赖最大化状态）
+        判定逻辑（精准兼容窗口/游戏全屏）：
+        1. 从上下文获取窗口句柄
+        2. 窗口尺寸 ≈ 屏幕硬件分辨率（误差<容忍度）
+        3. 窗口位置 ≈ 屏幕原点(0,0)（误差<容忍度）
+        4. 移除最大化状态强制要求（兼容游戏全屏无WS_MAXIMIZE标记的场景）
+        """
+        ctx = self._display_context
+
+        # 必要条件校验：从上下文获取窗口句柄
+        hwnd = ctx.hwnd
+        if not hwnd:
+            self.logger.warning("上下文未设置窗口句柄，无法判断全屏状态")
+            return False
+
+        try:
+            # 1. 获取窗口整体矩形（屏幕坐标，含边框/无边框）
+            win_left, win_top, win_right, win_bottom = win32gui.GetWindowRect(hwnd)
+            win_width = win_right - win_left
+            win_height = win_bottom - win_top
+
+            # 2. 获取屏幕硬件分辨率（不受DPI影响，复用原有稳定方法）
+            screen_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+            screen_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+
+            # 3. 保留最大化状态日志（不参与判定，便于调试）
+            window_style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+            is_maximized = (window_style & win32con.WS_MAXIMIZE) != 0
+
+            # 4. 核心全屏判定逻辑（尺寸匹配 + 位置匹配）
+            # 尺寸匹配：窗口尺寸与屏幕分辨率误差在容忍范围内
+            size_match = (
+                abs(win_width - screen_width) < self.FULLSCREEN_ERROR_TOLERANCE and
+                abs(win_height - screen_height) < self.FULLSCREEN_ERROR_TOLERANCE
+            )
+            # 位置匹配：窗口左上角接近屏幕原点（避免尺寸巧合导致的误判）
+            position_match = (
+                abs(win_left) < self.FULLSCREEN_ERROR_TOLERANCE and
+                abs(win_top) < self.FULLSCREEN_ERROR_TOLERANCE
+            )
+            # 最终判定：两个条件同时满足即为全屏
+            fullscreen = size_match and position_match
+
+            # 日志输出（补充位置匹配状态，便于调试）
+            self.logger.debug(
+                f"全屏状态检查 | "
+                f"窗口句柄: {hwnd} | "
+                f"最大化: {is_maximized} | "
+                f"窗口尺寸: {win_width}x{win_height} | "
+                f"屏幕硬件分辨率: {screen_width}x{screen_height} | "
+                f"窗口位置: ({win_left},{win_top}) | "
+                f"尺寸匹配: {size_match} | 位置匹配: {position_match} | "
+                f"误差容忍度: {self.FULLSCREEN_ERROR_TOLERANCE} | "
+                f"全屏判定: {fullscreen}"
+            )
+
+            return fullscreen
+
+        except Exception as e:
+            self.logger.error(f"检查全屏状态失败: {str(e)}", exc_info=True)
+            return False
 
     def convert_original_to_current_client(self, x: int, y: int) -> Tuple[int, int]:
         """
@@ -120,14 +204,15 @@ class CoordinateTransformer:
         :return: 屏幕全局物理坐标 (x, y)
         """
         ctx = self._display_context
-        if not ctx.hwnd:
-            self.logger.error("窗口句柄未设置，无法转换为屏幕坐标")
+        hwnd = ctx.hwnd
+        if not hwnd:
+            self.logger.error("上下文未设置窗口句柄，无法转换为屏幕坐标")
             return (x, y)
 
         # 先转换为客户区物理坐标，再转换为屏幕坐标
         phys_x, phys_y = self.convert_client_logical_to_physical(x, y)
         try:
-            screen_x, screen_y = win32gui.ClientToScreen(ctx.hwnd, (phys_x, phys_y))
+            screen_x, screen_y = win32gui.ClientToScreen(hwnd, (phys_x, phys_y))
             self.logger.debug(
                 f"客户区逻辑→屏幕物理 | 逻辑: ({x},{y}) → 物理: ({phys_x},{phys_y}) → 屏幕: ({screen_x},{screen_y})"
             )
@@ -162,3 +247,55 @@ class CoordinateTransformer:
             f"客户区物理→原始 | 物理: ({x},{y}) → 原始: ({orig_x},{orig_y}) [缩放比 x:{scale_x:.2f}, y:{scale_y:.2f}]"
         )
         return (orig_x, orig_y)
+
+    def convert_client_physical_to_logical(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        新增：将客户区物理坐标（截图像素坐标）转换为客户区逻辑坐标
+        用于模板匹配结果的坐标转换（截图是客户区物理尺寸，需转逻辑坐标）
+        """
+        ctx = self._display_context
+        ratio = ctx.logical_to_physical_ratio  # 逻辑→物理的比例，反向则除以该比例
+
+        if ratio <= 0:
+            self.logger.error(f"无效的逻辑-物理比例: {ratio}，无法转换坐标")
+            return (x, y)
+
+        logical_x = int(round(x / ratio))
+        logical_y = int(round(y / ratio))
+
+        # 限制在客户区逻辑范围内
+        logical_w, logical_h = ctx.client_logical_res
+        logical_x = max(0, min(logical_x, logical_w - 1))
+        logical_y = max(0, min(logical_y, logical_h - 1))
+
+        self.logger.debug(
+            f"客户区物理→逻辑 | 物理: ({x},{y}) → 逻辑: ({logical_x},{logical_y}) [比例: {ratio:.2f}]"
+        )
+        return (logical_x, logical_y)
+
+    def convert_client_physical_rect_to_logical(self, rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+        新增：将客户区物理矩形（截图匹配结果）转换为客户区逻辑矩形
+        """
+        x, y, w, h = rect
+        if w <= 0 or h <= 0:
+            self.logger.error(f"无效矩形尺寸: {rect}")
+            return rect
+
+        # 转换左上角坐标
+        new_x, new_y = self.convert_client_physical_to_logical(x, y)
+
+        # 转换宽高（同比例缩放）
+        ctx = self._display_context
+        ratio = ctx.logical_to_physical_ratio
+        new_w = int(round(w / ratio)) if ratio > 0 else w
+        new_h = int(round(h / ratio)) if ratio > 0 else h
+
+        # 确保尺寸有效
+        new_w = max(1, new_w)
+        new_h = max(1, new_h)
+
+        self.logger.debug(
+            f"客户区物理矩形→逻辑 | 物理: {rect} → 逻辑: ({new_x},{new_y},{new_w},{new_h}) [比例: {ratio:.2f}]"
+        )
+        return (new_x, new_y, new_w, new_h)

@@ -9,6 +9,7 @@ from src.auto_control.config.ocr_config import get_default_languages
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.utils.display_context import RuntimeDisplayContext  # 新增导入
 from src.core.path_manager import path_manager
+import datetime
 
 
 class OCRProcessor:
@@ -111,13 +112,13 @@ class OCRProcessor:
                         is_base_region: bool = False,
                         return_base_coord: bool = False) -> Optional[Tuple[int, int, int, int]]:
         """
-        查找特定文本在图像中的位置（支持限定区域查找，返回最匹配的边界框）
-        
-        核心优化：基于display_context提供的客户区尺寸进行坐标校验，确保区域有效性
+        查找文本位置（按需求修改：去预处理+保存裁剪图+保存OCR结果图）
+        :param is_base_region: True=region是物理坐标（基准ROI），False=region是逻辑坐标
+        :return: 客户区逻辑坐标
         """
         target_lang = lang or self._default_lang
         
-        # 1. 基础输入参数校验
+        # 1. 基础校验
         if image is None or image.size == 0:
             self.logger.error("查找文本位置失败：无效的输入图像")
             return None
@@ -125,200 +126,149 @@ class OCRProcessor:
             self.logger.error("查找文本位置失败：目标文本为空")
             return None
         
-        # 2. 获取当前客户区尺寸（用于坐标校验）
-        client_logical_w, client_logical_h = self.display_context.client_logical_res
-        img_h, img_w = image.shape[:2]
-        self.logger.debug(
-            f"当前客户区逻辑尺寸: {client_logical_w}x{client_logical_h} | "
-            f"输入图像尺寸: {img_w}x{img_h}"
-        )
-        
-        # 3. 处理限定区域（坐标转换+裁剪图像+记录偏移量）
-        orig_image = image.copy()  # 保存原图用于最终坐标映射和调试保存
-        region_offset = (0, 0)     # 裁剪区域在原图中的偏移量（x, y）
-        processed_region = region
-        
-        # 区域坐标转换（基准坐标 -> 图像坐标）
-        if region and is_base_region:
+        # 2. 关键参数+时间戳（用于保存图片命名）
+        img_h, img_w = image.shape[:2]  # 截图物理尺寸
+        orig_image = image.copy()
+        region_offset_phys = (0, 0)
+        processed_region_phys = None  # 最终裁剪用的物理坐标
+        is_fullscreen = self.coord_transformer.is_fullscreen
+        timestamp = datetime.datetime.now().strftime("%H%M%S")  # 精确到毫秒，避免重名
+
+        # 3. 处理region（核心：区分is_base_region）
+        if region:
             try:
-                processed_region = self.coord_transformer.convert_original_rect_to_current_client(region)
-                self.logger.debug(f"区域坐标转换 | 基准区域: {region} -> 图像区域: {processed_region}")
+                if is_base_region:
+                    # is_base_region=True：region是物理坐标（全屏基准ROI），直接用
+                    rx_phys, ry_phys, rw_phys, rh_phys = region
+                    self.logger.debug(f"is_base_region=True | 直接使用物理ROI裁剪: {region}")
+                else:
+                    # is_base_region=False：region是逻辑坐标，转物理坐标
+                    rx_log, ry_log, rw_log, rh_log = region
+                    rx_phys, ry_phys = self.coord_transformer.convert_client_logical_to_physical(rx_log, ry_log)
+                    rw_phys = int(round(rw_log * self.display_context.logical_to_physical_ratio))
+                    rh_phys = int(round(rh_log * self.display_context.logical_to_physical_ratio))
+                    self.logger.debug(f"is_base_region=False | 逻辑ROI: {region} → 物理ROI: ({rx_phys},{ry_phys},{rw_phys},{rh_phys})")
+
+                # 校验物理坐标不超出截图范围
+                if rx_phys < 0: rx_phys = 0
+                if ry_phys < 0: ry_phys = 0
+                if rx_phys + rw_phys > img_w: rw_phys = img_w - rx_phys
+                if ry_phys + rh_phys > img_h: rh_phys = img_h - ry_phys
+                if rw_phys <= 0 or rh_phys <= 0:
+                    raise ValueError("裁剪后物理区域无效")
+
+                processed_region_phys = (rx_phys, ry_phys, rw_phys, rh_phys)
+                region_offset_phys = (rx_phys, ry_phys)
+                self.logger.debug(f"裁剪物理ROI确认: {processed_region_phys} | 截图尺寸: {img_w}x{img_h}")
             except Exception as e:
-                self.logger.error(f"限定区域参数无效：{str(e)}，自动切换为全图查找")
-                processed_region = None  # 校验失败时回退到全图查找
+                self.logger.error(f"region处理失败：{str(e)}，切换为全图查找")
+                processed_region_phys = None
 
-        if processed_region:
-            try:
-                r_x, r_y, r_w, r_h = processed_region
-                
-                # 增强版区域合法性校验（结合客户区尺寸）
-                if r_x < 0 or r_y < 0:
-                    raise ValueError(f"区域起始坐标不能为负数：(x={r_x}, y={r_y})")
-                if r_w <= 0 or r_h <= 0:
-                    raise ValueError(f"区域宽高必须为正数：(w={r_w}, h={r_h})")
-                if r_x + r_w > client_logical_w or r_y + r_h > client_logical_h:
-                    raise ValueError(
-                        f"区域超出客户区范围：客户区({client_logical_w}x{client_logical_h})，"
-                        f"区域终点({r_x+r_w}, {r_y+r_h})"
-                    )
-                # 图像尺寸可能小于客户区（如窗口化时），需二次校验
-                if r_x + r_w > img_w or r_y + r_h > img_h:
-                    self.logger.warning(
-                        f"区域超出图像范围，自动裁剪至图像边界 | 图像({img_w}x{img_h})，"
-                        f"区域终点({r_x+r_w}, {r_y+r_h})"
-                    )
-                    r_w = max(1, min(r_w, img_w - r_x))
-                    r_h = max(1, min(r_h, img_h - r_y))
-                
-                # 裁剪子图（OpenCV切片：[y_start:y_end, x_start:x_end]）
-                image = orig_image[r_y:r_y + r_h, r_x:r_x + r_w]
-                region_offset = (r_x, r_y)  # 记录裁剪区域的左上角偏移
-                self.logger.debug(
-                    f"已裁剪限定区域 | 客户区尺寸: {client_logical_w}x{client_logical_h} | "
-                    f"区域参数: {processed_region} | 裁剪后子图尺寸: {image.shape[1]}x{image.shape[0]}"
-                )
-                
-            except (TypeError, ValueError) as e:
-                self.logger.error(f"限定区域参数无效：{str(e)}，自动切换为全图查找")
-                processed_region = None  # 校验失败时回退到全图查找
-
-        # 4. 日志输出查找参数
-        self.logger.debug(
-            f"调用文本位置查找接口 | "
-            f"目标文本: '{target_text}' | "
-            f"语言: {target_lang} | "
-            f"模糊匹配: {'是' if fuzzy_match else '否'} | "
-            f"最小置信度: {min_confidence} | "
-            f"查找范围: {'指定区域' if processed_region else '全图'} | "
-            f"输入坐标类型: {'基准坐标' if is_base_region else '图像坐标'} | "
-            f"输出坐标类型: {'基准坐标' if return_base_coord else '图像坐标'}"
-        )
-        
-        # 5. 检测裁剪后图像中的所有文本
-        text_results = self.engine.detect_text(image, target_lang)
-        if not text_results:
-            self.logger.warning(f"在{'指定区域' if processed_region else '全图'}中未检测到任何文本，无法查找目标 '{target_text}'")
-            return None
-        
-        # 6. 筛选符合条件的匹配结果
-        best_match = None
-        highest_confidence = 0.0  # 记录最高置信度（优先选择置信度高的匹配）
-        
-        for result in text_results:
-            # 过滤低于最小置信度的结果
-            current_confidence = result['confidence']
-            if current_confidence < min_confidence:
-                self.logger.debug(
-                    f"跳过低置信度结果 | 文本: '{result['text']}' | 置信度: {current_confidence} < {min_confidence}"
-                )
-                continue
+        # 4. 裁剪截图 + 保存ROI裁剪图
+        cropped_image = orig_image
+        if processed_region_phys:
+            rx_phys, ry_phys, rw_phys, rh_phys = processed_region_phys
+            cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
+            self.logger.debug(f"截图裁剪完成 | 裁剪后子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}")
             
-            # 判断文本是否匹配目标
-            is_match = False
-            result_text = result['text'].strip()
-            
-            if fuzzy_match:
-                # 模糊匹配：使用difflib计算字符串相似度（≥0.8视为匹配）
-                from difflib import SequenceMatcher
-                similarity = SequenceMatcher(None, result_text, target_text.strip()).ratio()
-                is_match = similarity >= 0.8
-                self.logger.debug(
-                    f"模糊匹配结果 | 识别文本: '{result_text}' | 目标: '{target_text}' | "
-                    f"相似度: {similarity:.2f} | 匹配: {'是' if is_match else '否'}"
-                )
-            else:
-                # 精确匹配：完全相等（可根据需求改为忽略大小写）
-                is_match = result_text == target_text.strip()
-                self.logger.debug(
-                    f"精确匹配结果 | 识别文本: '{result_text}' | 目标: '{target_text}' | 匹配: {'是' if is_match else '否'}"
-                )
-            
-            # 找到更优匹配（置信度更高则更新）
-            if is_match and current_confidence > highest_confidence:
-                highest_confidence = current_confidence
-                # 关键：将子图中的边界框坐标映射回原图（加上裁剪区域的偏移量）
-                sub_x, sub_y, sub_w, sub_h = result['bbox']
-                orig_bbox = (
-                    sub_x + region_offset[0],  # 加上x方向偏移
-                    sub_y + region_offset[1],  # 加上y方向偏移
-                    sub_w,
-                    sub_h
-                )
-                best_match = orig_bbox
-                self.logger.debug(
-                    f"更新最佳匹配 | 置信度: {highest_confidence} | "
-                    f"子图位置: {result['bbox']} | 原图位置: {orig_bbox}"
-                )
-        
-        # 7. 保存最高置信度结果（无论是否匹配目标文本）
-        if text_results:
-            max_conf_result = max(text_results, key=lambda x: x['confidence'])
-            max_text = max_conf_result['text']
-            max_confidence = max_conf_result['confidence']
-            
-            # 生成文件名：findtext_时分秒_目标文本_最高置信度文本.png
-            timestamp = time.strftime("%H%M%S", time.localtime())
-            safe_target = ''.join(c if c.isalnum() else '_' for c in target_text)[:10]
-            safe_text = ''.join(c if c.isalnum() else '_' for c in max_text)[:10]
-            conf_str = f"{max_confidence:.2f}"
-            save_filename = f"findtext_{target_lang}_{timestamp}_target_{safe_target}_max_{safe_text}_{conf_str}.png"
-            save_path = os.path.join(self.debug_img_dir, save_filename)
-            
-            # 转换子图结果到原图坐标
-            sub_x, sub_y, sub_w, sub_h = max_conf_result['bbox']
-            orig_max_bbox = (
-                sub_x + region_offset[0],
-                sub_y + region_offset[1],
-                sub_w,
-                sub_h
-            )
-            # 保存标注图（使用原图）
-            self._save_ocr_debug_image(orig_image, [{'bbox': orig_max_bbox, 'text': max_text, 'confidence': max_confidence}], save_path)
-            self.logger.debug(f"已保存最高置信度OCR结果图: {save_filename} | 文本: {max_text} | 置信度: {max_confidence:.2f}")
-        
-        # 8. 结果坐标转换（图像坐标 -> 原始基准坐标，如果需要）
-        final_bbox = best_match
-        if best_match and return_base_coord:
-            # 使用CoordinateTransformer的方法转换坐标
-            final_bbox = self.coord_transformer.convert_current_client_rect_to_original(best_match)
-            self.logger.debug(f"结果坐标转换 | 当前客户区坐标: {best_match} -> 原始基准坐标: {final_bbox}")
-            
-        # 9. 输出最终结果
-        if final_bbox:
-            self.logger.info(
-                f"成功找到目标文本 | "
-                f"文本: '{target_text}' | "
-                f"位置: {final_bbox} | "
-                f"置信度: {highest_confidence:.2f} | "
-                f"坐标类型: {'基准坐标' if return_base_coord else '图像坐标'}"
-            )
-            return final_bbox
+            # 保存ROI裁剪图（原图未预处理，方便查看是否截到文本）
+            crop_save_path = os.path.join(self.debug_img_dir, f"roi_crop_{target_text}_{timestamp}.png")
+            cv2.imwrite(crop_save_path, cropped_image)
+            self.logger.info(f"ROI裁剪图保存成功: {crop_save_path}")
         else:
-            self.logger.warning(f"在{'指定区域' if processed_region else '全图'}中未找到匹配的目标文本: '{target_text}'")
-            return None
+            # 全图查找时，也保存全图（方便调试）
+            full_save_path = os.path.join(self.debug_img_dir, f"full_image_{target_text}_{timestamp}.png")
+            cv2.imwrite(full_save_path, orig_image)
+            self.logger.debug(f"全图查找，保存原图: {full_save_path}")
 
-    def batch_process(self, images: List[np.ndarray], lang: Optional[str] = None) -> List[List[Dict]]:
-        """批量处理图像（代理到引擎并添加调试保存）"""
-        target_lang = lang or self._default_lang
-        results = self.engine.batch_process(images, target_lang)
-        
-        # 为批量处理结果添加调试保存
-        for idx, (image, img_results) in enumerate(zip(images, results), 1):
-            if img_results:
-                max_conf_result = max(img_results, key=lambda x: x['confidence'])
-                max_text = max_conf_result['text']
-                max_confidence = max_conf_result['confidence']
-                
-                timestamp = time.strftime("%H%M%S", time.localtime())
-                safe_text = ''.join(c if c.isalnum() else '_' for c in max_text)[:20]
-                conf_str = f"{max_confidence:.2f}"
-                save_filename = f"batch_{self.engine_type}_{idx}_{target_lang}_{timestamp}_{safe_text}_{conf_str}.png"
-                save_path = os.path.join(self.debug_img_dir, save_filename)
-                
-                self._save_ocr_debug_image(image, [max_conf_result], save_path)
-                self.logger.debug(f"批量图像 {idx} 最高置信度结果已保存: {save_filename}")
-        
-        return results
+        # 5. 移除图像预处理（直接用原图识别）
+        image_rgb = cropped_image  # 无需任何处理，直接传给OCR
+        if len(image_rgb.shape) == 2:  # 若为灰度图，转RGB（EasyOCR要求）
+            image_rgb = cv2.cvtColor(image_rgb, cv2.COLOR_GRAY2RGB)
+
+        # 6. OCR识别（恢复默认参数，避免置信度过低）
+        raw_results = self.engine.reader.readtext(
+            image_rgb,
+            detail=1,
+            paragraph=False,
+            text_threshold=0.7,  # 恢复默认高阈值，提升识别精度
+            low_text=0.4,
+            link_threshold=0.8,
+            canvas_size=1024,
+            mag_ratio=1.0,  # 不放大，避免失真
+        )
+
+        # 7. 格式化结果 + 保存OCR识别结果图
+        formatted_results = []
+        for result in raw_results:
+            bbox, text, confidence = result[:3]
+            x_coords = [int(point[0]) for point in bbox]
+            y_coords = [int(point[1]) for point in bbox]
+            x_phys_sub = min(x_coords)
+            y_phys_sub = min(y_coords)
+            w_phys_sub = max(x_coords) - x_phys_sub
+            h_phys_sub = max(y_coords) - y_phys_sub
+            # 映射到原图物理坐标（加裁剪偏移）
+            x_phys_orig = x_phys_sub + region_offset_phys[0]
+            y_phys_orig = y_phys_sub + region_offset_phys[1]
+            formatted_results.append({
+                'text': text.strip(),
+                'bbox': (x_phys_sub, y_phys_sub, w_phys_sub, h_phys_sub),  # 裁剪图内的坐标（用于画图）
+                'bbox_orig_phys': (x_phys_orig, y_phys_orig, w_phys_sub, h_phys_sub),  # 原图物理坐标
+                'confidence': float(confidence)
+            })
+
+        # 保存OCR识别结果图（在裁剪图上标记识别到的文本）
+        ocr_save_path = os.path.join(self.debug_img_dir, f"ocr_result_{target_text}_{timestamp}.png")
+        self._save_ocr_debug_image(cropped_image, formatted_results, ocr_save_path)
+
+        # 8. 筛选匹配结果（恢复严格匹配，避免误识别）
+        best_match_phys = None
+        highest_confidence = 0.0
+        target_text_clean = target_text.strip().lower().replace(" ", "")
+        for res in formatted_results:
+            curr_conf = res['confidence']
+            if curr_conf < min_confidence:  # 按传入的min_confidence过滤（默认0.9）
+                continue
+            res_text_clean = res['text'].strip().lower().replace(" ", "")
+            
+            # 模糊匹配（如需严格匹配，可把similarity阈值设为1.0）
+            from difflib import SequenceMatcher
+            similarity = SequenceMatcher(None, res_text_clean, target_text_clean).ratio()
+            if similarity >= 0.8 and curr_conf > highest_confidence:  # 提高相似度阈值，减少误判
+                highest_confidence = curr_conf
+                best_match_phys = res['bbox_orig_phys']
+                self.logger.debug(
+                    f"匹配成功 | 识别文本: '{res['text']}' | 相似度: {similarity:.2f} | "
+                    f"置信度: {curr_conf:.4f} | 原图物理坐标: {best_match_phys}"
+                )
+
+        # 9. 物理坐标→逻辑坐标（返回结果）
+        if best_match_phys:
+            x_phys, y_phys, w_phys, h_phys = best_match_phys
+            x_log = self.coord_transformer.convert_client_physical_to_logical(x_phys, y_phys)[0]
+            y_log = self.coord_transformer.convert_client_physical_to_logical(x_phys, y_phys)[1]
+            w_log = int(round(w_phys / self.display_context.logical_to_physical_ratio))
+            h_log = int(round(h_phys / self.display_context.logical_to_physical_ratio))
+            
+            client_w_log, client_h_log = self.display_context.client_logical_res
+            x_log = max(0, min(x_log, client_w_log - 1))
+            y_log = max(0, min(y_log, client_h_log - 1))
+            w_log = max(1, min(w_log, client_w_log - x_log))
+            h_log = max(1, min(h_log, client_h_log - y_log))
+            
+            final_bbox_log = (x_log, y_log, w_log, h_log)
+            self.logger.info(
+                f"找到目标文本 | 文本: '{target_text}' | 逻辑坐标: {final_bbox_log} | "
+                f"物理坐标: {best_match_phys} | 置信度: {highest_confidence:.4f}"
+            )
+            return final_bbox_log
+        else:
+            self.logger.warning(
+                f"未找到目标文本: '{target_text}' | 识别到的文本: {[r['text'] for r in formatted_results]} | "
+                f"置信度范围: {[f'{r["confidence"]:.4f}' for r in formatted_results]}"
+            )
+            return None
 
     def _save_ocr_debug_image(self, original_image: np.ndarray, results: List[Dict], save_path: str) -> None:
         """根据OCR结果保存带有标记的调试图像"""
