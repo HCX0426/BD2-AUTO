@@ -2,12 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: py312",
+      "name": "Python: 启动主程序",
       "type": "python",
       "request": "launch",
-      "program": "${file}",
+      "program": "${workspaceFolder}/console_run.py",  // 相对根目录路径（核心）
       "console": "integratedTerminal",
-      "cwd": "${fileDirname}"
+      "cwd": "${workspaceFolder}",  // 工作目录设为项目根目录（避免路径错误）
+      "justMyCode": true
     }
   ]
 }

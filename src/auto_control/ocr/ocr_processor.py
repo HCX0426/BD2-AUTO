@@ -1,5 +1,4 @@
 import os
-import time
 from typing import Optional, Tuple, List, Dict
 import numpy as np
 import cv2
@@ -7,17 +6,16 @@ from src.auto_control.ocr.base_ocr import BaseOCR
 from src.auto_control.ocr.easyocr_wrapper import EasyOCRWrapper
 from src.auto_control.config.ocr_config import get_default_languages
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
-from src.auto_control.utils.display_context import RuntimeDisplayContext  # 新增导入
-from src.core.path_manager import path_manager
+from src.auto_control.utils.display_context import RuntimeDisplayContext
+from src.core.path_manager import path_manager,config
 import datetime
-
 
 class OCRProcessor:
     def __init__(self, 
                  engine: str = 'easyocr', 
                  logger=None, 
                  coord_transformer: Optional[CoordinateTransformer] = None,
-                 display_context: Optional[RuntimeDisplayContext] = None,  # 新增：运行时上下文
+                 display_context: Optional[RuntimeDisplayContext] = None,
                  **kwargs):
         """
         OCR处理器封装类（统一调用不同OCR引擎，支持坐标转换）
@@ -52,10 +50,9 @@ class OCRProcessor:
         
         # 初始化调试目录
         self.debug_img_dir = path_manager.get("match_ocr_debug")
-        os.makedirs(self.debug_img_dir, exist_ok=True)
         
-        # 初始化指定的OCR引擎（确保与BaseOCR接口兼容）
-        self.engine: BaseOCR = self._init_engine(** kwargs)
+        # 初始化指定的OCR引擎
+        self.engine: BaseOCR = self._init_engine()
         
         # 初始化完成日志
         self.logger.info(
@@ -87,9 +84,9 @@ class OCRProcessor:
         
         return DefaultLogger()
 
-    def _init_engine(self, **kwargs) -> BaseOCR:
+    def _init_engine(self) -> BaseOCR:
         """根据引擎类型初始化具体OCR实例（确保返回BaseOCR子类）"""
-        self.logger.debug(f"开始初始化{self.engine_type.upper()}引擎 | 参数: {kwargs}")
+        self.logger.debug(f"开始初始化{self.engine_type.upper()}引擎")
         
         if self.engine_type == 'easyocr':
             # 初始化EasyOCR（参数通过配置文件读取，无需额外传入）
@@ -106,15 +103,13 @@ class OCRProcessor:
                         image: np.ndarray,
                         target_text: str,
                         lang: Optional[str] = None,
-                        fuzzy_match: bool = False,
                         min_confidence: float = 0.9,
                         region: Optional[Tuple[int, int, int, int]] = None,
-                        is_base_region: bool = False,
-                        return_base_coord: bool = False) -> Optional[Tuple[int, int, int, int]]:
+                        is_fullscreen: bool = False) -> Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
         """
-        查找文本位置（按需求修改：去预处理+保存裁剪图+保存OCR结果图）
-        :param is_base_region: True=region是物理坐标（基准ROI），False=region是逻辑坐标
-        :return: 客户区逻辑坐标
+        查找文本位置
+        :param is_fullscreen: True=region是物理坐标（基准ROI），False=region是逻辑坐标
+        :return: (客户区逻辑坐标, 原图物理坐标) 或 None
         """
         target_lang = lang or self._default_lang
         
@@ -131,23 +126,22 @@ class OCRProcessor:
         orig_image = image.copy()
         region_offset_phys = (0, 0)
         processed_region_phys = None  # 最终裁剪用的物理坐标
-        is_fullscreen = self.coord_transformer.is_fullscreen
         timestamp = datetime.datetime.now().strftime("%H%M%S")  # 精确到毫秒，避免重名
 
         # 3. 处理region（核心：区分is_base_region）
         if region:
             try:
-                if is_base_region:
-                    # is_base_region=True：region是物理坐标（全屏基准ROI），直接用
+                if is_fullscreen:
+                    # is_fullscreen=True：region是物理坐标（全屏基准ROI），直接用
                     rx_phys, ry_phys, rw_phys, rh_phys = region
-                    self.logger.debug(f"is_base_region=True | 直接使用物理ROI裁剪: {region}")
+                    self.logger.debug(f"is_fullscreen=True | 直接使用物理ROI裁剪: {region}")
                 else:
-                    # is_base_region=False：region是逻辑坐标，转物理坐标
+                    # is_fullscreen=False：region是逻辑坐标，转物理坐标
                     rx_log, ry_log, rw_log, rh_log = region
                     rx_phys, ry_phys = self.coord_transformer.convert_client_logical_to_physical(rx_log, ry_log)
                     rw_phys = int(round(rw_log * self.display_context.logical_to_physical_ratio))
                     rh_phys = int(round(rh_log * self.display_context.logical_to_physical_ratio))
-                    self.logger.debug(f"is_base_region=False | 逻辑ROI: {region} → 物理ROI: ({rx_phys},{ry_phys},{rw_phys},{rh_phys})")
+                    self.logger.debug(f"is_fullscreen=False | 逻辑ROI: {region} → 物理ROI: ({rx_phys},{ry_phys},{rw_phys},{rh_phys})")
 
                 # 校验物理坐标不超出截图范围
                 if rx_phys < 0: rx_phys = 0
@@ -171,15 +165,17 @@ class OCRProcessor:
             cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
             self.logger.debug(f"截图裁剪完成 | 裁剪后子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}")
             
-            # 保存ROI裁剪图（原图未预处理，方便查看是否截到文本）
-            crop_save_path = os.path.join(self.debug_img_dir, f"roi_crop_{target_text}_{timestamp}.png")
-            cv2.imwrite(crop_save_path, cropped_image)
-            self.logger.info(f"ROI裁剪图保存成功: {crop_save_path}")
+            if config.get("debug", False):
+                # 保存ROI裁剪图（原图未预处理，方便查看是否截到文本）
+                crop_save_path = os.path.join(self.debug_img_dir, f"roi_crop_{target_text}_{timestamp}.png")
+                cv2.imwrite(crop_save_path, cropped_image)
+                self.logger.info(f"ROI裁剪图保存成功: {crop_save_path}")
         else:
-            # 全图查找时，也保存全图（方便调试）
-            full_save_path = os.path.join(self.debug_img_dir, f"full_image_{target_text}_{timestamp}.png")
-            cv2.imwrite(full_save_path, orig_image)
-            self.logger.debug(f"全图查找，保存原图: {full_save_path}")
+            if config.get("debug", False):
+                # 全图查找时，也保存全图（方便调试）
+                full_save_path = os.path.join(self.debug_img_dir, f"full_image_{target_text}_{timestamp}.png")
+                cv2.imwrite(full_save_path, orig_image)
+                self.logger.debug(f"全图查找，保存原图: {full_save_path}")
 
         # 5. 移除图像预处理（直接用原图识别）
         image_rgb = cropped_image  # 无需任何处理，直接传给OCR
@@ -191,11 +187,11 @@ class OCRProcessor:
             image_rgb,
             detail=1,
             paragraph=False,
-            text_threshold=0.7,  # 恢复默认高阈值，提升识别精度
+            text_threshold=0.6,
             low_text=0.4,
             link_threshold=0.8,
             canvas_size=1024,
-            mag_ratio=1.0,  # 不放大，避免失真
+            mag_ratio=1.0  # 不放大，避免失真
         )
 
         # 7. 格式化结果 + 保存OCR识别结果图
@@ -243,9 +239,10 @@ class OCRProcessor:
                     f"置信度: {curr_conf:.4f} | 原图物理坐标: {best_match_phys}"
                 )
 
-        # 9. 物理坐标→逻辑坐标（返回结果）
+        # 9. 物理坐标→逻辑坐标（返回双坐标：逻辑坐标+物理坐标）
         if best_match_phys:
             x_phys, y_phys, w_phys, h_phys = best_match_phys
+            # 物理坐标转逻辑坐标（直接调用CoordinateTransformer的现有方法）
             x_log = self.coord_transformer.convert_client_physical_to_logical(x_phys, y_phys)[0]
             y_log = self.coord_transformer.convert_client_physical_to_logical(x_phys, y_phys)[1]
             w_log = int(round(w_phys / self.display_context.logical_to_physical_ratio))
@@ -257,12 +254,13 @@ class OCRProcessor:
             w_log = max(1, min(w_log, client_w_log - x_log))
             h_log = max(1, min(h_log, client_h_log - y_log))
             
-            final_bbox_log = (x_log, y_log, w_log, h_log)
+            final_bbox_log = (x_log, y_log, w_log, h_log)  # 逻辑坐标
+            final_bbox_phys = (x_phys, y_phys, w_phys, h_phys)  # 物理坐标（直接返回，无需额外转换）
             self.logger.info(
                 f"找到目标文本 | 文本: '{target_text}' | 逻辑坐标: {final_bbox_log} | "
-                f"物理坐标: {best_match_phys} | 置信度: {highest_confidence:.4f}"
+                f"物理坐标: {final_bbox_phys} | 置信度: {highest_confidence:.4f}"
             )
-            return final_bbox_log
+            return (final_bbox_log, final_bbox_phys)  # 返回双坐标
         else:
             self.logger.warning(
                 f"未找到目标文本: '{target_text}' | 识别到的文本: {[r['text'] for r in formatted_results]} | "

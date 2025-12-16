@@ -1,5 +1,4 @@
 {
-  "env": "prod",
   "framework": {
     "default_ocr_engine": "easyocr",
     "default_device_uri": "Windows:///?title_re=.*BrownDust.*",

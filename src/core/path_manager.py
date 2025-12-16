@@ -34,7 +34,6 @@ class PathManager:
             self.dynamic_base = os.path.join(self.static_base, "runtime", "dev")
 
         os.makedirs(self.dynamic_base, exist_ok=True)
-        # 此处不打印，避免访问未定义的属性
 
     def _init_all_paths(self):
         """统一定义所有路径（包括 task_path）"""

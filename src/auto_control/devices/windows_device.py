@@ -326,7 +326,7 @@ class WindowsDevice(BaseDevice):
                 screen_res = self._get_screen_hardware_res()
 
                 # 初始化上下文基础信息
-                self.display_context.original_base_width = self.display_context.original_base_width  # 保持原始基准
+                self.display_context.original_base_width = self.display_context.original_base_width
                 self.display_context.original_base_height = self.display_context.original_base_height
                 self.display_context.hwnd = self.hwnd
                 self.display_context.screen_physical_width, self.display_context.screen_physical_height = screen_res
@@ -354,7 +354,7 @@ class WindowsDevice(BaseDevice):
         """断开连接，重置状态"""
         if self.hwnd:
             self.logger.info(f"断开与窗口的连接: {self.window_title}（句柄: {self.hwnd}）")
-            # 重置上下文（保留原始基准）
+            # 重置上下文
             if self.display_context:
                 self.display_context.update_from_window(
                     hwnd=None,
@@ -481,10 +481,7 @@ class WindowsDevice(BaseDevice):
             return False
 
     def get_resolution(self) -> Tuple[int, int]:
-        """获取当前客户区逻辑分辨率（从上下文读取）"""
-        if not self.display_context:
-            self.logger.warning("上下文未初始化，返回默认分辨率")
-            return (1920, 1080)
+        """获取当前客户区逻辑分辨率"""
         return self.display_context.client_logical_res
 
     def capture_screen(self, roi: Optional[Tuple[int, int, int, int]] = None) -> Optional[np.ndarray]:
@@ -660,15 +657,23 @@ class WindowsDevice(BaseDevice):
                     return False
 
             # 坐标转换：原始基准坐标 → 客户区逻辑坐标 → 屏幕全局物理坐标
-            client_pos = target_pos
-            if is_base_coord and self.coord_transformer:
-                client_pos = self.coord_transformer.convert_original_to_current_client(*target_pos)
-                self.logger.debug(f"原始坐标 {target_pos} → 客户区逻辑坐标 {client_pos}")
+            # 核心修改：根据全屏状态优化转换链路
+            ctx = self.display_context
+            if ctx.is_fullscreen:
+                # 全屏模式：无需区分逻辑/物理坐标，直接转屏幕坐标（跳过所有缩放）
+                # 因为全屏时客户区原点=屏幕原点，所以 target_pos 直接作为物理坐标传入
+                screen_x, screen_y = win32gui.ClientToScreen(ctx.hwnd, target_pos)
+                self.logger.debug(f"全屏模式点击 | 直接使用坐标: {target_pos} → 屏幕坐标: ({screen_x},{screen_y})")
+            else:
+                # 窗口模式：按原逻辑处理
+                client_pos = target_pos
+                if is_base_coord and self.coord_transformer:
+                    client_pos = self.coord_transformer.convert_original_to_current_client(*target_pos)
+                    self.logger.debug(f"窗口模式 | 原始坐标 {target_pos} → 客户区逻辑坐标 {client_pos}")
+                screen_x, screen_y = self.coord_transformer.convert_client_logical_to_screen_physical(*client_pos)
+                self.logger.debug(f"窗口模式点击 | 逻辑坐标 {client_pos} → 屏幕坐标: ({screen_x},{screen_y})")
 
-            # 客户区逻辑坐标 → 屏幕全局物理坐标
-            screen_x, screen_y = self.coord_transformer.convert_client_logical_to_screen_physical(*client_pos)
-
-            # 执行点击
+            # 执行点击（保持不变）
             win32api.SetCursorPos((screen_x, screen_y))
             time.sleep(0.1)
             down_event = win32con.MOUSEEVENTF_RIGHTDOWN if right_click else win32con.MOUSEEVENTF_LEFTDOWN
@@ -680,16 +685,17 @@ class WindowsDevice(BaseDevice):
                 if click_time > 1:
                     time.sleep(0.1)
 
+            # 日志优化
+            mode = "全屏" if ctx.is_fullscreen else "窗口"
             self.logger.info(
                 f"点击成功 | 屏幕物理坐标: ({screen_x},{screen_y}) | "
-                f"来源: {matched_template if isinstance(pos, (str, list)) else '直接坐标'}"
+                f"模式: {mode} | 来源: {'直接坐标' if isinstance(pos, tuple) else matched_template}"
             )
             return True
         except Exception as e:
             self.last_error = f"点击失败: {str(e)}"
             self.logger.error(self.last_error, exc_info=True)
             return False
-
     def swipe(
             self,
             start_x: int,

@@ -10,7 +10,8 @@ import numpy as np
 from src.auto_control.config.auto_config import TEMPLATE_EXTENSIONS
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.utils.display_context import RuntimeDisplayContext
-from src.core.path_manager import path_manager
+from src.core.path_manager import config, path_manager
+
 
 class ImageProcessor:
     """图像处理器：通用模板匹配优化（支持窗口化 + DPI缩放 + 多尺度匹配）
@@ -272,11 +273,12 @@ class ImageProcessor:
                 final_bbox_logical = self.coord_transformer.convert_client_physical_rect_to_logical(final_bbox_physical)
                 match_x, match_y, templ_w, templ_h = final_bbox_logical
             
-            # 保存调试图像
-            current_time = datetime.datetime.now().strftime("%H%M%S")
-            save_filename = f"{template_name_safe}_match_{final_score:.4f}_{method_used}_{current_time}.png"
-            save_path = os.path.join(self.debug_img_dir, save_filename)
-            self._save_match_debug_image(original_image, match_x, match_y, templ_w, templ_h, final_score, save_path)
+            if config.get("debug", False):
+                # 保存调试图像
+                current_time = datetime.datetime.now().strftime("%H%M%S")
+                save_filename = f"{template_name_safe}_match_{final_score:.4f}_{method_used}_{current_time}.png"
+                save_path = os.path.join(self.debug_img_dir, save_filename)
+                self._save_match_debug_image(original_image, match_x, match_y, templ_w, templ_h, final_score, save_path)
 
             self.logger.info(
                 f"模板匹配成功 | 模板: {template_name} | 方法: {method_used} | 位置: ({match_x},{match_y}) | 尺寸: {templ_w}x{templ_h} | 分数: {final_score:.4f}")

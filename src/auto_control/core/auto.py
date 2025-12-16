@@ -18,16 +18,17 @@ from ..devices.device_manager import DeviceManager
 from ..image.image_processor import ImageProcessor
 from ..utils.logger import Logger
 from ..ocr.ocr_processor import OCRProcessor
-from ..utils.display_context import RuntimeDisplayContext  # 确保导入正确
+from ..utils.display_context import RuntimeDisplayContext
 
 
 # 此层传递均为客户区坐标
+# 全屏：region是物理坐标（基准ROI）；窗口：region是逻辑坐标
 class Auto:
     def __init__(
         self,
         ocr_engine: str = DEFAULT_OCR_ENGINE,
         device_uri: str = DEFAULT_DEVICE_URI,
-        base_resolution: Tuple[int, int] = DEFAULT_BASE_RESOLUTION
+        original_base_res: Tuple[int, int] = DEFAULT_BASE_RESOLUTION
     ):
         # 线程安全控制
         self.lock = threading.Lock()
@@ -43,52 +44,50 @@ class Auto:
             console_log_level=logging.INFO     # 控制台只输出重要信息
         )
 
-        # 初始化运行时显示上下文（核心新增）
-        self.display_context = RuntimeDisplayContext(
-            original_base_width=base_resolution[0],
-            original_base_height=base_resolution[1]
+        # 初始化运行时显示上下文
+        self.display_context: RuntimeDisplayContext = RuntimeDisplayContext(
+            original_base_width=original_base_res[0],
+            original_base_height=original_base_res[1]
         )
-        self.logger.info(f"运行时显示上下文初始化完成 | 基准分辨率: {base_resolution}")
 
-        # 坐标转换初始化（注入上下文）
-        self.coord_transformer = CoordinateTransformer(
+        # 坐标转换初始化
+        self.coord_transformer: CoordinateTransformer = CoordinateTransformer(
             logger=self.logger,
-            display_context=self.display_context  # 传递上下文
+            display_context=self.display_context
         )
 
-        # 图像处理器初始化（注入上下文）
-        self.image_processor = ImageProcessor(
-            original_base_res=base_resolution,
+        # 图像处理器初始化
+        self.image_processor: ImageProcessor = ImageProcessor(
+            original_base_res=original_base_res,
             logger=self.logger,
             coord_transformer=self.coord_transformer,
-            display_context=self.display_context  # 传递上下文
+            display_context=self.display_context
         )
 
-        # 设备管理器初始化（注入上下文）
-        self.device_manager = DeviceManager(
+        # 设备管理器初始化
+        self.device_manager: DeviceManager = DeviceManager(
             logger=self.logger,
             image_processor=self.image_processor,
             coord_transformer=self.coord_transformer,
-            display_context=self.display_context  # 传递上下文
+            display_context=self.display_context
         )
 
-        # OCR处理器初始化（注入上下文）
-        self.ocr_processor = OCRProcessor(
+        # OCR处理器初始化
+        self.ocr_processor: OCRProcessor = OCRProcessor(
             engine=ocr_engine, 
             logger=self.logger, 
             coord_transformer=self.coord_transformer,
-            display_context=self.display_context  # 传递上下文
+            display_context=self.display_context
         )
 
         # 设备配置
         self.default_device_uri = device_uri
-        self.base_resolution = base_resolution
 
         # 结果与错误追踪
         self.last_result = None    # 最后操作结果
         self.last_error = None     # 最后错误信息
 
-        self.logger.info("自动化系统初始化完成（已集成运行时显示上下文）")
+        self.logger.info("自动化系统初始化完成")
 
     def check_should_stop(self) -> bool:
         """线程安全检查任务中断标志"""
@@ -166,7 +165,7 @@ class Auto:
 
     # ======================== 设备管理方法 ========================
     def add_device(self, device_uri: str = DEFAULT_DEVICE_URI, timeout: float = 10.0) -> bool:
-        """添加设备并自动更新分辨率（优化时序）"""
+        """添加设备并自动更新分辨率"""
         if self.check_should_stop():
             self.logger.info("添加设备任务被中断")
             self.last_result = False
@@ -179,7 +178,7 @@ class Auto:
                 logger=self.logger,
                 image_processor=self.image_processor,
                 coord_transformer=self.coord_transformer,
-                display_context=self.display_context  # 传递上下文
+                display_context=self.display_context
             )
             self.last_result = result
 
@@ -191,7 +190,7 @@ class Auto:
                     original_active = self.device_manager.active_device
                     self.device_manager.set_active_device(device_uri)
 
-                    # 调用带重试的分辨率更新（同步到上下文）
+                    # 调用带重试的分辨率更新
                     if self._update_resolution_from_device():
                         self.logger.info(f"设备 {device_uri} 添加并更新分辨率成功")
                     else:
@@ -254,13 +253,12 @@ class Auto:
                     continue
 
             resolution = device.get_resolution()
-            if not resolution or resolution == (0, 0):
-                self.last_error = "获取分辨率无效: 分辨率为(0,0)"
+            if not resolution:
+                self.last_error = "获取客户区逻辑分辨率无效"
                 self.logger.error(f"错误: {self.last_error}")
                 return False
 
             # 同步更新上下文和转换器
-            self.base_resolution = resolution
             device._update_dynamic_window_info()
             self.logger.debug(
                 f"从设备更新分辨率 | 客户区尺寸: {resolution} | "
@@ -289,8 +287,7 @@ class Auto:
 
         # 启动时同步一次设备分辨率到上下文
         self._update_resolution_from_device()
-        self.logger.info("BD2-AUTO 自动化系统已启动")
-        print("BD2-AUTO 已启动")
+        self.logger.info("自动化系统开始启动")
 
     def stop(self) -> None:
         """停止自动化系统（清理资源）"""
@@ -331,7 +328,6 @@ class Auto:
             "total_devices": len(self.device_manager),
             "device_list": list(self.device_manager.devices.keys()),
             "device_states": device_states,
-            "base_resolution": self.base_resolution,
             "loaded_templates": len(self.image_processor.templates) if self.image_processor else 0,
             "last_error": self.last_error,
             "last_result": self.last_result
@@ -491,7 +487,7 @@ class Auto:
 
         # 处理ROI：核心修改！全屏模式直接用基准ROI（物理坐标），窗口才转换
         region = None  # 传给find_text_position的区域（物理坐标，全屏）/逻辑坐标（窗口）
-        is_fullscreen = self.coord_transformer.is_fullscreen  # 获取全屏状态
+        is_fullscreen = self.coord_transformer.is_fullscreen  # 获取全屏状态（直接调用CoordinateTransformer的属性）
         if roi:
             try:
                 # 步骤1：校验roi格式
@@ -506,7 +502,7 @@ class Auto:
                     region = roi
                     self.logger.debug(f"全屏模式 | 直接使用基准ROI（物理坐标）: {region} | 截图物理尺寸: {screen.shape[1]}x{screen.shape[0]}")
                 else:
-                    # 窗口模式：基准ROI（物理）→ 客户区逻辑坐标
+                    # 窗口模式：基准ROI（物理）→ 客户区逻辑坐标（调用CoordinateTransformer的现有方法）
                     region = self.coord_transformer.convert_original_rect_to_current_client(roi)
                     if not region or len(region) != 4:
                         raise ValueError("ROI转换后无效")
@@ -527,30 +523,43 @@ class Auto:
                 self.last_result = None
                 return None
 
-        # 调用OCR识别：关键！全屏时传is_base_region=True（告知是物理坐标），窗口传False
-        text_pos = self.ocr_processor.find_text_position(
+        # 调用OCR识别：获取双坐标（逻辑坐标+物理坐标）
+        ocr_result = self.ocr_processor.find_text_position(
             image=screen,  # 物理截图
             target_text=target_text,
             lang=lang,
-            fuzzy_match=DEFAULT_TEXT_FUZZY_MATCH,
             region=region,
-            is_base_region=is_fullscreen  # 全屏：region是物理坐标（基准ROI）；窗口：region是逻辑坐标
+            is_fullscreen=is_fullscreen  # 全屏：region是物理坐标；窗口：region是逻辑坐标
         )
 
-        if not text_pos:
+        if not ocr_result:
             self.last_error = f"文本点击失败: 未识别到文本 '{target_text}'"
             self.logger.warning(f"警告: {self.last_error}")
             self.last_result = None
             return None
 
-        # 计算点击坐标（text_pos是逻辑坐标，适配device.click）
-        x, y, w, h = text_pos
-        client_center_x = x + w // 2
-        client_center_y = y + h // 2
-        self.logger.info(
-            f"识别到文本 '{target_text}' | 客户区逻辑坐标: ({x},{y},{w},{h}) | 中心: ({client_center_x},{client_center_y}) | "
-            f"模式: {'全屏' if is_fullscreen else '窗口'}"
-        )
+        # 提取OCR返回的双坐标（直接使用，无需额外转换）
+        text_pos_log, text_pos_phys = ocr_result
+        x_log, y_log, w_log, h_log = text_pos_log
+        x_phys, y_phys, w_phys, h_phys = text_pos_phys
+
+        # 区分全屏/窗口模式计算点击坐标
+        if is_fullscreen:
+            # 全屏模式：使用物理坐标计算中心点（正确位置）
+            client_center_x = x_phys + w_phys // 2
+            client_center_y = y_phys + h_phys // 2
+            self.logger.info(
+                f"识别到文本 '{target_text}' | 物理坐标: ({x_phys},{y_phys},{w_phys},{h_phys}) | "
+                f"物理中心点: ({client_center_x},{client_center_y}) | 模式: 全屏"
+            )
+        else:
+            # 窗口模式：使用逻辑坐标计算中心点（原有逻辑正确）
+            client_center_x = x_log + w_log // 2
+            client_center_y = y_log + h_log // 2
+            self.logger.info(
+                f"识别到文本 '{target_text}' | 客户区逻辑坐标: ({x_log},{y_log},{w_log},{h_log}) | "
+                f"中心: ({client_center_x},{client_center_y}) | 模式: 窗口"
+            )
 
         if click:
             click_result = device.click(
@@ -558,7 +567,7 @@ class Auto:
                 duration=duration,
                 click_time=click_time,
                 right_click=right_click,
-                is_base_coord=False  # text_pos是逻辑坐标，无需转换
+                is_base_coord=is_fullscreen  # 全屏模式下pos是物理坐标（基准坐标），窗口模式下是逻辑坐标
             )
             if not click_result:
                 self.last_error = device.last_error or "文本点击执行失败"

@@ -1,17 +1,18 @@
-import os
-import sys
+
 import time
 
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QSplitter, QGroupBox, QListWidget, QListWidgetItem,
-    QPushButton, QTextEdit, QProgressBar, QMessageBox, QFormLayout,
-    QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QFrame,
-    QStackedWidget, QSizePolicy, QButtonGroup, QRadioButton, QSlider,
-    QFileDialog
-)
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QThread, QTimer, pyqtSlot
-from PyQt6.QtGui import QFont, QTextCursor, QIcon
+from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QFont, QIcon, QTextCursor
+from PyQt6.QtWidgets import (QApplication, QButtonGroup, QCheckBox,
+                             QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
+                             QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+                             QListWidget, QListWidgetItem, QMainWindow,
+                             QMessageBox, QProgressBar, QPushButton,
+                             QRadioButton, QSlider, QSpinBox, QSplitter,
+                             QStackedWidget, QTextEdit, QVBoxLayout, QWidget)
+
+from src.auto_control.core.auto import Auto
+
 
 class LogSignal(QWidget):
     log_updated = pyqtSignal(str)
@@ -114,7 +115,7 @@ class MainWindow(QMainWindow):
         self.config_manager = config_manager
         self.settings_manager = settings_manager
         self.task_mapping = task_mapping
-        self.auto_instance = auto_instance  # 核心控制实例
+        self.auto_instance: Auto = auto_instance  # 核心控制实例
         
         # UI状态变量
         self.task_thread = None
@@ -406,9 +407,9 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            import subprocess
             import os
-            
+            import subprocess
+
             # 检查路径是否存在
             if not os.path.exists(pc_game_path):
                 QMessageBox.critical(self, "错误", f"游戏路径不存在: {pc_game_path}")
@@ -719,13 +720,15 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "警告", "请至少选择一个任务")
                 return
             
-            # 关键修复：启动任务前，强制重置所有停止标志
+            # 启动任务前，强制重置所有停止标志
             self.auto_instance.set_should_stop(False)  # 重置Auto实例的停止标志
             if self.task_worker:
                 self.task_worker.should_stop = False    # 重置worker的停止标志
+                self.auto_instance.device_manager.remove_device(self.auto_instance.default_device_uri)
             
             self.set_task_running_state(True)
             self.log(f"开始执行任务，共 {len(selected_tasks)} 个任务")
+            
             
             if not self.auto_instance.add_device():
                 raise Exception(f"设备添加失败: {getattr(self.auto_instance, 'last_error', '未知错误')}")

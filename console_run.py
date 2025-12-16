@@ -24,7 +24,7 @@ def console_execute():
             return False
         auto.start()
 
-        cancel_pos = auto.text_click("取消", click=True,roi=(850,600,60,40))
+        cancel_pos = auto.text_click("任务",roi=(628,963,100,100))
         print("取消按钮位置: "+str(cancel_pos))
         # click_success = auto.click((179,158))
         # back_to_main(auto, max_attempts=2)
