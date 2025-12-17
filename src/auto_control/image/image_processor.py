@@ -6,7 +6,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
-# 导入坐标转换器和运行时上下文
 from src.auto_control.config.auto_config import TEMPLATE_EXTENSIONS
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.utils.display_context import RuntimeDisplayContext
@@ -14,66 +13,44 @@ from src.core.path_manager import config, path_manager
 
 
 class ImageProcessor:
-    """图像处理器：通用模板匹配优化（支持窗口化 + DPI缩放 + 多尺度匹配）
-
-    注意：所有模板必须在目标应用全屏运行时录制，
-    且 original_base_res 必须设置为录制时的物理屏幕分辨率（如 1920x1080）。
-    窗口模式下运行时会自动根据 DPI 和客户区尺寸进行适配。
-    """
+    """图像处理器：对齐OCR流程（先裁剪ROI，再模板缩放）"""
 
     def __init__(
         self,
         original_base_res: Tuple[int, int],
         logger: Optional[logging.Logger] = None,
         coord_transformer: Optional[CoordinateTransformer] = None,
-        display_context: Optional[RuntimeDisplayContext] = None,  # 新增：运行时上下文
+        display_context: Optional[RuntimeDisplayContext] = None,
         template_dir: str = None
     ) -> None:
-        """初始化图像处理器
-
-        Args:
-            original_base_res: 原始基准分辨率 (width, height)
-            logger: 日志记录器实例
-            coord_transformer: 坐标转换器实例（必填）
-            display_context: 运行时显示上下文（必填）
-            template_dir: 模板目录路径
-        """
         self.logger = logger or self._create_default_logger()
         self.template_dir = template_dir or path_manager.get("task_template")
         self.templates: Dict[str, np.ndarray] = {}
         self.coord_transformer = coord_transformer
-        self.display_context = display_context  # 存储上下文引用
-        self.original_base_res = original_base_res
+        self.display_context = display_context
+        self.original_base_res = original_base_res  # 全屏录制的基准分辨率（全图）
+        self.debug_img_dir = path_manager.get("match_temple_debug")
+        os.makedirs(self.debug_img_dir, exist_ok=True)
 
-        # 校验必要依赖
+        # 校验依赖
         if not self.coord_transformer:
             raise ValueError("坐标转换器(coord_transformer)必须初始化后传入")
         if not self.display_context:
             raise ValueError("运行时上下文(display_context)必须初始化后传入")
 
-        # 调试目录
-        self.debug_img_dir = path_manager.get("match_temple_debug")
-        os.makedirs(self.debug_img_dir, exist_ok=True)
-
-        # 通用匹配参数
-        self.edge_threshold = 0.3
+        # 匹配参数（对齐OCR的严格匹配）
+        self.min_confidence = 0.8  # 模板匹配阈值（对齐OCR）
         self.min_template_size = (10, 10)
-        self.nms_radius = 5
-        self.match_algorithms = {
-            "gray": cv2.TM_CCOEFF_NORMED,
-            "color": cv2.TM_CCOEFF_NORMED,
-            "fallback": cv2.TM_SQDIFF_NORMED
-        }
+        self.match_algorithm = cv2.TM_CCOEFF_NORMED  # 统一使用归一化相关系数匹配
 
-        # 加载模板
         self.load_all_templates()
         self.logger.info(
             f"初始化完成 | 加载模板数: {len(self.templates)} | "
             f"原始基准分辨率: {self.original_base_res}"
         )
 
+    # ------------------------------ 原有辅助方法（load/save模板）保持不变 ------------------------------
     def load_template(self, template_name: str, template_path: Optional[str] = None) -> bool:
-        """加载原始彩色模板图像（保持原有逻辑）"""
         try:
             if not template_path:
                 template_path = os.path.join(self.template_dir, f"{template_name}.png")
@@ -81,226 +58,19 @@ class ImageProcessor:
                 self.logger.error(f"模板不存在: {template_path}")
                 return False
 
-            # 直接加载彩色图像
             template_color = cv2.imread(template_path, cv2.IMREAD_COLOR)
             if template_color is None:
-                self.logger.error(f"读取模板失败 (可能不是有效的图像文件): {template_path}")
+                self.logger.error(f"读取模板失败: {template_path}")
                 return False
 
-            # 以 BGR 格式存储
             self.templates[template_name] = template_color
+            self.logger.debug(f"加载模板成功: {template_name} | 原始尺寸: {template_color.shape[:2]}")
             return True
         except Exception as e:
             self.logger.error(f"加载模板异常: {str(e)}", exc_info=True)
             return False
 
-    def _scale_template_to_current_size(
-        self,
-        template: np.ndarray,
-        dpi_scale: float,
-        hwnd: Optional[int] = None,
-    ) -> Optional[np.ndarray]:
-        """将模板缩放到匹配当前显示大小和 DPI 的尺寸
-        核心变更：从 display_context 读取窗口状态和尺寸
-        """
-        try:
-            # === 1. 从上下文获取窗口状态和尺寸 ===
-            is_fullscreen = self.display_context.is_fullscreen
-            logical_client_w, logical_client_h = self.display_context.client_logical_res
-            current_phys_w = logical_client_w * dpi_scale
-            current_phys_h = logical_client_h * dpi_scale
-
-            # === 2. 原始基准分辨率（物理像素）===
-            orig_base_w, orig_base_h = self.original_base_res
-
-            # === 3. 计算缩放比例 ===
-            total_scale = current_phys_w / orig_base_w
-            if is_fullscreen:
-                # 全屏模式下使用屏幕物理分辨率计算
-                screen_phys_w, screen_phys_h = self.display_context.screen_physical_res
-                total_scale = screen_phys_w / orig_base_w
-
-            # === 4. 验证并应用最终缩放 ===
-            if total_scale <= 0:
-                self.logger.error(f"无效的总缩放因子: {total_scale}")
-                return template
-
-            scaled_w = max(self.min_template_size[0], int(round(template.shape[1] * total_scale)))
-            scaled_h = max(self.min_template_size[1], int(round(template.shape[0] * total_scale)))
-
-            interpolation = cv2.INTER_AREA if total_scale < 1.0 else cv2.INTER_CUBIC
-            scaled_template = cv2.resize(template, (scaled_w, scaled_h), interpolation=interpolation)
-
-            self.logger.debug(
-                f"模板缩放完成 | 模式: {'全屏' if is_fullscreen else '窗口'} | "
-                f"DPI: {dpi_scale:.2f} | "
-                f"逻辑客户区: ({logical_client_w}, {logical_client_h}) | "
-                f"物理客户区: ({current_phys_w:.1f}, {current_phys_h:.1f}) | "
-                f"原始基准分辨率: {self.original_base_res} | "
-                f"总缩放因子: {total_scale:.4f} | "
-                f"缩放后模板尺寸: {scaled_template.shape[:2]}"
-            )
-
-            return scaled_template
-
-        except Exception as e:
-            self.logger.error(f"模板缩放失败: {e}", exc_info=True)
-            return template
-
-    def match_template(
-        self,
-        image: np.ndarray,
-        template: Union[str, np.ndarray],
-        dpi_scale: float = 1.0,
-        hwnd: Optional[int] = None,
-        threshold: float = 0.9,
-        scale_template: bool = True,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-        is_base_roi: bool = False
-    ) -> Optional[Tuple[int, int, int, int]]:
-        """改进版模板匹配（核心逻辑不变，依赖上下文进行坐标转换）"""
-        try:
-            if isinstance(template, str):
-                template_bgr = self.get_template(template)
-                if template_bgr is None:
-                    self.logger.error(f"模板「{template}」不存在或加载失败")
-                    return None
-            else:
-                template_bgr = template
-                if template_bgr is None:
-                    self.logger.error("自定义模板为None，匹配终止")
-                    return None
-
-            original_image = image.copy()
-            template_name = template if isinstance(template, str) else "custom_template"
-            template_name_safe = template_name.replace('/', '_').replace('\\', '_')
-
-            roi_offset = (0, 0)
-            if roi:
-                roi_result = self.extract_roi_region(image, roi, is_base_roi)
-                if len(roi_result) != 2:
-                    self.logger.error(f"ROI提取返回值异常: {roi_result}，使用全图匹配")
-                else:
-                    image, roi_rect = roi_result
-                    roi_offset = (roi_rect[0], roi_rect[1])
-
-            base_template_bgr = template_bgr
-            if scale_template:
-                scaled_template = self._scale_template_to_current_size(template_bgr, dpi_scale, hwnd)
-                if scaled_template is not None:
-                    base_template_bgr = scaled_template
-
-            if len(image.shape) == 3:
-                image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            else:
-                image_gray = image
-            image_gray = image_gray.astype(np.uint8)
-
-            # 多尺度匹配准备
-            scales = [0.8, 0.9, 1.0, 1.1, 1.2]
-            all_matches = []  # 存储 (score, (x, y, w, h), method_name)
-            early_stop_threshold = 0.95  # 高置信度提前停止
-
-            # 按尺度循环执行匹配
-            for scale in scales:
-                h_orig, w_orig = base_template_bgr.shape[:2]
-                scaled_w = max(1, int(round(w_orig * scale)))
-                scaled_h = max(1, int(round(h_orig * scale)))
-
-                if scaled_h < self.min_template_size[0] or scaled_w < self.min_template_size[1]:
-                    continue
-
-                scaled_template_gray = cv2.resize(
-                    cv2.cvtColor(base_template_bgr, cv2.COLOR_BGR2GRAY) 
-                    if len(base_template_bgr.shape) == 3 else base_template_bgr,
-                    (scaled_w, scaled_h), 
-                    interpolation=cv2.INTER_AREA
-                )
-                scaled_template_bgr = cv2.resize(
-                    base_template_bgr, 
-                    (scaled_w, scaled_h), 
-                    interpolation=cv2.INTER_AREA
-                )
-
-                methods_to_try = [
-                    ("Gray", lambda: self._match_gray(image_gray, scaled_template_gray)),
-                    ("Color", lambda: self._match_color(image, scaled_template_bgr)),
-                    ("Edge", lambda: self._match_edge(image_gray, scaled_template_gray)),
-                    ("ORB", lambda: self._match_orb(image_gray, scaled_template_gray))
-                ]
-
-                found_high_confidence_match_in_this_scale = False
-
-                for method_name, method_func in methods_to_try:
-                    try:
-                        score, location_data = method_func()
-
-                        if method_name == "ORB":
-                            if score >= threshold:
-                                all_matches.append((score, location_data, method_name))
-                                if score >= early_stop_threshold:
-                                    found_high_confidence_match_in_this_scale = True
-                                    break
-                        else:
-                            if score >= threshold:
-                                x, y = location_data
-                                all_matches.append((score, (x, y, scaled_w, scaled_h), method_name))
-                                if score >= early_stop_threshold:
-                                    found_high_confidence_match_in_this_scale = True
-                                    break
-
-                    except Exception as e:
-                        self.logger.warning(f"匹配方法 {method_name} 在尺度 {scale} 执行时出错: {e}")
-
-                if found_high_confidence_match_in_this_scale:
-                    break  # 提前停止后续尺度匹配
-
-            if not all_matches:
-                return None
-
-            best_match = max(all_matches, key=lambda item: item[0])
-            final_score, final_bbox, method_used = best_match
-            match_x, match_y, templ_w, templ_h = final_bbox
-
-            match_x += roi_offset[0]
-            match_y += roi_offset[1]
-
-            # 调用转换器转换坐标
-            is_fullscreen = self.display_context.is_fullscreen
-            if not is_fullscreen:
-                # 窗口模式：截图像素（客户区物理）→ 客户区逻辑
-                final_bbox_physical = (match_x, match_y, templ_w, templ_h)
-                final_bbox_logical = self.coord_transformer.convert_client_physical_rect_to_logical(final_bbox_physical)
-                match_x, match_y, templ_w, templ_h = final_bbox_logical
-            
-            if config.get("debug", False):
-                # 保存调试图像
-                current_time = datetime.datetime.now().strftime("%H%M%S")
-                save_filename = f"{template_name_safe}_match_{final_score:.4f}_{method_used}_{current_time}.png"
-                save_path = os.path.join(self.debug_img_dir, save_filename)
-                self._save_match_debug_image(original_image, match_x, match_y, templ_w, templ_h, final_score, save_path)
-
-            self.logger.info(
-                f"模板匹配成功 | 模板: {template_name} | 方法: {method_used} | 位置: ({match_x},{match_y}) | 尺寸: {templ_w}x{templ_h} | 分数: {final_score:.4f}")
-
-            return (match_x, match_y, templ_w, templ_h)
-
-        except Exception as e:
-            self.logger.error(f"模板匹配异常失败: {str(e)}", exc_info=True)
-            return None
-
-    def _create_default_logger(self) -> logging.Logger:
-        """创建默认日志记录器（保持不变）"""
-        logger = logging.getLogger("ImageProcessor")
-        logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        return logger
-
     def load_all_templates(self) -> None:
-        """加载模板目录下所有支持格式的模板文件（保持不变）"""
         if not os.path.isdir(self.template_dir):
             self.logger.warning(f"模板目录不存在: {self.template_dir}")
             return
@@ -309,17 +79,11 @@ class ImageProcessor:
             for filename in files:
                 if filename.lower().endswith(TEMPLATE_EXTENSIONS):
                     rel_path = os.path.relpath(root, self.template_dir)
-                    template_name = (
-                        os.path.join(rel_path, os.path.splitext(filename)[0]).replace('\\', '/')
-                        if rel_path != "." else os.path.splitext(filename)[0]
-                    )
+                    template_name = os.path.join(rel_path, os.path.splitext(filename)[0]).replace('\\', '/') if rel_path != "." else os.path.splitext(filename)[0]
                     template_path = os.path.join(root, filename)
                     self.load_template(template_name, template_path)
 
     def get_template(self, template_name: str) -> Optional[np.ndarray]:
-        """获取指定名称的模板（保持不变）"""
-        loaded_names = list(self.templates.keys())
-        self.logger.debug(f"获取模板: {template_name} | 已加载: {len(loaded_names)}")
         template = self.templates.get(template_name)
         if template is None:
             self.logger.warning(f"模板未找到，尝试重新加载: {template_name}")
@@ -327,110 +91,328 @@ class ImageProcessor:
                 template = self.templates.get(template_name)
         return template
 
-    def save_template(self, template_name: str, image: np.ndarray) -> bool:
-        """保存模板图像（保持不变）"""
-        try:
-            template_path = os.path.join(self.template_dir, f"{template_name}.png")
-
-            if image is None:
-                self.logger.error("保存模板失败：图像为None")
-                return False
-
-            # 确保图像是 uint8 格式
-            if image.dtype != np.uint8:
-                image = np.clip(image, 0, 255).astype(np.uint8)
-
-            cv2.imwrite(template_path, image)
-            self.load_template(template_name, template_path)
-            self.logger.info(f"保存模板成功: {template_name} -> {template_path} | 尺寸: {image.shape}")
-            return True
-        except Exception as e:
-            self.logger.error(f"保存模板异常: {str(e)}", exc_info=True)
-            return False
-
-    def _save_match_debug_image(
-        self,
-        original_image: np.ndarray,
-        match_x: int,
-        match_y: int,
-        templ_w: int,
-        templ_h: int,
-        match_confidence: float,
-        save_path: str
-    ) -> None:
-        """保存匹配调试图像（保持不变）"""
-        try:
-            debug_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR) if len(
-                original_image.shape) == 2 else original_image.copy()
-            cv2.rectangle(debug_image, (match_x, match_y), (match_x + templ_w, match_y + templ_h), (0, 0, 255), 2)
-            center_x = match_x + templ_w // 2
-            center_y = match_y + templ_h // 2
-            cv2.circle(debug_image, (center_x, center_y), 3, (0, 255, 0), -1)
-            text_lines = [
-                f"Match: ({match_x}, {match_y})",
-                f"Size: {templ_w}x{templ_h}",
-                f"Center: ({center_x}, {center_y})",
-                f"Confidence: {match_confidence:.4f}"
-            ]
-            text_y = max(0, match_y - 10)
-            for i, line in enumerate(text_lines):
-                y_pos = text_y - i * 20 if text_y - i * 20 > 0 else match_y + templ_h + 15 + i * 20
-                cv2.putText(debug_image, line, (match_x, y_pos),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
-            info_text = f"Image: {debug_image.shape[1]}x{debug_image.shape[0]}"
-            cv2.putText(debug_image, info_text, (debug_image.shape[1] - 200, debug_image.shape[0] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
-            cv2.imwrite(save_path, debug_image)
-            self.logger.info(f"调试图保存: {save_path} | 匹配度: {match_confidence:.4f}")
-        except Exception as e:
-            self.logger.error(f"保存调试图异常: {str(e)}", exc_info=True)
-
-    def extract_roi_region(
+    # ------------------------------ 核心修改：匹配流程对齐OCR ------------------------------
+    def match_template(
         self,
         image: np.ndarray,
-        roi: Tuple[int, int, int, int],
-        is_base_roi: bool = False
-    ) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
-        """提取感兴趣区域（基于上下文的坐标转换优化）"""
+        template: Union[str, np.ndarray],
+        threshold: float = 0.8,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        is_fullscreen: bool = False  # 与OCR一致：True=物理ROI，False=逻辑ROI
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """
+        对齐OCR流程的模板匹配：先裁剪ROI→再缩放模板→最后匹配
+        核心流程：全图 → ROI预处理（校验+调整）→ 裁剪子图 → 模板缩放（适配子图）→ 匹配 → 坐标映射
+        Args:
+            image: 输入图像（WindowsDevice返回的物理截图，BGR格式）
+            template: 模板名称（字符串）或自定义模板（np.ndarray）
+            threshold: 匹配阈值（0~1，值越高匹配越严格）
+            roi: 感兴趣区域（x, y, w, h），格式由is_fullscreen决定
+            is_fullscreen: ROI类型标记（True=物理坐标，False=逻辑坐标）
+        Returns:
+            匹配成功返回逻辑坐标矩形（x, y, w, h），失败返回None
+        """
         try:
-            if image is None:
-                self.logger.error("提取ROI失败：图像为None")
-                raise ValueError("Input image cannot be None")
-            roi_x, roi_y, roi_w, roi_h = roi
-            
-            # 从上下文获取当前客户区逻辑尺寸用于边界校验
-            client_logical_w, client_logical_h = self.display_context.client_logical_res
+            # ======================================
+            # 1. 输入参数校验
+            # ======================================
+            if image is None or image.size == 0:
+                self.logger.error("模板匹配失败：输入图像为空或无效")
+                return None
+            orig_image = image.copy()  # 保存原图（用于调试和坐标映射）
+            image_phys_h, image_phys_w = orig_image.shape[:2]  # 原图物理尺寸（高, 宽）
+            timestamp = datetime.datetime.now().strftime("%H%M%S%f")[:-3]  # 时间戳（精确到毫秒）
+            roi_offset_phys = (0, 0)  # ROI在原图中的物理坐标偏移（用于映射回全图）
 
-            if is_base_roi and self.coord_transformer:
-                try:
-                    # 使用转换器将原始基准ROI转换为当前客户区逻辑ROI
-                    converted_roi = self.coord_transformer.convert_original_rect_to_current_client(roi)
-                    roi_x, roi_y, roi_w, roi_h = converted_roi
-                    self.logger.debug(f"原始ROI {roi} 转换为当前逻辑ROI {converted_roi}")
-                except Exception as e:
-                    self.logger.warning(f"ROI转换失败，使用原始ROI: {str(e)}")
-
-            # 基于当前客户区尺寸裁剪ROI范围
-            img_h, img_w = image.shape[:2]
-            roi_x = max(0, min(roi_x, min(client_logical_w, img_w) - 1))
-            roi_y = max(0, min(roi_y, min(client_logical_h, img_h) - 1))
-            roi_w = max(1, min(roi_w, min(client_logical_w, img_w) - roi_x))
-            roi_h = max(1, min(roi_h, min(client_logical_h, img_h) - roi_y))
-
-            roi_image = image[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w]
+            # ======================================
+            # 2. 加载模板并校验
+            # ======================================
+            if isinstance(template, str):
+                template_bgr = self.get_template(template)
+                if template_bgr is None:
+                    self.logger.error(f"模板匹配失败：模板「{template}」不存在或加载失败")
+                    return None
+                template_name = template
+            else:
+                if not isinstance(template, np.ndarray) or template.size == 0:
+                    self.logger.error("模板匹配失败：自定义模板为无效numpy数组")
+                    return None
+                template_bgr = template
+                template_name = "custom_template"
+            template_orig_h, template_orig_w = template_bgr.shape[:2]  # 模板原始尺寸（高, 宽）
             self.logger.debug(
-                f"提取ROI成功 | 逻辑客户区尺寸: {client_logical_w}x{client_logical_h} | "
-                f"ROI: ({roi_x},{roi_y},{roi_w},{roi_h}) | 裁剪后尺寸: {roi_image.shape[:2]}"
+                f"开始模板匹配 | 模板: {template_name} | 原始尺寸: (宽={template_orig_w}, 高={template_orig_h}) | "
+                f"输入图像尺寸: (宽={image_phys_w}, 高={image_phys_h}) | 阈值: {threshold} | "
+                f"ROI: {roi} | 全屏模式: {is_fullscreen}"
             )
-            return (roi_image, (roi_x, roi_y, roi_w, roi_h))
-        except Exception as e:
-            self.logger.error(f"提取ROI异常: {str(e)}", exc_info=True)
-            if image is not None:
-                return (image, (0, 0, image.shape[1], image.shape[0]))
-            raise ValueError("Cannot extract ROI: input image is None")
 
+            # ======================================
+            # 3. ROI预处理（对齐OCR逻辑：校验+调整）
+            # ======================================
+            cropped_image = orig_image  # 裁剪后的子图（默认全图）
+            processed_roi = roi  # 处理后的ROI（用于后续计算）
+            if roi:
+                try:
+                    # 校验ROI格式
+                    if not isinstance(roi, (tuple, list)) or len(roi) != 4:
+                        raise ValueError(f"ROI格式无效（需为4元组/列表），当前: {type(roi)} {roi}")
+                    rx, ry, rw, rh = roi
+                    if rx < 0 or ry < 0 or rw <= 0 or rh <= 0:
+                        raise ValueError(f"ROI参数无效（x/y非负，w/h正数），当前: ({rx}, {ry}, {rw}, {rh})")
+
+                    if is_fullscreen:
+                        # 全屏模式：ROI是物理坐标，直接校验边界
+                        rx_phys, ry_phys, rw_phys, rh_phys = rx, ry, rw, rh
+                        # 调整ROI避免超出原图范围
+                        rx_phys = max(0, rx_phys)
+                        ry_phys = max(0, ry_phys)
+                        rw_phys = min(rw_phys, image_phys_w - rx_phys)
+                        rh_phys = min(rh_phys, image_phys_h - ry_phys)
+                        self.logger.debug(
+                            f"全屏模式ROI处理 | 原始物理ROI: {roi} → 调整后: ({rx_phys}, {ry_phys}, {rw_phys}, {rh_phys}) | "
+                            f"原图尺寸: (宽={image_phys_w}, 高={image_phys_h})"
+                        )
+                    else:
+                        # 窗口模式：ROI是逻辑坐标 → 转换为物理坐标
+                        client_w_log, client_h_log = self.display_context.client_logical_res
+                        # 先调整逻辑ROI避免超出客户区
+                        rx_log = max(0, rx)
+                        ry_log = max(0, ry)
+                        rw_log = min(rw, client_w_log - rx_log)
+                        rh_log = min(rh, client_h_log - ry_log)
+                        if rw_log <= 0 or rh_log <= 0:
+                            raise ValueError(
+                                f"逻辑ROI超出客户区范围 | 原始ROI: {roi} | 客户区逻辑尺寸: {client_w_log}x{client_h_log}")
+                        # 逻辑坐标 → 物理坐标（应用DPI缩放）
+                        rx_phys, ry_phys = self.coord_transformer.convert_client_logical_to_physical(rx_log, ry_log)
+                        ratio = self.display_context.logical_to_physical_ratio
+                        rw_phys = int(round(rw_log * ratio))
+                        rh_phys = int(round(rh_log * ratio))
+                        self.logger.debug(
+                            f"窗口模式ROI处理 | 原始逻辑ROI: {roi} → 调整后逻辑ROI: ({rx_log}, {ry_log}, {rw_log}, {rh_log}) → "
+                            f"物理ROI: ({rx_phys}, {ry_phys}, {rw_phys}, {rh_phys}) | DPI比例: {ratio:.2f}"
+                        )
+
+                    # 最终校验物理ROI有效性
+                    if rw_phys <= 0 or rh_phys <= 0:
+                        raise ValueError(f"物理ROI无效（尺寸≤0）: ({rx_phys}, {ry_phys}, {rw_phys}, {rh_phys})")
+
+                    # 裁剪ROI子图（OpenCV切片：[y_start:y_end, x_start:x_end]）
+                    cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
+                    roi_offset_phys = (rx_phys, ry_phys)  # 记录ROI在原图的偏移
+                    cropped_phys_h, cropped_phys_w = cropped_image.shape[:2]  # 子图物理尺寸（高, 宽）
+                    self.logger.debug(
+                        f"ROI裁剪完成 | 子图尺寸: (宽={cropped_phys_w}, 高={cropped_phys_h}) | "
+                        f"原图偏移: {roi_offset_phys} | 裁剪后图像是否有效: {cropped_image.size > 0}"
+                    )
+
+                    # 调试模式：保存裁剪后的子图
+                    if config.get("debug", False):
+                        crop_save_path = os.path.join(
+                            self.debug_img_dir, f"roi_crop_{template_name}_{timestamp}.png"
+                        )
+                        cv2.imwrite(crop_save_path, cropped_image)
+                        self.logger.debug(f"ROI子图已保存至: {crop_save_path}")
+
+                    processed_roi = (rx, ry, rw, rh)  # 保存原始输入ROI（用于计算缩放比例）
+
+                except ValueError as e:
+                    self.logger.warning(f"ROI处理失败：{str(e)}，自动切换为全图匹配")
+                    cropped_image = orig_image
+                    processed_roi = None
+                    roi_offset_phys = (0, 0)
+
+            # ======================================
+            # 4. 计算模板缩放比例（基于裁剪子图尺寸）
+            # ======================================
+            cropped_phys_h, cropped_phys_w = cropped_image.shape[:2]  # 子图尺寸（高, 宽）
+            if processed_roi:
+                # 有ROI：缩放比例 = 子图尺寸 ÷ 原始ROI尺寸（保持宽高比）
+                orig_roi_w, orig_roi_h = processed_roi[2], processed_roi[3]
+                scale_ratio_w = cropped_phys_w / orig_roi_w if orig_roi_w != 0 else 1.0
+                scale_ratio_h = cropped_phys_h / orig_roi_h if orig_roi_h != 0 else 1.0
+                scale_ratio = min(scale_ratio_w, scale_ratio_h)  # 取最小值避免超出子图
+                self.logger.debug(
+                    f"模板缩放比例计算（有ROI）| 子图尺寸: (宽={cropped_phys_w}, 高={cropped_phys_h}) | "
+                    f"原始ROI尺寸: (宽={orig_roi_w}, 高={orig_roi_h}) | "
+                    f"宽比例: {scale_ratio_w:.4f} | 高比例: {scale_ratio_h:.4f} | 最终比例: {scale_ratio:.4f}"
+                )
+            else:
+                # 无ROI：缩放比例 = 子图尺寸 ÷ 原始基准尺寸（全图缩放）
+                orig_base_w, orig_base_h = self.original_base_res
+                scale_ratio_w = cropped_phys_w / orig_base_w
+                scale_ratio_h = cropped_phys_h / orig_base_h
+                scale_ratio = min(scale_ratio_w, scale_ratio_h)
+                self.logger.debug(
+                    f"模板缩放比例计算（无ROI）| 子图尺寸: (宽={cropped_phys_w}, 高={cropped_phys_h}) | "
+                    f"原始基准尺寸: (宽={orig_base_w}, 高={orig_base_h}) | "
+                    f"宽比例: {scale_ratio_w:.4f} | 高比例: {scale_ratio_h:.4f} | 最终比例: {scale_ratio:.4f}"
+                )
+
+            # ======================================
+            # 5. 缩放模板（适配裁剪子图）
+            # ======================================
+            # 计算缩放后尺寸（确保不小于最小模板尺寸）
+            scaled_w = max(self.min_template_size[0], int(round(template_orig_w * scale_ratio)))
+            scaled_h = max(self.min_template_size[1], int(round(template_orig_h * scale_ratio)))
+            # 双重保险：确保模板不超过子图尺寸（留2像素余量避免匹配失败）
+            scaled_w = min(scaled_w, cropped_phys_w - 2)
+            scaled_h = min(scaled_h, cropped_phys_h - 2)
+
+            if scaled_w <= 0 or scaled_h <= 0:
+                self.logger.error(
+                    f"模板缩放失败 | 缩放后尺寸无效: (宽={scaled_w}, 高={scaled_h}) | "
+                    f"子图尺寸: (宽={cropped_phys_w}, 高={cropped_phys_h}) | 比例: {scale_ratio:.4f}"
+                )
+                return None
+
+            # 执行缩放（缩小用INTER_AREA，放大用INTER_CUBIC，保证清晰度）
+            interpolation = cv2.INTER_AREA if scale_ratio < 1.0 else cv2.INTER_CUBIC
+            scaled_template = cv2.resize(template_bgr, (scaled_w, scaled_h), interpolation=interpolation)
+            self.logger.debug(
+                f"模板缩放完成 | 原始尺寸: (宽={template_orig_w}, 高={template_orig_h}) → "
+                f"缩放后: (宽={scaled_w}, 高={scaled_h}) | 插值方式: {interpolation}"
+            )
+
+            # ======================================
+            # 6. 图像预处理（灰度转换，提高匹配稳定性）
+            # ======================================
+            # 子图转灰度
+            if len(cropped_image.shape) == 3:
+                cropped_gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+            else:
+                cropped_gray = cropped_image  # 已为灰度图
+            # 模板转灰度
+            if len(scaled_template.shape) == 3:
+                template_gray = cv2.cvtColor(scaled_template, cv2.COLOR_BGR2GRAY)
+            else:
+                template_gray = scaled_template  # 已为灰度图
+
+            # ======================================
+            # 7. 执行模板匹配
+            # ======================================
+            # 校验匹配条件（模板尺寸不能大于子图尺寸）
+            if (template_gray.shape[0] > cropped_gray.shape[0]) or (template_gray.shape[1] > cropped_gray.shape[1]):
+                self.logger.error(
+                    f"模板匹配失败：模板尺寸超过子图尺寸 | "
+                    f"模板尺寸: (宽={template_gray.shape[1]}, 高={template_gray.shape[0]}) | "
+                    f"子图尺寸: (宽={cropped_gray.shape[1]}, 高={cropped_gray.shape[0]})"
+                )
+                return None
+
+            # 执行匹配
+            result = cv2.matchTemplate(cropped_gray, template_gray, self.match_algorithm)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            match_score = max_val  # TM_CCOEFF_NORMED：值范围[-1,1]，越大匹配度越高
+            self.logger.debug(
+                f"模板匹配完成 | 最高匹配分数: {match_score:.4f} | 阈值: {threshold} | "
+                f"匹配位置（子图内）: {max_loc}"
+            )
+
+            # 筛选有效匹配结果
+            if match_score < threshold:
+                self.logger.debug(
+                    f"模板匹配失败：分数不足 | 模板: {template_name} | 分数: {match_score:.4f} < 阈值: {threshold}"
+                )
+                # 调试模式：保存匹配失败的调试图
+                if config.get("debug", False):
+                    debug_img = cropped_image.copy()
+                    cv2.putText(
+                        debug_img, f"Score: {match_score:.4f} < Threshold: {threshold}",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
+                    )
+                    save_path = os.path.join(
+                        self.debug_img_dir, f"match_fail_{template_name}_{timestamp}.png"
+                    )
+                    cv2.imwrite(save_path, debug_img)
+                    self.logger.debug(f"匹配失败调试图已保存至: {save_path}")
+                return None
+
+            # ======================================
+            # 8. 坐标映射（子图内坐标 → 全图物理坐标 → 逻辑坐标）
+            # ======================================
+            # 子图内匹配坐标（x, y）
+            match_x_sub, match_y_sub = max_loc
+            # 映射到全图物理坐标（子图坐标 + ROI偏移）
+            match_x_phys = match_x_sub + roi_offset_phys[0]
+            match_y_phys = match_y_sub + roi_offset_phys[1]
+            # 匹配区域尺寸（缩放后的模板尺寸）
+            match_w_phys = scaled_template.shape[1]
+            match_h_phys = scaled_template.shape[0]
+            # 全图物理坐标矩形
+            full_bbox_phys = (match_x_phys, match_y_phys, match_w_phys, match_h_phys)
+            self.logger.debug(
+                f"坐标映射完成 | 子图内坐标: ({match_x_sub}, {match_y_sub}) → "
+                f"全图物理坐标: {full_bbox_phys} | ROI偏移: {roi_offset_phys}"
+            )
+
+            # 物理坐标 → 逻辑坐标（适配窗口/全屏模式）
+            ctx = self.display_context
+            if ctx.is_fullscreen:
+                # 全屏模式：物理坐标 = 逻辑坐标
+                final_bbox_log = full_bbox_phys
+            else:
+                # 窗口模式：物理坐标 → 逻辑坐标（反向应用DPI缩放）
+                x_log = self.coord_transformer.convert_client_physical_to_logical(match_x_phys, match_y_phys)[0]
+                y_log = self.coord_transformer.convert_client_physical_to_logical(match_x_phys, match_y_phys)[1]
+                ratio = ctx.logical_to_physical_ratio
+                w_log = int(round(match_w_phys / ratio)) if ratio > 0 else match_w_phys
+                h_log = int(round(match_h_phys / ratio)) if ratio > 0 else match_h_phys
+                # 校验逻辑坐标有效性（避免超出客户区）
+                client_w_log, client_h_log = ctx.client_logical_res
+                x_log = max(0, min(x_log, client_w_log - 1))
+                y_log = max(0, min(y_log, client_h_log - 1))
+                w_log = max(1, min(w_log, client_w_log - x_log))
+                h_log = max(1, min(h_log, client_h_log - y_log))
+                final_bbox_log = (x_log, y_log, w_log, h_log)
+
+            # ======================================
+            # 9. 调试模式：保存匹配成功的结果图
+            # ======================================
+            if config.get("debug", False):
+                debug_img = orig_image.copy()
+                # 绘制物理坐标矩形（红色边框）
+                cv2.rectangle(
+                    debug_img, (match_x_phys, match_y_phys),
+                    (match_x_phys + match_w_phys, match_y_phys + match_h_phys),
+                    (0, 0, 255), 2
+                )
+                # 绘制中心点（绿色圆点）
+                center_x_phys = match_x_phys + match_w_phys // 2
+                center_y_phys = match_y_phys + match_h_phys // 2
+                cv2.circle(debug_img, (center_x_phys, center_y_phys), 3, (0, 255, 0), -1)
+                # 添加文本信息
+                text = (
+                    f"Template: {template_name} | Score: {match_score:.4f} | "
+                    f"Phys: {full_bbox_phys} | Log: {final_bbox_log}"
+                )
+                cv2.putText(
+                    debug_img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, (0, 255, 0), 1, lineType=cv2.LINE_AA
+                )
+                # 保存图片
+                save_path = os.path.join(
+                    self.debug_img_dir, f"match_success_{template_name}_{timestamp}.png"
+                )
+                cv2.imwrite(save_path, debug_img)
+                self.logger.debug(f"匹配成功调试图已保存至: {save_path}")
+
+            # ======================================
+            # 10. 返回结果（逻辑坐标矩形）
+            # ======================================
+            self.logger.info(
+                f"模板匹配成功 | 模板: {template_name} | 逻辑坐标: {final_bbox_log} | "
+                f"物理坐标: {full_bbox_phys} | 匹配分数: {match_score:.4f} | "
+                f"模式: {'全屏' if ctx.is_fullscreen else '窗口'}"
+            )
+            return final_bbox_log
+
+        except Exception as e:
+            self.logger.error(f"模板匹配异常 | 模板: {template_name} | 错误: {str(e)}", exc_info=True)
+            return None
+
+    # ------------------------------ 其他辅助方法（保持不变） ------------------------------
     def get_center(self, rect: Union[Tuple[int, int, int, int], np.ndarray]) -> Tuple[int, int]:
-        """计算矩形中心点（保持不变）"""
         if rect is None:
             self.logger.warning("计算中心失败：矩形为None")
             return (0, 0)
@@ -443,194 +425,16 @@ class ImageProcessor:
             x, y, w, h = map(int, rect)
             center_x = x + w // 2
             center_y = y + h // 2
-            self.logger.debug(f"计算中心成功: {rect} -> ({center_x},{center_y})")
             return (center_x, center_y)
         except (ValueError, TypeError):
             self.logger.warning(f"计算中心失败：矩形值错误 {rect}")
             return (0, 0)
 
-    def _to_edge(self, img: np.ndarray) -> np.ndarray:
-        """提取图像边缘（保持不变）"""
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-        gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        return cv2.Canny(gray, 30, 120)
-
-    def _match_gray(
-        self,
-        image_gray: np.ndarray,
-        template_gray: np.ndarray,
-        mask: Optional[np.ndarray] = None
-    ) -> Tuple[float, Tuple[int, int]]:
-        """灰度模板匹配（保持不变）"""
-        try:
-            res = cv2.matchTemplate(image_gray, template_gray, cv2.TM_CCOEFF_NORMED, mask=mask)
-            _, max_val, _, max_loc = cv2.minMaxLoc(res)
-            return max_val, max_loc
-        except Exception as e:
-            self.logger.error(f"_match_gray 执行失败: {e}", exc_info=True)
-            return -1, (0, 0)
-
-    def _match_color(
-        self,
-        image_bgr: np.ndarray,
-        template_bgr: np.ndarray,
-        mask: Optional[np.ndarray] = None
-    ) -> Tuple[float, Tuple[int, int]]:
-        """彩色模板匹配（保持不变）"""
-        try:
-            scores = []
-            locs = []
-            for i in range(3):  # B, G, R
-                res = cv2.matchTemplate(image_bgr[:, :, i], template_bgr[:, :, i], cv2.TM_CCOEFF_NORMED, mask=mask)
-                _, max_val, _, max_loc = cv2.minMaxLoc(res)
-                scores.append(max_val)
-                locs.append(max_loc)
-
-            avg_score = np.mean(scores)
-            avg_loc = locs[0]
-
-            return float(avg_score), avg_loc
-        except Exception as e:
-            self.logger.error(f"_match_color 执行失败: {e}", exc_info=True)
-            return -1, (0, 0)
-
-    def _match_edge(
-        self,
-        image_gray: np.ndarray,
-        template_gray: np.ndarray
-    ) -> Tuple[float, Tuple[int, int]]:
-        """基于边缘的模板匹配（保持不变）"""
-        try:
-            edge_img = self._to_edge(image_gray)
-            edge_tpl = self._to_edge(template_gray)
-
-            res = cv2.matchTemplate(edge_img, edge_tpl, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(res)
-            return max_val, max_loc
-        except Exception as e:
-            self.logger.error(f"_match_edge 执行失败: {e}", exc_info=True)
-            return -1, (0, 0)
-
-    def _match_orb(
-        self,
-        image_gray: np.ndarray,
-        template_gray: np.ndarray
-    ) -> Tuple[float, Tuple[int, int, int, int]]:
-        """ORB 特征点匹配（保持不变）"""
-        try:
-            orb = cv2.ORB_create(nfeatures=500)
-            bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-
-            kp1, des1 = orb.detectAndCompute(template_gray, None)
-            kp2, des2 = orb.detectAndCompute(image_gray, None)
-
-            if des1 is None or des2 is None or len(des1) < 2 or len(des2) < 2:
-                self.logger.debug("ORB匹配失败：模板或图像中未检测到足够特征点")
-                return -1, (0, 0, 0, 0)
-
-            matches = bf.match(des1, des2)
-            if len(matches) < 10:
-                self.logger.debug(f"ORB匹配点数不足: {len(matches)}")
-                return -1, (0, 0, 0, 0)
-
-            matches = sorted(matches, key=lambda x: x.distance)
-
-            src_pts = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-            dst_pts = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-
-            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-            matches_mask = mask.ravel().tolist()
-
-            if M is None or sum(matches_mask) < 10:
-                self.logger.debug("ORB RANSAC 内点数不足")
-                return -1, (0, 0, 0, 0)
-
-            h, w = template_gray.shape
-            pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
-            dst = cv2.perspectiveTransform(pts, M)
-
-            x_min = int(np.min(dst[:, :, 0]))
-            x_max = int(np.max(dst[:, :, 0]))
-            y_min = int(np.min(dst[:, :, 1]))
-            y_max = int(np.max(dst[:, :, 1]))
-
-            confidence = sum(matches_mask) / len(matches_mask) if len(matches_mask) > 0 else 0
-            adjusted_confidence = min(1.0, confidence * 2)
-
-            return adjusted_confidence, (x_min, y_min, x_max - x_min, y_max - y_min)
-
-        except Exception as e:
-            self.logger.error(f"_match_orb 执行失败: {e}", exc_info=True)
-            return -1, (0, 0, 0, 0)
-
-    def find_color_location(
-        self,
-        image: np.ndarray,
-        target_color: Union[Tuple[int, int, int], List[Tuple[int, int, int]], np.ndarray],
-        roi: Optional[Tuple[int, int, int, int]] = None,
-        tolerance: int = 20,
-        is_base_roi: bool = False
-    ) -> Optional[Tuple[int, int, int, int]]:
-        """查找目标颜色位置（基于上下文的ROI转换优化）"""
-        try:
-            roi_offset = (0, 0)
-            # 1. 基于上下文提取ROI
-            if roi:
-                extracted_result = self.extract_roi_region(image, roi, is_base_roi)
-                if isinstance(extracted_result, tuple) and len(extracted_result) >= 2:
-                    image, roi_rect = extracted_result
-                    roi_offset = (roi_rect[0], roi_rect[1])
-                else:
-                    self.logger.error("ROI提取失败，使用全图进行颜色匹配。")
-
-            # 2. 颜色匹配逻辑（保持不变）
-            matched_mask = None
-            if isinstance(target_color, (tuple, list)) and len(target_color) > 0:
-                if isinstance(target_color[0], int):
-                    target_colors = [target_color]
-                else:
-                    target_colors = target_color
-
-                matched_mask = np.zeros(image.shape[:2], dtype=np.uint8)
-                for color in target_colors:
-                    b, g, r = color
-                    lower_bound = np.array([max(0, b - tolerance), max(0, g - tolerance), max(0, r - tolerance)])
-                    upper_bound = np.array([min(255, b + tolerance), min(255, g + tolerance), min(255, r + tolerance)])
-                    color_mask = cv2.inRange(image, lower_bound, upper_bound)
-                    matched_mask = cv2.bitwise_or(matched_mask, color_mask)
-
-            elif isinstance(target_color, np.ndarray) and target_color.ndim == 2:
-                if target_color.shape[:2] == image.shape[:2]:
-                    matched_mask = target_color
-                else:
-                    self.logger.error("提供的颜色掩码图像尺寸与目标图像不匹配。")
-                    return None
-            else:
-                self.logger.error("无效的 target_color 参数类型或格式。")
-                return None
-
-            # 3. 查找轮廓或最大连通域
-            if matched_mask is not None and np.any(matched_mask):
-                contours, _ = cv2.findContours(matched_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if contours:
-                    largest_contour = max(contours, key=cv2.contourArea)
-                    x, y, w, h = cv2.boundingRect(largest_contour)
-
-                    # 4. 应用ROI偏移并基于上下文校验坐标有效性
-                    final_x = x + roi_offset[0]
-                    final_y = y + roi_offset[1]
-                    client_w, client_h = self.display_context.client_logical_res
-                    
-                    if final_x < 0 or final_y < 0 or final_x + w > client_w or final_y + h > client_h:
-                        self.logger.warning(f"颜色匹配区域超出客户区范围: ({final_x},{final_y},{w},{h})")
-                        return None
-
-                    self.logger.debug(f"颜色匹配成功: 位置({final_x}, {final_y}), 尺寸({w}, {h})")
-                    return (final_x, final_y, w, h)
-
-            self.logger.debug("在指定区域内未找到匹配的颜色。")
-            return None
-
-        except Exception as e:
-            self.logger.error(f"find_color_location 执行失败: {e}", exc_info=True)
-            return None
+    def _create_default_logger(self) -> logging.Logger:
+        logger = logging.getLogger("ImageProcessor")
+        logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        return logger
