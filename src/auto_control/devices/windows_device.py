@@ -632,6 +632,7 @@ class WindowsDevice(BaseDevice):
                     self.logger.error(f"点击失败: {self.last_error}")
                     return False
 
+                is_base_roi = self.display_context.is_fullscreen
                 # ROI预处理：对齐OCR逻辑，窗口模式自动调整超出范围的ROI
                 processed_roi = roi
                 if roi:
@@ -642,7 +643,7 @@ class WindowsDevice(BaseDevice):
                         rx, ry, rw, rh = roi
                         if rx < 0 or ry < 0 or rw <= 0 or rh <= 0:
                             raise ValueError(f"ROI参数无效：x={rx},y={ry}（需非负）；w={rw},h={rh}（需正数）")
-
+                        
                         # 窗口模式（is_base_roi=False）：ROI是逻辑坐标，需调整边界
                         if not is_base_roi:
                             # 调整ROI避免超出客户区逻辑尺寸
@@ -686,7 +687,7 @@ class WindowsDevice(BaseDevice):
                         processed_roi = None
 
                 # 截图（传入预处理后的ROI）
-                screen = self.capture_screen(roi=processed_roi if is_base_roi else None)
+                screen = self.capture_screen()
                 if screen is None:
                     self.last_error = "截图失败，无法执行模板匹配"
                     self.logger.error(f"点击失败: {self.last_error}")
@@ -700,7 +701,7 @@ class WindowsDevice(BaseDevice):
                     match_result = self.image_processor.match_template(
                         image=screen,
                         template=template_name,
-                        threshold=0.6,  # 可根据需求调整阈值
+                        threshold=0.6,
                         roi=processed_roi,
                         is_fullscreen=is_base_roi
                     )
@@ -803,6 +804,7 @@ class WindowsDevice(BaseDevice):
             self.last_error = f"点击执行异常: {str(e)}"
             self.logger.error(f"点击失败: {self.last_error}", exc_info=True)
             return False
+  
     def swipe(
             self,
             start_x: int,

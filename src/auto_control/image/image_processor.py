@@ -113,6 +113,10 @@ class ImageProcessor:
             匹配成功返回逻辑坐标矩形（x, y, w, h），失败返回None
         """
         try:
+            self.logger.debug(
+                f"全屏模式参数: {is_fullscreen} | 上下文全屏状态: {self.display_context.is_fullscreen} | "
+                f"ROI: {roi} | 阈值: {threshold}"
+            )
             # ======================================
             # 1. 输入参数校验
             # ======================================
