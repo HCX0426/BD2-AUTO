@@ -28,7 +28,7 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
             # 初始状态：进入公会界面
             if state == "init":
                 if back_to_main(auto):
-                    if auto.template_click("get_guild/公会标识"):
+                    if auto.template_click("get_guild/公会标识",roi=(310,111,130,100)):
                         logger.info("成功进入公会界面")
                         auto.sleep(4)
                         state = "entered"
@@ -36,7 +36,7 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                 
             # 检查公会商店
             if state == "entered":
-                if auto.check_element_exist("get_guild/公会商店"):
+                if auto.check_element_exist("get_guild/公会商店",roi=(1631,16,230,70)):
                     logger.info("检测到公会商店")
                     state = "checking"
                 else:
@@ -46,7 +46,7 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                 
             # 返回处理
             if state == "checking":
-                if auto.template_click("public/返回键1",click_time=2):
+                if auto.template_click("public/返回键1",roi=(120,20,100,66)):
                     logger.info("成功点击返回键")
                     auto.sleep(2)
                     state = "completed"

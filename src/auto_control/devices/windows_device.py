@@ -13,9 +13,9 @@ import win32ui
 from PIL import Image
 
 from src.auto_control.devices.base_device import BaseDevice, DeviceState
-from src.auto_control.utils.coordinate_transformer import CoordinateTransformer  # 新的转换器
 from src.auto_control.image.image_processor import ImageProcessor
-from src.auto_control.utils.display_context import RuntimeDisplayContext  # 新的上下文容器
+from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
+from src.auto_control.utils.display_context import RuntimeDisplayContext
 
 
 class DCHandle:
@@ -74,13 +74,13 @@ class WindowsDevice(BaseDevice):
             logger=None,
             image_processor: Optional[ImageProcessor] = None,
             coord_transformer: Optional[CoordinateTransformer] = None,
-            display_context: Optional[RuntimeDisplayContext] = None,  # 新增：传入全局上下文
+            display_context: Optional[RuntimeDisplayContext] = None,
     ):
         super().__init__(device_uri)
         self.logger = logger
         self.device_uri = device_uri
         self.image_processor: ImageProcessor = image_processor
-        
+
         # 全局唯一的转换器和上下文（必须传入同一个实例）
         self.coord_transformer: CoordinateTransformer = coord_transformer
         self.display_context: RuntimeDisplayContext = display_context
@@ -116,7 +116,7 @@ class WindowsDevice(BaseDevice):
     def _get_window_handle(self) -> Optional[int]:
         """根据URI参数查找窗口句柄"""
         self.logger.info("开始查找窗口...")
-        
+
         # 按优先级尝试不同查找方式
         strategies = [
             ("精确标题", lambda: self.uri_params.get("title") and win32gui.FindWindow(None, self.uri_params["title"])),
@@ -124,7 +124,7 @@ class WindowsDevice(BaseDevice):
             ("进程名", lambda: self._find_window_by_process_name("BrownDust2")),
             ("类名", lambda: win32gui.FindWindow("UnityWndClass", None)),
         ]
-        
+
         for name, strategy in strategies:
             self.logger.info(f"尝试通过{name}查找窗口...")
             hwnd = strategy()
@@ -134,7 +134,7 @@ class WindowsDevice(BaseDevice):
                 self.window_title = title
                 self.logger.info(f"通过{name}找到窗口: {title}, 句柄: {hwnd}")
                 return hwnd
-        
+
         self.logger.error("未找到匹配的窗口")
         return None
 
@@ -142,25 +142,25 @@ class WindowsDevice(BaseDevice):
         """通过正则表达式查找窗口标题"""
         if "title_re" not in self.uri_params:
             return None
-        
+
         import re
         pattern_str = self.uri_params["title_re"]
         if '*' in pattern_str and not (pattern_str.startswith('.*') or pattern_str.endswith('.*')):
             pattern_str = pattern_str.replace('*', '.*')
-        
+
         try:
             pattern = re.compile(pattern_str, re.IGNORECASE)
         except re.error as e:
             self.logger.error(f"正则表达式编译错误: {e}")
             return None
-        
+
         def callback(hwnd, ctx):
             title = win32gui.GetWindowText(hwnd)
             if title and pattern.search(title):
                 ctx.append(hwnd)
                 return False
             return True
-        
+
         results = []
         win32gui.EnumWindows(callback, results)
         return results[0] if results else None
@@ -173,14 +173,14 @@ class WindowsDevice(BaseDevice):
                 if proc.info['name'].lower() == process_name.lower():
                     pid = proc.info['pid']
                     self.logger.info(f"找到进程: {process_name}, PID: {pid}")
-                    
+
                     def find_window_by_pid(hwnd, pid_list):
                         _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
                         if found_pid == pid_list[0] and win32gui.GetWindowText(hwnd):
                             pid_list.append(hwnd)
                             return False
                         return True
-                    
+
                     results = [pid]
                     win32gui.EnumWindows(find_window_by_pid, results)
                     if len(results) > 1:
@@ -191,7 +191,7 @@ class WindowsDevice(BaseDevice):
         except Exception as e:
             self.logger.error(f"通过进程名查找窗口出错: {e}")
         return None
-    
+
     def _enable_dpi_awareness(self) -> None:
         """启用DPI感知"""
         try:
@@ -220,7 +220,7 @@ class WindowsDevice(BaseDevice):
         if not self.hwnd:
             self.logger.warning("窗口句柄不存在，默认DPI=1.0")
             return 1.0
-        
+
         try:
             if hasattr(ctypes.windll.user32, 'GetDpiForWindow'):
                 dpi = ctypes.windll.user32.GetDpiForWindow(self.hwnd)
@@ -388,7 +388,7 @@ class WindowsDevice(BaseDevice):
             return False
 
         current_time = time.time()
-        
+
         # 1. 前台验证：当前前台窗口就是目标窗口
         foreground_hwnd = win32gui.GetForegroundWindow()
         if foreground_hwnd == self.hwnd:
@@ -429,7 +429,7 @@ class WindowsDevice(BaseDevice):
                     self.logger.warning(f"窗口激活尝试失败")
             except Exception as e:
                 self.logger.error(f"激活窗口异常: {str(e)}")
-            
+
             self._foreground_activation_allowed = False
             self.logger.warning(f"进入前台等待循环，每 {self.FOREGROUND_CHECK_INTERVAL} 秒检查一次")
 
@@ -590,9 +590,8 @@ class WindowsDevice(BaseDevice):
             click_time: int = 1,
             duration: float = 0.1,
             right_click: bool = False,
-            is_base_coord: bool = False,
-            roi: Optional[Tuple[int, int, int, int]] = None,
-            is_base_roi: bool = False
+            is_base_coord: bool = False,  # 是否是原始基准坐标，基准坐标（原始1920x1080）→ 客户区逻辑坐标
+            roi: Optional[Tuple[int, int, int, int]] = None
     ) -> bool:
         """鼠标点击操作（基于上下文和转换器，ROI预处理对齐OCR逻辑）"""
         # 基础校验：设备状态、上下文初始化
@@ -643,7 +642,7 @@ class WindowsDevice(BaseDevice):
                         rx, ry, rw, rh = roi
                         if rx < 0 or ry < 0 or rw <= 0 or rh <= 0:
                             raise ValueError(f"ROI参数无效：x={rx},y={ry}（需非负）；w={rw},h={rh}（需正数）")
-                        
+
                         # 窗口模式（is_base_roi=False）：ROI是逻辑坐标，需调整边界
                         if not is_base_roi:
                             # 调整ROI避免超出客户区逻辑尺寸
@@ -651,13 +650,13 @@ class WindowsDevice(BaseDevice):
                             ry_log = max(0, ry)
                             rw_log = min(rw, client_w_log - rx_log)
                             rh_log = min(rh, client_h_log - ry_log)
-                            
+
                             if rw_log <= 0 or rh_log <= 0:
                                 raise ValueError(
                                     f"ROI超出客户区范围，调整后尺寸无效 | "
                                     f"原ROI: {roi} | 客户区逻辑尺寸: {client_w_log}x{client_h_log}"
                                 )
-                            
+
                             processed_roi = (rx_log, ry_log, rw_log, rh_log)
                             self.logger.debug(
                                 f"窗口模式ROI预处理完成 | 原ROI: {roi} → 调整后ROI: {processed_roi} | "
@@ -670,12 +669,12 @@ class WindowsDevice(BaseDevice):
                             ry_phys = max(0, ry_phys)
                             rw_phys = min(rw_phys, ctx.client_physical_res[0] - rx_phys)
                             rh_phys = min(rh_phys, ctx.client_physical_res[1] - ry_phys)
-                            
+
                             if rw_phys <= 0 or rh_phys <= 0:
                                 raise ValueError(
                                     f"全屏ROI超出客户区范围 | 原ROI: {roi} | 客户区物理尺寸: {ctx.client_physical_res}"
                                 )
-                            
+
                             processed_roi = (rx_phys, ry_phys, rw_phys, rh_phys)
                             self.logger.debug(
                                 f"全屏模式ROI预处理完成 | 原ROI: {roi} → 调整后ROI: {processed_roi} | "
@@ -702,8 +701,7 @@ class WindowsDevice(BaseDevice):
                         image=screen,
                         template=template_name,
                         threshold=0.6,
-                        roi=processed_roi,
-                        is_fullscreen=is_base_roi
+                        roi=processed_roi
                     )
                     if match_result is not None:
                         matched_template = template_name
@@ -804,7 +802,7 @@ class WindowsDevice(BaseDevice):
             self.last_error = f"点击执行异常: {str(e)}"
             self.logger.error(f"点击失败: {self.last_error}", exc_info=True)
             return False
-  
+
     def swipe(
             self,
             start_x: int,
@@ -865,7 +863,6 @@ class WindowsDevice(BaseDevice):
             self.logger.error(self.last_error, exc_info=True)
             return False
 
-    # 以下方法（key_press、text_input、exists、wait、get_state、sleep）保持原有逻辑，仅补充上下文校验
     def key_press(self, key: str, duration: float = 0.1) -> bool:
         if not self.hwnd or self.state != DeviceState.CONNECTED or not self.display_context:
             self.last_error = "未连接到窗口或上下文未初始化"
@@ -935,8 +932,7 @@ class WindowsDevice(BaseDevice):
             self,
             template_name: Union[str, List[str]],
             threshold: float = 0.8,
-            roi: Optional[Tuple[int, int, int, int]] = None,
-            is_base_roi: bool = False
+            roi: Optional[Tuple[int, int, int, int]] = None
     ) -> Optional[Tuple[int, int]]:
         try:
             if not self.hwnd or not self.display_context:
@@ -947,7 +943,7 @@ class WindowsDevice(BaseDevice):
             if not self.image_processor:
                 self.last_error = "缺少图像处理器"
                 return None
-            screen = self.capture_screen(roi=roi if is_base_roi else None)
+            screen = self.capture_screen()
             if screen is None:
                 self.logger.debug(f"截图为空，无法检查模板: {template_name}")
                 return None
@@ -959,16 +955,17 @@ class WindowsDevice(BaseDevice):
                     image=screen,
                     template=template,
                     threshold=threshold,
-                    roi=roi,
-                    is_fullscreen=is_base_roi
+                    roi=roi
                 )
                 if match_result is not None:
-                    match_rect = tuple(match_result.tolist()) if isinstance(match_result, np.ndarray) else tuple(match_result)
+                    match_rect = tuple(match_result.tolist()) if isinstance(
+                        match_result, np.ndarray) else tuple(match_result)
                     if len(match_rect) != 4:
                         self.logger.warning(f"模板结果格式无效: {match_rect}，模板: {template}")
                         continue
                     center_pos = self.image_processor.get_center(match_rect)
-                    center_pos = tuple(map(int, center_pos)) if isinstance(center_pos, (list, np.ndarray)) else center_pos
+                    center_pos = tuple(map(int, center_pos)) if isinstance(
+                        center_pos, (list, np.ndarray)) else center_pos
                     if not isinstance(center_pos, tuple) or len(center_pos) != 2:
                         self.logger.warning(f"模板中心点无效: {center_pos}，模板: {template}")
                         continue
@@ -988,13 +985,12 @@ class WindowsDevice(BaseDevice):
             timeout: float = 10.0,
             interval: float = 0.5,
             roi: Optional[Tuple[int, int, int, int]] = None,
-            is_base_roi: bool = False
     ) -> Optional[Tuple[int, int]]:
         start_time = time.time()
         templates = [template_name] if isinstance(template_name, str) else template_name
         self.logger.debug(f"开始等待模板: {templates}（超时: {timeout}s，间隔: {interval}s）")
         while time.time() - start_time < timeout:
-            center_pos = self.exists(templates, threshold=0.8, roi=roi, is_base_roi=is_base_roi)
+            center_pos = self.exists(templates, threshold=0.8, roi=roi)
             if center_pos is not None:
                 self.logger.info(
                     f"模板 {templates} 已找到（等待耗时: {time.time() - start_time:.1f}s），中心点: {center_pos}"

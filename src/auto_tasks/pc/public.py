@@ -23,7 +23,7 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
 
             auto.sleep(2)    
             # 检查是否已在主界面
-            if auto.check_element_exist("public/主界面"):
+            if auto.check_element_exist("public/主界面",roi=(1720,20,120,70)):
                 logger.debug("已在主界面")
                 return True
                 
@@ -35,7 +35,7 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
                 continue
             
             # 检查返回是否成功
-            if auto.check_element_exist("public/主界面"):
+            if auto.check_element_exist("public/主界面",roi=(1720,20,120,70)):
                 return True
                 
             # 备用返回方式
@@ -65,14 +65,14 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
 
 def _handle_return_identifiers(auto: Auto) -> bool:
     """处理返回主界面相关的标识（闪避标识/地图标识）"""
-    dodge_pos = auto.check_element_exist("public/闪避标识")
-    # map_pos = auto.check_element_exist("public/地图标识")
+    dodge_pos = auto.check_element_exist("public/闪避标识",roi=(1600,833,170,140))
+    map_pos = auto.check_element_exist("public/地图标识",roi=(1740,20,175,88))
     
-    if dodge_pos:
-        if daily_pos := auto.check_element_exist("public/每日收集"):
-            auto.key_press("a",1)
-            auto.click(daily_pos)
-            auto.sleep(1)
+    if dodge_pos or map_pos:
+        # if daily_pos := auto.check_element_exist("public/每日收集"):
+        #     auto.key_press("a",1)
+        #     auto.click(daily_pos)
+        #     auto.sleep(1)
         auto.key_press("h")
         auto.sleep(1)
         return True
@@ -83,8 +83,8 @@ def _handle_return_identifiers(auto: Auto) -> bool:
 
 def _handle_confirmation_dialogs(auto: Auto) -> bool:
     """处理确认对话框"""
-    confirm_pos = auto.text_click("确认", click=False)
-    end_game_pos = auto.text_click("结束游戏", click=False)
+    confirm_pos = auto.text_click("确认", click=False,roi=(655,344,600,700))
+    end_game_pos = auto.text_click("结束游戏", click=False,roi=(750,436,462,240))
     if confirm_pos and not end_game_pos:
         auto.click(confirm_pos)
         auto.sleep(1)

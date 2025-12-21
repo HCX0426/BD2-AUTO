@@ -7,22 +7,21 @@ import cv2
 import numpy as np
 
 from ..config import (DEFAULT_BASE_RESOLUTION, DEFAULT_CHECK_ELEMENT_DELAY,
-                     DEFAULT_CLICK_DELAY, DEFAULT_DEVICE_URI,
-                     DEFAULT_KEY_DURATION,
-                     DEFAULT_OCR_ENGINE, DEFAULT_SCREENSHOT_DELAY,
-                     DEFAULT_TASK_TIMEOUT, DEFAULT_TEXT_FUZZY_MATCH,
-                     DEFAULT_WINDOW_OPERATION_DELAY, LOG_CONFIG)
-from ..utils.coordinate_transformer import CoordinateTransformer
-from ..devices.base_device import BaseDevice, DeviceState
+                      DEFAULT_CLICK_DELAY, DEFAULT_DEVICE_URI,
+                      DEFAULT_KEY_DURATION, DEFAULT_OCR_ENGINE,
+                      DEFAULT_SCREENSHOT_DELAY, DEFAULT_TASK_TIMEOUT,
+                      DEFAULT_WINDOW_OPERATION_DELAY, LOG_CONFIG)
+from ..devices.base_device import BaseDevice
 from ..devices.device_manager import DeviceManager
 from ..image.image_processor import ImageProcessor
-from ..utils.logger import Logger
 from ..ocr.ocr_processor import OCRProcessor
+from ..utils.coordinate_transformer import CoordinateTransformer
 from ..utils.display_context import RuntimeDisplayContext
+from ..utils.logger import Logger
 
 
-# 此层传递均为客户区坐标
-# 全屏：region是物理坐标（基准ROI）；窗口：region是逻辑坐标
+# 窗口模式时生效，is_base_coord为True时，pos为基准坐标（屏幕物理坐标），基准坐标（原始1920x1080）→ 客户区逻辑坐标
+# 默认传递region是屏幕物理坐标（基准ROI）
 class Auto:
     def __init__(
         self,
@@ -165,46 +164,24 @@ class Auto:
 
     # ======================== 设备管理方法 ========================
     def add_device(self, device_uri: str = DEFAULT_DEVICE_URI, timeout: float = 10.0) -> bool:
-        """添加设备并自动更新分辨率"""
+        """添加设备（分辨率同步由DeviceManager自动处理）"""
         if self.check_should_stop():
             self.logger.info("添加设备任务被中断")
             self.last_result = False
             return False
 
         try:
+            # 纯转发调用，无额外逻辑
             result = self.device_manager.add_device(
                 device_uri=device_uri,
-                timeout=timeout,
-                logger=self.logger,
-                image_processor=self.image_processor,
-                coord_transformer=self.coord_transformer,
-                display_context=self.display_context
+                timeout=timeout
             )
             self.last_result = result
 
             if result:
-                # 直接获取刚添加的设备，而非依赖活动设备
-                new_device = self.device_manager.get_device(device_uri)
-                if new_device and new_device.is_connected:
-                    # 临时将新设备设为活动设备（确保分辨率更新成功）
-                    original_active = self.device_manager.active_device
-                    self.device_manager.set_active_device(device_uri)
-
-                    # 调用带重试的分辨率更新
-                    if self._update_resolution_from_device():
-                        self.logger.info(f"设备 {device_uri} 添加并更新分辨率成功")
-                    else:
-                        self.last_error = f"设备 {device_uri} 添加成功，但分辨率更新失败"
-                        self.logger.warning(f"警告: {self.last_error}")
-
-                    # 恢复原始活动设备（如果之前有）
-                    if original_active and original_active != device_uri:
-                        self.device_manager.set_active_device(original_active)
-                else:
-                    self.last_error = f"设备 {device_uri} 添加成功，但设备实例无效"
-                    self.logger.warning(f"警告: {self.last_error}")
+                self.logger.info(f"设备 {device_uri} 添加请求已提交（分辨率同步由设备层处理）")
             else:
-                self.last_error = f"设备 {device_uri} 添加失败"
+                self.last_error = f"设备 {device_uri} 添加失败（详见设备层日志）"
                 self.logger.error(f"错误: {self.last_error}")
 
             return result
@@ -215,7 +192,7 @@ class Auto:
             return False
 
     def set_active_device(self, device_uri: str) -> bool:
-        """设置活动设备（仅允许已连接设备）"""
+        """设置活动设备（分辨率同步由DeviceManager自动处理）"""
         result = self.device_manager.set_active_device(device_uri)
         self.last_result = result
 
@@ -223,53 +200,9 @@ class Auto:
             self.last_error = f"设置活动设备失败: {device_uri}"
             self.logger.error(f"错误: {self.last_error}")
         else:
-            # 切换活动设备后同步更新上下文分辨率
-            self._update_resolution_from_device()
-            self.logger.info(f"活动设备已切换为: {device_uri}")
+            self.logger.info(f"活动设备切换请求已提交: {device_uri}")
 
         return result
-
-    def _update_resolution_from_device(self, max_retries: int = 3, retry_delay: float = 0.2) -> bool:
-        """从活动设备更新基准分辨率（同步到上下文和转换器）"""
-        for retry in range(max_retries):
-            device = self.device_manager.get_active_device()
-            # 校验设备是否存在且已连接
-            if not device or not device.is_connected:
-                if retry < max_retries - 1:
-                    self.logger.debug(f"重试获取活动设备（第{retry+1}次）...")
-                    time.sleep(retry_delay)
-                    continue
-                self.last_error = "无法更新分辨率: 活动设备未连接或不存在"
-                self.logger.error(f"错误: {self.last_error}")
-                return False
-
-            # 获取设备分辨率
-            dev_state = device.get_state()
-            if dev_state != DeviceState.CONNECTED:
-                if retry < max_retries - 1:
-                    self.logger.debug(
-                        f"设备状态为{dev_state.name}，等待就绪（第{retry+1}次）...")
-                    time.sleep(retry_delay)
-                    continue
-
-            resolution = device.get_resolution()
-            if not resolution:
-                self.last_error = "获取客户区逻辑分辨率无效"
-                self.logger.error(f"错误: {self.last_error}")
-                return False
-
-            # 同步更新上下文和转换器
-            device._update_dynamic_window_info()
-            self.logger.debug(
-                f"从设备更新分辨率 | 客户区尺寸: {resolution} | "
-                f"上下文同步完成"
-            )
-            return True
-
-        # 超过最大重试次数
-        self.last_error = f"超过{max_retries}次重试，仍无法获取有效设备分辨率"
-        self.logger.error(f"错误: {self.last_error}")
-        return False
 
     def get_task_logger(self, task_name: str) -> logging.Logger:
         """获取任务专用日志器"""
@@ -285,8 +218,6 @@ class Auto:
             self.running = True
             self.should_stop = False  # 重置中断标志
 
-        # 启动时同步一次设备分辨率到上下文
-        self._update_resolution_from_device()
         self.logger.info("自动化系统开始启动")
 
     def stop(self) -> None:
@@ -405,8 +336,7 @@ class Auto:
         duration: float = 0.1,
         click_time: int = 1,
         right_click: bool = False,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-        is_base_roi: bool = False
+        roi: Optional[Tuple[int, int, int, int]] = None
     ) -> bool:
         """模板匹配点击（支持多个模板和ROI）"""
         if self.check_should_stop():
@@ -429,7 +359,7 @@ class Auto:
         # 记录使用的参数
         params_info = []
         if roi:
-            roi_type = "基准ROI" if is_base_roi else "客户区ROI"
+            roi_type = "基准ROI"
             params_info.append(f"{roi_type}: {roi}")
         if len(templates) > 1:
             params_info.append(f"模板数量: {len(templates)}")
@@ -443,8 +373,7 @@ class Auto:
             duration=duration,
             click_time=click_time,
             right_click=right_click,
-            roi=roi,
-            is_base_roi=is_base_roi
+            roi=roi
         )
 
         if not self.last_result:
@@ -528,8 +457,7 @@ class Auto:
             image=screen,  # 物理截图
             target_text=target_text,
             lang=lang,
-            region=region,
-            is_fullscreen=is_fullscreen  # 全屏：region是物理坐标；窗口：region是逻辑坐标
+            region=region
         )
 
         if not ocr_result:
@@ -566,8 +494,7 @@ class Auto:
                 pos=(client_center_x, client_center_y),
                 duration=duration,
                 click_time=click_time,
-                right_click=right_click,
-                is_base_coord=is_fullscreen  # 全屏模式下pos是物理坐标（基准坐标），窗口模式下是逻辑坐标
+                right_click=right_click
             )
             if not click_result:
                 self.last_error = device.last_error or "文本点击执行失败"
@@ -585,7 +512,6 @@ class Auto:
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
     ) -> bool:
-        """最小化窗口（操作后同步上下文状态）"""
         if self.check_should_stop():
             self.logger.info("最小化窗口任务被中断")
             self.last_result = False
@@ -601,10 +527,9 @@ class Auto:
 
         self.last_result = device.minimize_window()
         if self.last_result:
-            # 窗口状态变化后，延迟更新上下文（确保系统状态同步）
             time.sleep(0.3)
-            self._update_resolution_from_device(max_retries=1)
-            self.logger.info("窗口最小化成功，上下文状态已同步")
+            self.device_manager.sync_active_device_resolution()
+            self.logger.info("窗口最小化成功，已触发设备层分辨率同步")
         else:
             self.last_error = device.last_error or "窗口最小化失败"
             self.logger.error(f"错误: {self.last_error}")
@@ -616,7 +541,6 @@ class Auto:
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
         device_uri: Optional[str] = None
     ) -> bool:
-        """最大化窗口（操作后同步上下文状态）"""
         if self.check_should_stop():
             self.logger.info("最大化窗口任务被中断")
             self.last_result = False
@@ -632,10 +556,10 @@ class Auto:
 
         self.last_result = device.maximize_window()
         if self.last_result:
-            # 窗口状态变化后，延迟更新上下文（确保系统状态同步）
-            time.sleep(0.3)
-            self._update_resolution_from_device(max_retries=1)
-            self.logger.info("窗口最大化成功，上下文状态已同步")
+            # 窗口变化后，调用DeviceManager同步分辨率（而非Auto层自己处理）
+            time.sleep(0.3)  # 等待窗口状态稳定
+            self.device_manager.sync_active_device_resolution()
+            self.logger.info("窗口最大化成功，已触发设备层分辨率同步")
         else:
             self.last_error = device.last_error or "窗口最大化失败"
             self.logger.error(f"错误: {self.last_error}")
@@ -648,8 +572,7 @@ class Auto:
         template_name: Union[str, List[str]],
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
         device_uri: Optional[str] = None,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-        is_base_roi: bool = False
+        roi: Optional[Tuple[int, int, int, int]] = None
     ) -> bool:
         """检查模板元素是否存在（支持多个模板和ROI，基于上下文校验）"""
         if self.check_should_stop():
@@ -675,7 +598,7 @@ class Auto:
             # 记录使用的参数（包含上下文信息）
             params_info = []
             if roi:
-                roi_type = "基准ROI" if is_base_roi else "客户区ROI"
+                roi_type = "基准ROI"
                 params_info.append(f"{roi_type}: {roi}")
             params_info.append(f"客户区尺寸: {self.display_context.client_logical_res}")
             if len(templates) > 1:
@@ -686,7 +609,7 @@ class Auto:
             self.logger.debug(f"检查元素参数: {templates}{param_log}")
 
             # device.exists返回：存在则返回中心点坐标（Tuple），不存在则返回None
-            result = device.exists(templates, roi=roi, is_base_roi=is_base_roi)
+            result = device.exists(templates, roi=roi)
             self.last_result = result
 
             if device.last_error:
@@ -762,8 +685,7 @@ class Auto:
         timeout: float = DEFAULT_TASK_TIMEOUT,
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
         device_uri: Optional[str] = None,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-        is_base_roi: bool = False
+        roi: Optional[Tuple[int, int, int, int]] = None
     ) -> bool:
         """等待模板元素出现（支持多个模板和ROI，基于上下文）"""
         if self.check_should_stop():
@@ -788,7 +710,7 @@ class Auto:
         # 记录使用的参数（包含上下文信息）
         params_info = []
         if roi:
-            roi_type = "基准ROI" if is_base_roi else "客户区ROI"
+            roi_type = "基准ROI"
             params_info.append(f"{roi_type}: {roi}")
         params_info.append(f"客户区尺寸: {self.display_context.client_logical_res}")
         if len(templates) > 1:
@@ -799,8 +721,7 @@ class Auto:
         self.logger.debug(f"等待元素参数: {templates}{param_log} | 超时: {timeout}s")
 
         start_time = time.time()
-        # device.wait 返回：超时返回None，成功返回中心点坐标（Tuple）
-        center_pos = device.wait(templates, timeout=timeout, roi=roi, is_base_roi=is_base_roi)
+        center_pos = device.wait(templates, timeout=timeout, roi=roi)
         self.last_result = center_pos
 
         if not self.last_result:

@@ -104,8 +104,8 @@ class OCRProcessor:
                         target_text: str,
                         lang: Optional[str] = None,
                         min_confidence: float = 0.9,
-                        region: Optional[Tuple[int, int, int, int]] = None,
-                        is_fullscreen: bool = False) -> Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
+                        region: Optional[Tuple[int, int, int, int]] = None
+        ) -> Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
         """
         查找文本位置（核心逻辑：文本完全一致优先，即使置信度未达阈值也视为找到）
         规则：区分大小写、忽略空格、完全匹配即有效，多匹配时选置信度最高的
@@ -133,6 +133,7 @@ class OCRProcessor:
         processed_region_phys = None
         timestamp = datetime.datetime.now().strftime("%H%M%S%f")[:-3]
 
+        is_fullscreen = self.display_context.is_fullscreen
         # 3. 处理region（安全扩展+边界锁，不变）
         if region:
             try:

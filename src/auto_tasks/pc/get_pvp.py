@@ -50,10 +50,10 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                 if click_back(auto):
                     logger.info("领取赛季奖励")
                     auto.sleep(2)
-                # if pos := auto.check_element_exist("get_pvp/进入竞技场"):
-                #     logger.info("进入竞技场")
-                #     auto.click(pos)
-                #     auto.sleep(5)
+                if pos := auto.check_element_exist("get_pvp/进入竞技场"):
+                    logger.info("进入竞技场")
+                    auto.click(pos)
+                    auto.sleep(5)
                 
                 if pos := auto.check_element_exist("get_pvp/竞技场标识"):
                     logger.info("进入竞技场")

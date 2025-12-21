@@ -6,7 +6,7 @@
       "name": "Python: 启动主程序",
       "type": "python",
       "request": "launch",
-      "program": "${workspaceFolder}/console_run.py",  // 相对根目录路径（核心）
+      "program": "${workspaceFolder}/main.py",  // 相对根目录路径（核心）
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",  // 工作目录设为项目根目录（避免路径错误）
       "justMyCode": true
