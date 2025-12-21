@@ -16,6 +16,7 @@ class OCRProcessor:
                  logger=None, 
                  coord_transformer: Optional[CoordinateTransformer] = None,
                  display_context: Optional[RuntimeDisplayContext] = None,
+                 test_mode: bool = False,
                  **kwargs):
         """
         OCR处理器封装类（统一调用不同OCR引擎，支持坐标转换）
@@ -24,6 +25,7 @@ class OCRProcessor:
         :param logger: 日志实例（从上层传递，如Auto类）
         :param coord_transformer: 坐标转换器实例（用于处理坐标转换）
         :param display_context: 运行时显示上下文（提供窗口状态和尺寸信息）
+        :param test_mode: 测试模式开关（控制是否保存调试图片+初始化清空历史图），默认False
         :param kwargs: 引擎特定参数：
             - languages: 自定义默认语言组合（如 'ch_tra+eng'，可选）
         """
@@ -48,8 +50,14 @@ class OCRProcessor:
         if not self.display_context:
             raise ValueError("运行时上下文(display_context)必须初始化后传入")
         
-        # 初始化调试目录
+        # 初始化调试目录和测试模式
         self.debug_img_dir = path_manager.get("match_ocr_debug")
+        self.test_mode = test_mode
+        
+        # 确保调试目录存在，并在测试模式下清空历史调试图
+        os.makedirs(self.debug_img_dir, exist_ok=True)
+        if self.test_mode:
+            self._clear_debug_images()
         
         # 初始化指定的OCR引擎
         self.engine: BaseOCR = self._init_engine()
@@ -60,8 +68,44 @@ class OCRProcessor:
             f"引擎: {self.engine_type.upper()} | "
             f"默认语言: {self._default_lang} | "
             f"GPU加速: {'启用' if self.engine._use_gpu else '禁用'} | "
-            f"坐标系统: 已配置（上下文+转换器）"
+            f"坐标系统: 已配置（上下文+转换器）| "
+            f"测试模式: {'启用（已清空历史调试图）' if self.test_mode else '禁用'}"
         )
+
+    def _clear_debug_images(self) -> None:
+        """测试模式专用：清空OCR调试目录下的所有历史调试图（仅删除.png格式）"""
+        try:
+            total_count = 0  # 总调试图数
+            deleted_count = 0  # 成功删除数
+            failed_files = []  # 删除失败的文件
+
+            # 遍历调试目录下所有文件
+            for filename in os.listdir(self.debug_img_dir):
+                file_path = os.path.join(self.debug_img_dir, filename)
+                # 仅处理png格式文件（避免误删非调试图文件）
+                if os.path.isfile(file_path) and filename.lower().endswith(".png"):
+                    total_count += 1
+                    try:
+                        os.remove(file_path)
+                        deleted_count += 1
+                        self.logger.debug(f"已删除历史OCR调试图: {filename}")
+                    except Exception as e:
+                        failed_files.append(f"{filename}（错误：{str(e)}）")
+
+            # 输出清空统计日志
+            log_msg = (
+                f"测试模式 - 清空调试目录完成 | "
+                f"目录: {self.debug_img_dir} | "
+                f"总调试图数: {total_count} | "
+                f"成功删除: {deleted_count} | "
+                f"删除失败: {len(failed_files)}"
+            )
+            if failed_files:
+                log_msg += f" | 失败文件: {failed_files}"
+            self.logger.info(log_msg)
+
+        except Exception as e:
+            self.logger.error(f"测试模式 - 清空调试目录异常: {str(e)}", exc_info=True)
 
     def _create_default_logger(self):
         """无日志实例时的降级实现（使用print输出）"""
@@ -186,12 +230,12 @@ class OCRProcessor:
             cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
             self.logger.debug(f"截图裁剪完成 | 裁剪后子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}")
             
-            if config.get("debug", False):
+            if self.test_mode:
                 crop_save_path = os.path.join(self.debug_img_dir, f"roi_crop_{target_text_clean}_{timestamp}.png")
                 cv2.imwrite(crop_save_path, cropped_image)
                 self.logger.info(f"ROI裁剪图保存成功: {crop_save_path}")
         else:
-            if config.get("debug", False):
+            if self.test_mode:
                 full_save_path = os.path.join(self.debug_img_dir, f"full_image_{target_text_clean}_{timestamp}.png")
                 cv2.imwrite(full_save_path, orig_image)
                 self.logger.debug(f"全图查找，保存原图: {full_save_path}")
@@ -234,9 +278,10 @@ class OCRProcessor:
                 'confidence': float(confidence)
             })
 
-        # 8. 保存调试图（不变）
-        ocr_save_path = os.path.join(self.debug_img_dir, f"ocr_result_{target_text_clean}_{timestamp}.png")
-        self._save_ocr_debug_image(cropped_image, formatted_results, ocr_save_path)
+        # 8. 保存调试图
+        if self.test_mode:
+            ocr_save_path = os.path.join(self.debug_img_dir, f"ocr_result_{target_text_clean}_{timestamp}.png")
+            self._save_ocr_debug_image(cropped_image, formatted_results, ocr_save_path)
 
         # 9. 核心修改：匹配逻辑（文本完全一致优先，忽略置信度阈值）
         best_match_phys = None

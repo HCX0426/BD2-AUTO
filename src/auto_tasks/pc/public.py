@@ -84,7 +84,7 @@ def _handle_return_identifiers(auto: Auto) -> bool:
 def _handle_confirmation_dialogs(auto: Auto) -> bool:
     """处理确认对话框"""
     confirm_pos = auto.text_click("确认", click=False,roi=(655,344,600,700))
-    end_game_pos = auto.text_click("结束游戏", click=False,roi=(750,436,462,240))
+    end_game_pos = auto.text_click("结束游戏", click=False,roi=(655,344,600,700))
     if confirm_pos and not end_game_pos:
         auto.click(confirm_pos)
         auto.sleep(1)

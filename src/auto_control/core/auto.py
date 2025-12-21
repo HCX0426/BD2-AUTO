@@ -10,7 +10,7 @@ from ..config import (DEFAULT_BASE_RESOLUTION, DEFAULT_CHECK_ELEMENT_DELAY,
                       DEFAULT_CLICK_DELAY, DEFAULT_DEVICE_URI,
                       DEFAULT_KEY_DURATION, DEFAULT_OCR_ENGINE,
                       DEFAULT_SCREENSHOT_DELAY, DEFAULT_TASK_TIMEOUT,
-                      DEFAULT_WINDOW_OPERATION_DELAY, LOG_CONFIG)
+                      DEFAULT_WINDOW_OPERATION_DELAY)
 from ..devices.base_device import BaseDevice
 from ..devices.device_manager import DeviceManager
 from ..image.image_processor import ImageProcessor
@@ -18,10 +18,11 @@ from ..ocr.ocr_processor import OCRProcessor
 from ..utils.coordinate_transformer import CoordinateTransformer
 from ..utils.display_context import RuntimeDisplayContext
 from ..utils.logger import Logger
-
+from ...core.path_manager import config, path_manager
 
 # 窗口模式时生效，is_base_coord为True时，pos为基准坐标（屏幕物理坐标），基准坐标（原始1920x1080）→ 客户区逻辑坐标
 # 默认传递region是屏幕物理坐标（基准ROI）
+# 1. 对外提供调用入口；2. 读取项目配置（setting）；3. 衔接业务与底层工具
 class Auto:
     def __init__(
         self,
@@ -29,18 +30,22 @@ class Auto:
         device_uri: str = DEFAULT_DEVICE_URI,
         original_base_res: Tuple[int, int] = DEFAULT_BASE_RESOLUTION
     ):
+        
+        self.test_mode = config.get("debug", False)
         # 线程安全控制
         self.lock = threading.Lock()
         self.should_stop = False  # 任务中断标志
         self.running = False      # 系统运行状态
 
-        # 日志初始化
+        # 日志初始化：创建系统日志器（全局统一日志核心）
         self.logger = Logger(
-            task_name="System",
-            base_log_dir=LOG_CONFIG["BASE_LOG_DIR"],
+            name="System",  # 日志器名称，显示为 [System]
+            base_log_dir=path_manager.get("log"),
             log_file_prefix="system",
             file_log_level=logging.DEBUG,
-            console_log_level=logging.INFO     # 控制台只输出重要信息
+            console_log_level=logging.INFO,  # 控制台只输出重要信息
+            is_system_logger=True,  # 标记为系统日志器，创建全局统一Handler
+            test_mode=self.test_mode  # 测试模式：每次运行清空所有日志文件
         )
 
         # 初始化运行时显示上下文
@@ -49,23 +54,30 @@ class Auto:
             original_base_height=original_base_res[1]
         )
 
+        # 为每个核心组件创建独立的组件日志器（自动多播到系统日志）
+        self.coord_transformer_logger = self.logger.create_component_logger("CoordinateTransformer")
+        self.image_processor_logger = self.logger.create_component_logger("ImageProcessor")
+        self.device_manager_logger = self.logger.create_component_logger("DeviceManager")
+        self.ocr_processor_logger = self.logger.create_component_logger("OCRProcessor")
+
         # 坐标转换初始化
         self.coord_transformer: CoordinateTransformer = CoordinateTransformer(
-            logger=self.logger,
+            logger=self.coord_transformer_logger,
             display_context=self.display_context
         )
 
         # 图像处理器初始化
         self.image_processor: ImageProcessor = ImageProcessor(
             original_base_res=original_base_res,
-            logger=self.logger,
+            logger=self.image_processor_logger,
             coord_transformer=self.coord_transformer,
-            display_context=self.display_context
+            display_context=self.display_context,
+            test_mode=self.test_mode
         )
 
         # 设备管理器初始化
         self.device_manager: DeviceManager = DeviceManager(
-            logger=self.logger,
+            logger=self.device_manager_logger,
             image_processor=self.image_processor,
             coord_transformer=self.coord_transformer,
             display_context=self.display_context
@@ -73,10 +85,11 @@ class Auto:
 
         # OCR处理器初始化
         self.ocr_processor: OCRProcessor = OCRProcessor(
-            engine=ocr_engine, 
-            logger=self.logger, 
+            engine=ocr_engine,
+            logger=self.ocr_processor_logger,
             coord_transformer=self.coord_transformer,
-            display_context=self.display_context
+            display_context=self.display_context,
+            
         )
 
         # 设备配置
@@ -111,13 +124,10 @@ class Auto:
         if not device:
             device = self.device_manager.get_active_device()
 
-        # 日志输出设备状态
+        # 日志输出设备状态（System日志）
         if device:
-            dev_uri = device.device_uri if hasattr(
-                device, 'device_uri') else "未知URI"
-            self.logger.debug(
-                f"使用设备: {dev_uri} | 状态: {device.get_state().name}"
-            )
+            dev_uri = device.device_uri if hasattr(device, 'device_uri') else "未知URI"
+            self.logger.debug(f"使用设备: {dev_uri} | 状态: {device.get_state().name}")
         else:
             self.last_error = "未找到可用设备"
             self.logger.error(f"错误: {self.last_error}")
@@ -204,8 +214,8 @@ class Auto:
 
         return result
 
-    def get_task_logger(self, task_name: str) -> logging.Logger:
-        """获取任务专用日志器"""
+    def get_task_logger(self, task_name: str) -> Logger:
+        """获取独立任务日志器（日志多播到任务文件+system.log+控制台）"""
         return self.logger.create_task_logger(task_name)
 
     # ======================== 系统控制方法 ========================
@@ -233,10 +243,9 @@ class Auto:
         success, fail = self.device_manager.disconnect_all()
         self.logger.info(f"设备断开统计: 成功{success}个, 失败{fail}个")
 
-        # 关闭日志线程池
+        # 关闭日志线程池（系统日志器+所有组件/任务日志器共享同一个异步池）
         self.logger.shutdown()
         self.logger.info("BD2-AUTO 自动化系统已停止")
-        print("BD2-AUTO 已停止")
 
     def get_status(self) -> dict:
         """获取系统完整状态（包含上下文信息）"""
@@ -384,7 +393,6 @@ class Auto:
 
         return self.last_result
 
-
     def text_click(
             self,
             target_text: str,
@@ -506,7 +514,6 @@ class Auto:
             return (client_center_x, client_center_y)
 
     # ======================== 窗口管理方法 ========================
-
     def minimize_window(
         self,
         delay: float = DEFAULT_WINDOW_OPERATION_DELAY,

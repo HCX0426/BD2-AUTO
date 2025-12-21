@@ -10,30 +10,11 @@ class BaseOCR(ABC):
         OCR基类初始化
         :param logger: 日志实例（从上层传递）
         """
+        if not logger:
+            raise ValueError("OCR初始化失败：logger不能为空（必须传入有效日志实例）")
         self._use_gpu = False
         # 初始化日志（支持降级方案）
-        self.logger = logger if logger else self._create_default_logger()
-
-    def _create_default_logger(self):
-        """无日志实例时的降级实现"""
-        class DefaultLogger:
-            @staticmethod
-            def debug(msg):
-                print(f"[DEBUG] BaseOCR: {msg}")
-            
-            @staticmethod
-            def info(msg):
-                print(f"[INFO] BaseOCR: {msg}")
-            
-            @staticmethod
-            def warning(msg):
-                print(f"[WARNING] BaseOCR: {msg}")
-            
-            @staticmethod
-            def error(msg, exc_info=False):
-                print(f"[ERROR] BaseOCR: {msg}")
-        
-        return DefaultLogger()
+        self.logger = logger
 
     @abstractmethod
     def detect_text(self, image: np.ndarray, lang: str) -> List[Dict]:

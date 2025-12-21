@@ -22,7 +22,7 @@ class CoordinateTransformer:
         self.logger.info(
             f"坐标转换器初始化 | 原始基准分辨率: {display_context.original_base_res}"
         )
-        # 全屏判定误差容忍度（保持原有值，如需兼容更多场景可改为10）
+        # 全屏判定误差容忍度
         self.FULLSCREEN_ERROR_TOLERANCE = 5
 
     @property
@@ -47,7 +47,7 @@ class CoordinateTransformer:
 
     def _check_fullscreen(self) -> bool:
         """
-        内部实现：检查窗口是否为全屏（优化判定逻辑，不依赖最大化状态）
+        内部实现：检查窗口是否为全屏（不依赖最大化状态）
         判定逻辑（精准兼容窗口/游戏全屏）：
         1. 从上下文获取窗口句柄
         2. 窗口尺寸 ≈ 屏幕硬件分辨率（误差<容忍度）
@@ -221,33 +221,6 @@ class CoordinateTransformer:
             self.logger.error(f"转换到屏幕坐标失败: {str(e)}")
             return (phys_x, phys_y)
 
-    def convert_client_physical_to_original(self, x: int, y: int) -> Tuple[int, int]:
-        """
-        将客户区物理坐标反向转换为原始基准坐标
-        
-        :param x: 客户区物理X坐标
-        :param y: 客户区物理Y坐标
-        :return: 原始基准坐标 (x, y)
-        """
-        ctx = self._display_context
-        orig_w, orig_h = ctx.original_base_res
-        curr_phys_w, curr_phys_h = ctx.client_physical_res
-
-        if orig_w <= 0 or orig_h <= 0 or curr_phys_w <= 0 or curr_phys_h <= 0:
-            self.logger.error(f"无效分辨率，无法反向转换 | 原始: {orig_w}x{orig_h}, 当前物理: {curr_phys_w}x{curr_phys_h}")
-            return (x, y)
-
-        scale_x = orig_w / curr_phys_w
-        scale_y = orig_h / curr_phys_h
-
-        orig_x = int(round(x * scale_x))
-        orig_y = int(round(y * scale_y))
-
-        self.logger.debug(
-            f"客户区物理→原始 | 物理: ({x},{y}) → 原始: ({orig_x},{orig_y}) [缩放比 x:{scale_x:.2f}, y:{scale_y:.2f}]"
-        )
-        return (orig_x, orig_y)
-
     def convert_client_physical_to_logical(self, x: int, y: int) -> Tuple[int, int]:
         """
         新增：将客户区物理坐标（截图像素坐标）转换为客户区逻辑坐标
@@ -275,7 +248,7 @@ class CoordinateTransformer:
 
     def convert_client_physical_rect_to_logical(self, rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """
-        新增：将客户区物理矩形（截图匹配结果）转换为客户区逻辑矩形
+        将客户区物理矩形（截图匹配结果）转换为客户区逻辑矩形
         """
         x, y, w, h = rect
         if w <= 0 or h <= 0:
