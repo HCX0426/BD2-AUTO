@@ -9,7 +9,8 @@ import numpy as np
 from src.auto_control.config.auto_config import TEMPLATE_EXTENSIONS
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.utils.display_context import RuntimeDisplayContext
-from src.core.path_manager import config, path_manager
+from src.auto_control.utils.debug_image_saver import DebugImageSaver  # 导入公共调试图工具类
+from src.core.path_manager import path_manager
 
 
 class ImageProcessor:
@@ -52,16 +53,19 @@ class ImageProcessor:
         self.coord_transformer = coord_transformer
         self.display_context = display_context
         self.template_dir = template_dir or path_manager.get("task_template")
-        self.debug_img_dir = path_manager.get("match_temple_debug")
         self.test_mode = test_mode
 
         # 初始化辅助属性
         self.templates: Dict[str, np.ndarray] = {}
-        os.makedirs(self.debug_img_dir, exist_ok=True)  # 确保调试目录存在
+        debug_dir = path_manager.get("match_temple_debug")
+        os.makedirs(debug_dir, exist_ok=True)  # 确保调试目录存在
 
-        # 测试模式：清空历史调试图
-        if self.test_mode:
-            self._clear_debug_images()
+        # 初始化公共调试图保存工具
+        self.debug_saver = DebugImageSaver(
+            logger=logger,
+            debug_dir=debug_dir,
+            test_mode=test_mode
+        )
 
         # 匹配参数配置
         self.min_confidence = 0.8
@@ -75,41 +79,6 @@ class ImageProcessor:
             f"原始基准分辨率: {self.original_base_res} | 模板目录: {self.template_dir} | "
             f"测试模式: {'启用（已清空历史调试图）' if self.test_mode else '禁用'}"
         )
-
-    def _clear_debug_images(self) -> None:
-        """测试模式专用：清空调试目录下的所有历史调试图（仅删除.png格式）"""
-        try:
-            total_count = 0  # 总调试图数
-            deleted_count = 0  # 成功删除数
-            failed_files = []  # 删除失败的文件
-
-            # 遍历调试目录下所有文件
-            for filename in os.listdir(self.debug_img_dir):
-                file_path = os.path.join(self.debug_img_dir, filename)
-                # 仅处理png格式文件（避免误删其他类型文件）
-                if os.path.isfile(file_path) and filename.lower().endswith(".png"):
-                    total_count += 1
-                    try:
-                        os.remove(file_path)
-                        deleted_count += 1
-                        self.logger.debug(f"已删除历史调试图: {filename}")
-                    except Exception as e:
-                        failed_files.append(f"{filename}（错误：{str(e)}）")
-
-            # 输出清空统计日志
-            log_msg = (
-                f"测试模式 - 清空调试目录完成 | "
-                f"目录: {self.debug_img_dir} | "
-                f"总调试图数: {total_count} | "
-                f"成功删除: {deleted_count} | "
-                f"删除失败: {len(failed_files)}"
-            )
-            if failed_files:
-                log_msg += f" | 失败文件: {failed_files}"
-            self.logger.info(log_msg)
-
-        except Exception as e:
-            self.logger.error(f"测试模式 - 清空调试目录异常: {str(e)}", exc_info=True)
 
     def load_template(self, template_name: str, template_path: Optional[str] = None) -> bool:
         try:
@@ -159,18 +128,6 @@ class ImageProcessor:
         threshold: float = 0.8,
         roi: Optional[Tuple[int, int, int, int]] = None
     ) -> Optional[Tuple[int, int, int, int]]:
-        """
-        对齐OCR流程的模板匹配：先裁剪ROI→再缩放模板→最后匹配
-        Args:
-            image: 输入图像（WindowsDevice返回的物理截图，BGR格式）
-            template: 模板名称（字符串）或自定义模板（np.ndarray）
-            threshold: 匹配阈值（0~1，值越高匹配越严格）
-            roi: 感兴趣区域（x, y, w, h）：
-                - 上下文全屏时 → 物理坐标（基于屏幕物理分辨率）
-                - 上下文窗口时 → 逻辑坐标（基于客户区逻辑尺寸）
-        Returns:
-            匹配成功返回逻辑坐标矩形（x, y, w, h），失败返回None
-        """
         try:
             is_fullscreen = self.display_context.is_fullscreen
             ctx = self.display_context
@@ -184,9 +141,11 @@ class ImageProcessor:
                 return None
             orig_image = image.copy()
             image_phys_h, image_phys_w = orig_image.shape[:2]
-            timestamp = datetime.datetime.now().strftime("%H%M%S%f")[:-3]
+            orig_roi_phys = None  # 原始ROI的物理坐标（用于标注）
+            processed_roi = roi   # 处理后的ROI（逻辑坐标）
             roi_offset_phys = (0, 0)
 
+            # 处理模板（原有逻辑不变）
             if isinstance(template, str):
                 template_bgr = self.get_template(template)
                 if template_bgr is None:
@@ -200,126 +159,85 @@ class ImageProcessor:
                 template_bgr = template
                 template_name = "custom_template"
             template_orig_h, template_orig_w = template_bgr.shape[:2]
+            template_orig_size = (template_orig_w, template_orig_h)
             self.logger.debug(
-                f"开始模板匹配 | 模板: {template_name} | 原始尺寸: (宽={template_orig_w}, 高={template_orig_h}) | "
+                f"开始模板匹配 | 模板: {template_name} | 原始尺寸: {template_orig_size} | "
                 f"输入图像尺寸: (宽={image_phys_w}, 高={image_phys_h}) | 阈值: {threshold} | "
                 f"ROI: {roi} | 上下文全屏状态: {is_fullscreen}"
             )
 
+            # ------------------------------ 复用CoordinateTransformer的ROI处理 ------------------------------
             cropped_image = orig_image
-            processed_roi = roi
             if roi:
-                try:
-                    if not isinstance(roi, (tuple, list)) or len(roi) != 4:
-                        raise ValueError(f"ROI格式无效（需为4元组/列表），当前: {type(roi)} {roi}")
-                    rx, ry, rw, rh = roi
-                    if rx < 0 or ry < 0 or rw <= 0 or rh <= 0:
-                        raise ValueError(f"ROI参数无效（x/y非负，w/h正数），当前: ({rx}, {ry}, {rw}, {rh})")
-
-                    if is_fullscreen:
-                        rx_phys, ry_phys, rw_phys, rh_phys = rx, ry, rw, rh
-                        rx_phys = max(0, rx_phys)
-                        ry_phys = max(0, ry_phys)
-                        rw_phys = min(rw_phys, ctx.screen_physical_width - rx_phys)
-                        rh_phys = min(rh_phys, ctx.screen_physical_height - ry_phys)
-                        self.logger.debug(
-                            f"全屏模式ROI处理 | 原始物理ROI: {roi} → 调整后: ({rx_phys}, {ry_phys}, {rw_phys}, {rh_phys}) | "
-                            f"屏幕物理尺寸: {ctx.screen_physical_res}"
-                        )
-                    else:
-                        client_w_log, client_h_log = ctx.client_logical_res
-                        rx_log = max(0, rx)
-                        ry_log = max(0, ry)
-                        rw_log = min(rw, client_w_log - rx_log)
-                        rh_log = min(rh, client_h_log - ry_log)
-                        if rw_log <= 0 or rh_log <= 0:
-                            raise ValueError(
-                                f"逻辑ROI超出客户区范围 | 原始ROI: {roi} | 客户区逻辑尺寸: {client_w_log}x{client_h_log}")
-                        rx_phys, ry_phys = self.coord_transformer.convert_client_logical_to_physical(rx_log, ry_log)
-                        ratio = ctx.logical_to_physical_ratio
-                        rw_phys = int(round(rw_log * ratio))
-                        rh_phys = int(round(rh_log * ratio))
-                        self.logger.debug(
-                            f"窗口模式ROI处理 | 原始逻辑ROI: {roi} → 调整后逻辑ROI: ({rx_log}, {ry_log}, {rw_log}, {rh_log}) → "
-                            f"物理ROI: ({rx_phys}, {ry_phys}, {rw_phys}, {rh_phys}) | DPI比例: {ratio:.2f}"
-                        )
-
-                    if rw_phys <= 0 or rh_phys <= 0:
-                        raise ValueError(f"物理ROI无效（尺寸≤0）: ({rx_phys}, {ry_phys}, {rw_phys}, {rh_phys})")
-
+                # 调用公共ROI处理方法（禁用扩展，使用图像物理尺寸作为边界）
+                processed_roi_phys, roi_offset_phys = self.coord_transformer.process_roi(
+                    roi=roi,
+                    boundary_width=image_phys_w,
+                    boundary_height=image_phys_h,
+                    enable_expand=False  # ImageProcessor不启用扩展
+                )
+                if processed_roi_phys:
+                    orig_roi_phys = processed_roi_phys
+                    rx_phys, ry_phys, rw_phys, rh_phys = processed_roi_phys
                     cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
-                    roi_offset_phys = (rx_phys, ry_phys)
-                    cropped_phys_h, cropped_phys_w = cropped_image.shape[:2]
-                    self.logger.debug(
-                        f"ROI裁剪完成 | 子图尺寸: (宽={cropped_phys_w}, 高={cropped_phys_h}) | "
-                        f"原图偏移: {roi_offset_phys} | 裁剪后图像是否有效: {cropped_image.size > 0}"
-                    )
-
-                    if self.test_mode:
-                        safe_template_name = template_name.replace("/", "_").replace("\\", "_")
-                        crop_save_path = os.path.join(
-                            self.debug_img_dir, f"roi_crop_{safe_template_name}_{timestamp}.png"
+                    # 新增：裁剪后子图有效性检查，为空则回退到原图
+                    if cropped_image.size == 0:
+                        self.logger.warning(f"ROI裁剪后子图为空，使用原图进行匹配 | 原始ROI: {roi} | 处理后ROI物理坐标: {processed_roi_phys}")
+                        cropped_image = orig_image
+                        roi_offset_phys = (0, 0)
+                        orig_roi_phys = None
+                    else:
+                        self.logger.debug(
+                            f"ROI裁剪完成 | 子图尺寸: (宽={cropped_image.shape[1]}, 高={cropped_image.shape[0]}) | "
+                            f"原图偏移: {roi_offset_phys} | 裁剪后图像是否有效: {cropped_image.size > 0}"
                         )
-                        cv2.imwrite(crop_save_path, cropped_image)
-                        self.logger.debug(f"ROI子图已保存至: {crop_save_path}")
-
-                    processed_roi = (rx, ry, rw, rh)
-
-                except ValueError as e:
-                    self.logger.warning(f"ROI处理失败：{str(e)}，自动切换为全图匹配")
-                    cropped_image = orig_image
+                else:
                     processed_roi = None
                     roi_offset_phys = (0, 0)
+                    orig_roi_phys = None
 
-            cropped_phys_h, cropped_phys_w = cropped_image.shape[:2]
-            if processed_roi:
-                orig_roi_w, orig_roi_h = processed_roi[2], processed_roi[3]
-                scale_ratio_w = cropped_phys_w / orig_roi_w if orig_roi_w != 0 else 1.0
-                scale_ratio_h = cropped_phys_h / orig_roi_h if orig_roi_h != 0 else 1.0
-                scale_ratio = min(scale_ratio_w, scale_ratio_h)
-                self.logger.debug(
-                    f"模板缩放比例计算（有ROI）| 子图尺寸: (宽={cropped_phys_w}, 高={cropped_phys_h}) | "
-                    f"原始ROI尺寸: (宽={orig_roi_w}, 高={orig_roi_h}) | "
-                    f"宽比例: {scale_ratio_w:.4f} | 高比例: {scale_ratio_h:.4f} | 最终比例: {scale_ratio:.4f}"
-                )
+            # ------------------------------ 修复：模板缩放比例计算（基于整体物理尺寸，与ROI无关） ------------------------------
+            # 核心修正：模板缩放比例 = 当前整体物理尺寸 / 基准分辨率（全屏=屏幕，窗口=客户区）
+            if is_fullscreen:
+                target_phys_size = self.display_context.screen_physical_res
             else:
-                orig_base_w, orig_base_h = self.original_base_res
-                scale_ratio_w = cropped_phys_w / orig_base_w
-                scale_ratio_h = cropped_phys_h / orig_base_h
-                scale_ratio = min(scale_ratio_w, scale_ratio_h)
-                self.logger.debug(
-                    f"模板缩放比例计算（无ROI）| 子图尺寸: (宽={cropped_phys_w}, 高={cropped_phys_h}) | "
-                    f"原始基准尺寸: (宽={orig_base_w}, 高={orig_base_h}) | "
-                    f"宽比例: {scale_ratio_w:.4f} | 高比例: {scale_ratio_h:.4f} | 最终比例: {scale_ratio:.4f}"
-                )
+                target_phys_size = self.display_context.client_physical_res
+            # 计算正确的缩放比例（仅依赖整体分辨率，不依赖ROI尺寸）
+            scale_ratio = self.coord_transformer.calculate_template_scale_ratio(
+                target_phys_size=target_phys_size,
+                has_roi=False  # 模板缩放与ROI无关，仅需整体分辨率比例
+            )
+            self.logger.debug(
+                f"模板缩放比例计算完成 | 基准分辨率: {self.original_base_res} | "
+                f"当前整体物理尺寸: {target_phys_size} | 缩放比例: {scale_ratio:.4f}"
+            )
 
+            # 模板缩放（基于正确比例，保留尺寸限制逻辑）
             scaled_w = max(self.min_template_size[0], int(round(template_orig_w * scale_ratio)))
             scaled_h = max(self.min_template_size[1], int(round(template_orig_h * scale_ratio)))
-            scaled_w = min(scaled_w, cropped_phys_w - 2)
-            scaled_h = min(scaled_h, cropped_phys_h - 2)
+            # 确保缩放后模板不超过裁剪子图尺寸（避免匹配时模板超出范围）
+            scaled_w = min(scaled_w, cropped_image.shape[1] - 2)
+            scaled_h = min(scaled_h, cropped_image.shape[0] - 2)
+            template_scaled_size = (scaled_w, scaled_h)
 
             if scaled_w <= 0 or scaled_h <= 0:
                 self.logger.error(
-                    f"模板缩放失败 | 缩放后尺寸无效: (宽={scaled_w}, 高={scaled_h}) | "
-                    f"子图尺寸: (宽={cropped_phys_w}, 高={cropped_phys_h}) | 比例: {scale_ratio:.4f}"
+                    f"模板缩放失败 | 缩放后尺寸无效: {template_scaled_size} | "
+                    f"子图尺寸: (宽={cropped_image.shape[1]}, 高={cropped_image.shape[0]}) | 比例: {scale_ratio:.4f}"
                 )
                 return None
 
-            interpolation = cv2.INTER_AREA if scale_ratio < 1.0 else cv2.INTER_CUBIC
+            # 优化：缩小用LANCZOS4（抗锯齿更好，保留模板细节），放大用CUBIC
+            interpolation = cv2.INTER_LANCZOS4 if scale_ratio < 1.0 else cv2.INTER_CUBIC
             scaled_template = cv2.resize(template_bgr, (scaled_w, scaled_h), interpolation=interpolation)
             self.logger.debug(
-                f"模板缩放完成 | 原始尺寸: (宽={template_orig_w}, 高={template_orig_h}) → "
-                f"缩放后: (宽={scaled_w}, 高={scaled_h}) | 插值方式: {interpolation}"
+                f"模板缩放完成 | 原始尺寸: {template_orig_size} → 缩放后: {template_scaled_size} | "
+                f"插值方式: {interpolation} | 缩放比例: {scale_ratio:.4f}"
             )
 
-            if len(cropped_image.shape) == 3:
-                cropped_gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
-            else:
-                cropped_gray = cropped_image
-            if len(scaled_template.shape) == 3:
-                template_gray = cv2.cvtColor(scaled_template, cv2.COLOR_BGR2GRAY)
-            else:
-                template_gray = scaled_template
+            # 模板匹配核心逻辑（原有不变）
+            cropped_gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY) if len(cropped_image.shape) == 3 else cropped_image
+            template_gray = cv2.cvtColor(scaled_template, cv2.COLOR_BGR2GRAY) if len(scaled_template.shape) == 3 else scaled_template
 
             if (template_gray.shape[0] > cropped_gray.shape[0]) or (template_gray.shape[1] > cropped_gray.shape[1]):
                 self.logger.error(
@@ -342,74 +260,54 @@ class ImageProcessor:
                     f"模板匹配失败：分数不足 | 模板: {template_name} | 分数: {match_score:.4f} < 阈值: {threshold}"
                 )
                 if self.test_mode:
-                    safe_template_name = template_name.replace("/", "_").replace("\\", "_")
-                    debug_img = cropped_image.copy()
-                    cv2.putText(
-                        debug_img, f"Score: {match_score:.4f} < Threshold: {threshold}",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
+                    self.debug_saver.save_template_debug(
+                        orig_image=orig_image,
+                        template_name=template_name,
+                        is_success=False,
+                        match_score=match_score,
+                        threshold=threshold,
+                        is_fullscreen=is_fullscreen,
+                        orig_roi_phys=orig_roi_phys,
+                        processed_roi=processed_roi
                     )
-                    save_path = os.path.join(
-                        self.debug_img_dir, f"match_fail_{safe_template_name}_{timestamp}.png"
-                    )
-                    cv2.imwrite(save_path, debug_img)
-                    self.logger.debug(f"匹配失败调试图已保存至: {save_path}")
                 return None
 
+            # ------------------------------ 复用CoordinateTransformer的子图坐标→原图物理坐标 + 中心计算 ------------------------------
             match_x_sub, match_y_sub = max_loc
-            match_x_phys = match_x_sub + roi_offset_phys[0]
-            match_y_phys = match_y_sub + roi_offset_phys[1]
-            match_w_phys = scaled_template.shape[1]
-            match_h_phys = scaled_template.shape[0]
-            full_bbox_phys = (match_x_phys, match_y_phys, match_w_phys, match_h_phys)
-            self.logger.debug(
-                f"坐标映射完成 | 子图内坐标: ({match_x_sub}, {match_y_sub}) → "
-                f"全图物理坐标: {full_bbox_phys} | ROI偏移: {roi_offset_phys}"
+            # 子图内矩形 → 原图物理矩形（应用ROI偏移）
+            match_bbox_sub = (match_x_sub, match_y_sub, scaled_template.shape[1], scaled_template.shape[0])
+            match_bbox_phys = self.coord_transformer.apply_roi_offset_to_subcoord(
+                sub_coord=match_bbox_sub,
+                roi_offset_phys=roi_offset_phys
             )
+            # 计算矩形中心（复用公共方法）
+            center_phys = self.coord_transformer.get_rect_center(match_bbox_phys)
 
-            if is_fullscreen:
-                final_bbox_log = full_bbox_phys
-            else:
-                x_log = self.coord_transformer.convert_client_physical_to_logical(match_x_phys, match_y_phys)[0]
-                y_log = self.coord_transformer.convert_client_physical_to_logical(match_x_phys, match_y_phys)[1]
-                ratio = ctx.logical_to_physical_ratio
-                w_log = int(round(match_w_phys / ratio)) if ratio > 0 else match_w_phys
-                h_log = int(round(match_h_phys / ratio)) if ratio > 0 else match_h_phys
-                client_w_log, client_h_log = ctx.client_logical_res
-                x_log = max(0, min(x_log, client_w_log - 1))
-                y_log = max(0, min(y_log, client_h_log - 1))
-                w_log = max(1, min(w_log, client_w_log - x_log))
-                h_log = max(1, min(h_log, client_h_log - y_log))
-                final_bbox_log = (x_log, y_log, w_log, h_log)
+            # ------------------------------ 复用CoordinateTransformer的全屏/窗口逻辑坐标统一转换 ------------------------------
+            final_bbox_log = self.coord_transformer.get_unified_logical_rect(match_bbox_phys)
 
+            # 测试模式保存图片（原有逻辑不变）
             if self.test_mode:
-                safe_template_name = template_name.replace("/", "_").replace("\\", "_")
-                debug_img = orig_image.copy()
-                cv2.rectangle(
-                    debug_img, (match_x_phys, match_y_phys),
-                    (match_x_phys + match_w_phys, match_y_phys + match_h_phys),
-                    (0, 0, 255), 2
+                self.debug_saver.save_template_debug(
+                    orig_image=orig_image,
+                    template_name=template_name,
+                    is_success=True,
+                    match_score=match_score,
+                    threshold=threshold,
+                    is_fullscreen=is_fullscreen,
+                    orig_roi_phys=orig_roi_phys,
+                    processed_roi=processed_roi,
+                    match_bbox_phys=match_bbox_phys,
+                    center_phys=center_phys,
+                    final_bbox_log=final_bbox_log,
+                    template_orig_size=template_orig_size,
+                    template_scaled_size=template_scaled_size
                 )
-                center_x_phys = match_x_phys + match_w_phys // 2
-                center_y_phys = match_y_phys + match_h_phys // 2
-                cv2.circle(debug_img, (center_x_phys, center_y_phys), 3, (0, 255, 0), -1)
-                text = (
-                    f"Template: {template_name} | Score: {match_score:.4f} | "
-                    f"Phys: {full_bbox_phys} | Log: {final_bbox_log} | Mode: {'Fullscreen' if is_fullscreen else 'Window'}"
-                )
-                cv2.putText(
-                    debug_img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5, (0, 255, 0), 1, lineType=cv2.LINE_AA
-                )
-                save_path = os.path.join(
-                    self.debug_img_dir, f"match_success_{safe_template_name}_{timestamp}.png"
-                )
-                cv2.imwrite(save_path, debug_img)
-                self.logger.debug(f"匹配成功调试图已保存至: {save_path}")
 
             self.logger.info(
                 f"模板匹配成功 | 模板: {template_name} | 逻辑坐标: {final_bbox_log} | "
-                f"物理坐标: {full_bbox_phys} | 匹配分数: {match_score:.4f} | "
-                f"模式: {'全屏' if is_fullscreen else '窗口'}"
+                f"物理坐标: {match_bbox_phys} | 匹配分数: {match_score:.4f} | "
+                f"模式: {'全屏' if is_fullscreen else '窗口'} | 模板缩放比例: {scale_ratio:.4f}"
             )
             return final_bbox_log
 
@@ -417,21 +315,3 @@ class ImageProcessor:
             template_name = template if isinstance(template, str) else "custom_template"
             self.logger.error(f"模板匹配异常 | 模板: {template_name} | 错误: {str(e)}", exc_info=True)
             return None
-
-    def get_center(self, rect: Union[Tuple[int, int, int, int], np.ndarray]) -> Tuple[int, int]:
-        if rect is None:
-            self.logger.warning("计算中心失败：矩形为None")
-            return (0, 0)
-        if isinstance(rect, np.ndarray):
-            rect = tuple(rect.tolist())
-        if not isinstance(rect, (tuple, list)) or len(rect) != 4:
-            self.logger.warning(f"计算中心失败：无效矩形 {rect}")
-            return (0, 0)
-        try:
-            x, y, w, h = map(int, rect)
-            center_x = x + w // 2
-            center_y = y + h // 2
-            return (center_x, center_y)
-        except (ValueError, TypeError):
-            self.logger.warning(f"计算中心失败：矩形值错误 {rect}")
-            return (0, 0)

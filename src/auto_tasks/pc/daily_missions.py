@@ -28,7 +28,7 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
             # 初始状态：检查主界面
             if state == "init":
                 if back_to_main(auto):
-                    if pos := auto.text_click("任务", click=False,roi=(635,1000,90,35)):
+                    if pos := auto.text_click("任务", click=False,roi=(600,900,170,150)):
                         logger.info(f"进入任务界面")
                         auto.click(pos, click_time=2)
                         auto.sleep(2)

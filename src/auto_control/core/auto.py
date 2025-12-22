@@ -89,7 +89,7 @@ class Auto:
             logger=self.ocr_processor_logger,
             coord_transformer=self.coord_transformer,
             display_context=self.display_context,
-            
+            test_mode=self.test_mode
         )
 
         # 设备配置
@@ -394,124 +394,83 @@ class Auto:
         return self.last_result
 
     def text_click(
-            self,
-            target_text: str,
-            click: bool = True,
-            lang: str = None,
-            roi: Optional[tuple] = None,
-            delay: float = DEFAULT_CLICK_DELAY,
-            device_uri: Optional[str] = None,
-            duration: float = 0.1,
-            click_time: int = 1,
-            right_click: bool = False
-        ) -> Optional[Tuple[int, int]]:
-        """OCR文本识别并点击（支持ROI，基于上下文坐标处理）"""
-        if self.check_should_stop():
-            self.logger.info("文本点击任务被中断")
-            self.last_result = None
-            return None
+                self,
+                target_text: str,
+                click: bool = True,
+                lang: str = None,
+                roi: Optional[tuple] = None,
+                delay: float = DEFAULT_CLICK_DELAY,
+                device_uri: Optional[str] = None,
+                duration: float = 0.1,
+                click_time: int = 1,
+                right_click: bool = False
+            ) -> Optional[Tuple[int, int]]:
+            """OCR文本识别并点击（支持ROI，直接透传不处理，内部统一校验转换）"""
+            if self.check_should_stop():
+                self.logger.info("文本点击任务被中断")
+                self.last_result = None
+                return None
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
 
-        # 截图（WindowsDevice.capture_screen 已返回客户区物理截图）
-        screen = device.capture_screen()
-        if screen is None:
-            self.last_error = "文本点击失败: 截图失败"
-            self.logger.error(f"错误: {self.last_error}")
-            self.last_result = None
-            return None
-
-        # 处理ROI：核心修改！全屏模式直接用基准ROI（物理坐标），窗口才转换
-        region = None  # 传给find_text_position的区域（物理坐标，全屏）/逻辑坐标（窗口）
-        is_fullscreen = self.coord_transformer.is_fullscreen  # 获取全屏状态（直接调用CoordinateTransformer的属性）
-        if roi:
-            try:
-                # 步骤1：校验roi格式
-                if not isinstance(roi, (tuple, list)) or len(roi) != 4:
-                    raise ValueError(f"roi必须是4元组/列表（x, y, w, h），当前为{type(roi)}且长度{len(roi)}")
-                rx, ry, rw, rh = roi
-                if rx < 0 or ry < 0 or rw <= 0 or rh <= 0:
-                    raise ValueError(f"roi参数无效：x={rx}, y={ry}（需非负）；w={rw}, h={rh}（需正数）")
-
-                if is_fullscreen:
-                    # 全屏模式：基准ROI是物理坐标，直接使用（不转换）
-                    region = roi
-                    self.logger.debug(f"全屏模式 | 直接使用基准ROI（物理坐标）: {region} | 截图物理尺寸: {screen.shape[1]}x{screen.shape[0]}")
-                else:
-                    # 窗口模式：基准ROI（物理）→ 客户区逻辑坐标（调用CoordinateTransformer的现有方法）
-                    region = self.coord_transformer.convert_original_rect_to_current_client(roi)
-                    if not region or len(region) != 4:
-                        raise ValueError("ROI转换后无效")
-                    rx2, ry2, rw2, rh2 = region
-                    client_w, client_h = self.display_context.client_logical_res
-                    if rx2 < 0 or ry2 < 0 or rw2 <= 0 or rh2 <= 0:
-                        raise ValueError(f"转换后ROI无效：{region}")
-                    if rx2 + rw2 > client_w or ry2 + rh2 > client_h:
-                        self.logger.warning(f"窗口模式 | ROI超出客户区，自动裁剪: {region} → ({rx2}, {ry2}, {client_w - rx2}, {client_h - ry2})")
-                        rw2 = max(1, client_w - rx2)
-                        rh2 = max(1, client_h - ry2)
-                        region = (rx2, ry2, rw2, rh2)
-                    self.logger.debug(f"窗口模式 | 基准ROI: {roi} → 逻辑ROI: {region} | 客户区逻辑尺寸: {client_w}x{client_h}")
-
-            except ValueError as e:
-                self.last_error = f"文本点击失败: ROI参数无效 - {str(e)}"
+            # 截图（WindowsDevice.capture_screen 已返回客户区物理截图）
+            screen = device.capture_screen()
+            if screen is None:
+                self.last_error = "文本点击失败: 截图失败"
                 self.logger.error(f"错误: {self.last_error}")
                 self.last_result = None
                 return None
 
-        # 调用OCR识别：获取双坐标（逻辑坐标+物理坐标）
-        ocr_result = self.ocr_processor.find_text_position(
-            image=screen,  # 物理截图
-            target_text=target_text,
-            lang=lang,
-            region=region
-        )
+            # ROI 彻底不处理：直接透传（格式校验、坐标转换全交给 OCR 内部）
+            region = roi
+            if roi:
+                self.logger.debug(f"直接传递原始基准ROI: {roi} | 截图物理尺寸: {screen.shape[1]}x{screen.shape[0]}")
 
-        if not ocr_result:
-            self.last_error = f"文本点击失败: 未识别到文本 '{target_text}'"
-            self.logger.warning(f"警告: {self.last_error}")
-            self.last_result = None
-            return None
-
-        # 提取OCR返回的双坐标（直接使用，无需额外转换）
-        text_pos_log, text_pos_phys = ocr_result
-        x_log, y_log, w_log, h_log = text_pos_log
-        x_phys, y_phys, w_phys, h_phys = text_pos_phys
-
-        # 区分全屏/窗口模式计算点击坐标
-        if is_fullscreen:
-            # 全屏模式：使用物理坐标计算中心点（正确位置）
-            client_center_x = x_phys + w_phys // 2
-            client_center_y = y_phys + h_phys // 2
-            self.logger.info(
-                f"识别到文本 '{target_text}' | 物理坐标: ({x_phys},{y_phys},{w_phys},{h_phys}) | "
-                f"物理中心点: ({client_center_x},{client_center_y}) | 模式: 全屏"
-            )
-        else:
-            # 窗口模式：使用逻辑坐标计算中心点（原有逻辑正确）
-            client_center_x = x_log + w_log // 2
-            client_center_y = y_log + h_log // 2
-            self.logger.info(
-                f"识别到文本 '{target_text}' | 客户区逻辑坐标: ({x_log},{y_log},{w_log},{h_log}) | "
-                f"中心: ({client_center_x},{client_center_y}) | 模式: 窗口"
+            # 调用OCR识别：明确是基准ROI，内部统一处理校验+转换
+            ocr_result = self.ocr_processor.find_text_position(
+                image=screen,
+                target_text=target_text,
+                lang=lang,
+                region=region
             )
 
-        if click:
-            click_result = device.click(
-                pos=(client_center_x, client_center_y),
-                duration=duration,
-                click_time=click_time,
-                right_click=right_click
-            )
-            if not click_result:
-                self.last_error = device.last_error or "文本点击执行失败"
-                self.logger.error(f"错误: {self.last_error}")
+            if not ocr_result:
+                self.last_error = f"文本点击失败: 未识别到文本 '{target_text}'"
+                self.logger.warning(f"警告: {self.last_error}")
+                self.last_result = None
                 return None
-            return (client_center_x, client_center_y)
-        else:
-            self.last_result = (client_center_x, client_center_y)
-            return (client_center_x, client_center_y)
+
+            # ------------------------------ 提取逻辑坐标------------------------------
+            text_pos_log, _ = ocr_result  # 第一个元素是逻辑坐标 (x_log, y_log, w_log, h_log)
+            x_log, y_log, w_log, h_log = text_pos_log
+            # 基于逻辑坐标计算点击中心点（逻辑坐标）
+            click_center_x = x_log + w_log // 2
+            click_center_y = y_log + h_log // 2
+
+            # 日志输出（补充逻辑坐标，更清晰）
+            is_fullscreen = self.coord_transformer.is_fullscreen
+            self.logger.info(
+                f"识别到文本 '{target_text}' | 模式: {'全屏' if is_fullscreen else '窗口'} | "
+                f"逻辑坐标: ({x_log},{y_log},{w_log},{h_log}) | 物理坐标: {ocr_result[1]} | "  # 保留物理坐标日志（方便调试）
+                f"点击中心点（逻辑）: ({click_center_x},{click_center_y})"
+            )
+
+            if click:
+                click_result = device.click(
+                    pos=(click_center_x, click_center_y),
+                    duration=duration,
+                    click_time=click_time,
+                    right_click=right_click
+                )
+                if not click_result:
+                    self.last_error = device.last_error or "文本点击执行失败"
+                    self.logger.error(f"错误: {self.last_error}")
+                    return None
+                return (click_center_x, click_center_y)
+            else:
+                self.last_result = (click_center_x, click_center_y)
+                return (click_center_x, click_center_y)
 
     # ======================== 窗口管理方法 ========================
     def minimize_window(

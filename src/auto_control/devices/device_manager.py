@@ -23,13 +23,13 @@ class DeviceManager:
         """
         # 强制检查所有必需依赖（不存在直接抛错，不提供降级）
         if not logger:
-            raise ValueError("[DeviceManager] 初始化失败：logger不能为空（Auto层必须传入有效日志实例）")
+            raise ValueError("初始化失败：logger不能为空（Auto层必须传入有效日志实例）")
         if not isinstance(image_processor, ImageProcessor):
-            raise ValueError("[DeviceManager] 初始化失败：image_processor必须是ImageProcessor实例")
+            raise ValueError("初始化失败：image_processor必须是ImageProcessor实例")
         if not isinstance(coord_transformer, CoordinateTransformer):
-            raise ValueError("[DeviceManager] 初始化失败：coord_transformer必须是CoordinateTransformer实例")
+            raise ValueError("初始化失败：coord_transformer必须是CoordinateTransformer实例")
         if not isinstance(display_context, RuntimeDisplayContext):
-            raise ValueError("[DeviceManager] 初始化失败：display_context必须是RuntimeDisplayContext实例")
+            raise ValueError("初始化失败：display_context必须是RuntimeDisplayContext实例")
 
         # 设备存储：URI -> 设备实例（统一转为小写存储）
         self.devices: Dict[str, BaseDevice] = {}
@@ -41,48 +41,24 @@ class DeviceManager:
         self.coord_transformer = coord_transformer
         self.display_context = display_context
 
-        self.logger.info("[DeviceManager] 设备管理器初始化完成")
+        self.logger.info("设备管理器初始化完成")
 
     # ======================== 分辨率同步核心方法 ========================
     def _sync_device_resolution(self, device: BaseDevice) -> bool:
         """同步设备分辨率到上下文和坐标转换器（内部自动调用）"""
         # 只保留业务相关检查（设备是否有效+已连接）
         if not device or not device.is_connected:
-            self.logger.debug(f"[DeviceManager] 分辨率同步失败：设备{getattr(device, 'device_uri', '未知')}未连接或无效")
+            self.logger.debug(f"分辨率同步失败：设备{getattr(device, 'device_uri', '未知')}未连接或无效")
             return False
 
         try:
             # 触发设备更新动态窗口信息（仅WindowsDevice支持，兼容其他设备）
             if hasattr(device, "_update_dynamic_window_info") and callable(device._update_dynamic_window_info):
                 device._update_dynamic_window_info()
-            
-            # 获取设备客户区分辨率（检查格式合法性，运行时可能出现）
-            resolution = device.get_resolution()
-            if not isinstance(resolution, (tuple, list)) or len(resolution) != 2:
-                self.logger.error(f"[DeviceManager] 分辨率同步失败：设备{device.device_uri}返回无效格式 {resolution}（需(x, y)）")
-                return False
-            if resolution[0] <= 0 or resolution[1] <= 0:
-                self.logger.error(f"[DeviceManager] 分辨率同步失败：设备{device.device_uri}返回无效尺寸 {resolution}（需正数）")
-                return False
-            
-            # 同步到显示上下文（依赖已在__init__校验，直接调用）
-            self.display_context.update_client_resolution(
-                client_logical_width=resolution[0],
-                client_logical_height=resolution[1]
-            )
-            
-            # 同步到坐标转换器（依赖已在__init__校验，直接调用）
-            self.coord_transformer.update_context(self.display_context)
-            
-            # 输出详细同步日志
-            self.logger.debug(
-                f"[DeviceManager] 分辨率同步成功 | 设备: {device.device_uri} | "
-                f"客户区尺寸: {resolution[0]}x{resolution[1]} | "
-                f"全屏状态: {self.coord_transformer.is_fullscreen}"
-            )
+                
             return True
         except Exception as e:
-            self.logger.error(f"[DeviceManager] 设备{getattr(device, 'device_uri', '未知')}分辨率同步异常：{str(e)}", exc_info=True)
+            self.logger.error(f"设备{getattr(device, 'device_uri', '未知')}分辨率同步异常：{str(e)}", exc_info=True)
             return False
 
     # ======================== 设备管理核心方法 ========================
@@ -91,33 +67,33 @@ class DeviceManager:
         lower_uri = device_uri.lower()
         device = self.devices.get(lower_uri)
         if device:
-            self.logger.debug(f"[DeviceManager] 获取设备成功: {device_uri}（状态: {device.get_state().name}）")
+            self.logger.debug(f"获取设备成功: {device_uri}（状态: {device.get_state().name}）")
         else:
-            self.logger.debug(f"[DeviceManager] 未找到设备: {device_uri}")
+            self.logger.debug(f"未找到设备: {device_uri}")
         return device
 
     def get_active_device(self) -> Optional[BaseDevice]:
         """获取当前活动设备（自动校验有效性）"""
         if not self.active_device:
-            self.logger.debug("[DeviceManager] 无活动设备")
+            self.logger.debug("无活动设备")
             return None
         
         device = self.get_device(self.active_device)
         if not device:
-            self.logger.warning(f"[DeviceManager] 活动设备{self.active_device}不存在，已重置")
+            self.logger.warning(f"活动设备{self.active_device}不存在，已重置")
             self.active_device = None
         return device
 
     def get_all_devices(self) -> Dict[str, BaseDevice]:
         """获取所有设备字典（URI -> 实例）（返回副本，避免外部修改）"""
         device_count = len(self.devices)
-        self.logger.debug(f"[DeviceManager] 当前已连接设备总数: {device_count}")
+        self.logger.debug(f"当前已连接设备总数: {device_count}")
         return self.devices.copy()
 
     def get_device_list(self) -> List[str]:
         """获取所有设备URI列表（按添加顺序返回）"""
         uri_list = list(self.devices.keys())
-        self.logger.debug(f"[DeviceManager] 设备URI列表: {uri_list}")
+        self.logger.debug(f"设备URI列表: {uri_list}")
         return uri_list
 
     def add_device(
@@ -137,11 +113,11 @@ class DeviceManager:
         if lower_uri in self.devices:
             device = self.devices[lower_uri]
             if device.is_connected:
-                self.logger.info(f"[DeviceManager] 设备已存在且已连接: {device_uri}（状态: {device.get_state().name}）")
+                self.logger.info(f"设备已存在且已连接: {device_uri}（状态: {device.get_state().name}）")
                 self._sync_device_resolution(device)
                 return True
             else:
-                self.logger.warning(f"[DeviceManager] 设备已存在但未连接，尝试重新连接: {device_uri}")
+                self.logger.warning(f"设备已存在但未连接，尝试重新连接: {device_uri}")
                 del self.devices[lower_uri]
 
         # 2. 识别设备类型
@@ -151,11 +127,11 @@ class DeviceManager:
         elif lower_uri.startswith(("android://", "adb://")):
             device_type = "ADB"
         else:
-            self.logger.error(f"[DeviceManager] 添加设备失败：无法识别URI类型 - {device_uri}（支持windows:// / adb://）")
+            self.logger.error(f"添加设备失败：无法识别URI类型 - {device_uri}（支持windows:// / adb://）")
             return False
 
         try:
-            self.logger.info(f"[DeviceManager] 开始添加{device_type}设备: {device_uri}（超时时间: {timeout}s）")
+            self.logger.info(f"开始添加{device_type}设备: {device_uri}（超时时间: {timeout}s）")
             
             # 3. 创建设备实例（依赖已校验，直接传入）
             if device_type == "Windows":
@@ -183,12 +159,12 @@ class DeviceManager:
                 # 6. 自动设置第一个设备为活动设备
                 if not self.active_device:
                     self.active_device = lower_uri
-                    self.logger.debug(f"[DeviceManager] 自动设置活动设备: {device_uri}（首个添加的设备）")
+                    self.logger.debug(f"自动设置活动设备: {device_uri}（首个添加的设备）")
                 # 7. 自动同步分辨率
                 sync_success = self._sync_device_resolution(device)
                 sync_msg = "分辨率同步成功" if sync_success else "分辨率同步失败（不影响设备使用）"
                 self.logger.info(
-                    f"[DeviceManager] 设备添加成功: {device_uri} | "
+                    f"设备添加成功: {device_uri} | "
                     f"耗时: {elapsed_time:.2f}s | "
                     f"{sync_msg}"
                 )
@@ -197,14 +173,14 @@ class DeviceManager:
                 # 连接失败：输出具体错误
                 error_msg = device.last_error or "未知连接错误"
                 self.logger.error(
-                    f"[DeviceManager] 设备连接失败: {device_uri} | "
+                    f"设备连接失败: {device_uri} | "
                     f"耗时: {elapsed_time:.2f}s | "
                     f"错误原因: {error_msg}"
                 )
                 return False
 
         except Exception as e:
-            self.logger.error(f"[DeviceManager] 添加设备异常: {device_uri} - {str(e)}", exc_info=True)
+            self.logger.error(f"添加设备异常: {device_uri} - {str(e)}", exc_info=True)
             return False
 
     def remove_device(self, device_uri: str) -> bool:
@@ -217,7 +193,7 @@ class DeviceManager:
         device = self.devices.get(lower_uri)
         
         if not device:
-            self.logger.warning(f"[DeviceManager] 移除设备失败：设备不存在 - {device_uri}")
+            self.logger.warning(f"移除设备失败：设备不存在 - {device_uri}")
             return False
 
         try:
@@ -230,20 +206,20 @@ class DeviceManager:
             
             # 2. 从设备列表中删除
             del self.devices[lower_uri]
-            self.logger.info(f"[DeviceManager] 设备移除成功: {device_uri} | {disconnect_msg}")
+            self.logger.info(f"设备移除成功: {device_uri} | {disconnect_msg}")
             
             # 3. 处理活动设备切换（如果移除的是当前活动设备）
             if self.active_device == lower_uri:
                 self.active_device = next(iter(self.devices.keys()), None)
                 if self.active_device:
-                    self.logger.info(f"[DeviceManager] 活动设备自动切换为: {self.active_device}")
+                    self.logger.info(f"活动设备自动切换为: {self.active_device}")
                     self._sync_device_resolution(self.get_active_device())
                 else:
-                    self.logger.info("[DeviceManager] 所有设备已移除，无当前活动设备")
+                    self.logger.info("所有设备已移除，无当前活动设备")
             
             return True
         except Exception as e:
-            self.logger.error(f"[DeviceManager] 移除设备异常: {device_uri} - {str(e)}", exc_info=True)
+            self.logger.error(f"移除设备异常: {device_uri} - {str(e)}", exc_info=True)
             return False
 
     def set_active_device(self, device_uri: str) -> bool:
@@ -257,14 +233,14 @@ class DeviceManager:
         
         # 1. 校验设备是否存在
         if not device:
-            self.logger.error(f"[DeviceManager] 设置活动设备失败：设备不存在 - {device_uri}")
+            self.logger.error(f"设置活动设备失败：设备不存在 - {device_uri}")
             return False
         
         # 2. 校验设备是否已连接
         if not device.is_connected:
             current_state = device.get_state().name
             self.logger.error(
-                f"[DeviceManager] 设置活动设备失败：设备未连接 - {device_uri} | "
+                f"设置活动设备失败：设备未连接 - {device_uri} | "
                 f"当前状态: {current_state}（需CONNECTED状态）"
             )
             return False
@@ -276,7 +252,7 @@ class DeviceManager:
         sync_msg = "分辨率同步成功" if sync_success else "分辨率同步失败"
         
         self.logger.info(
-            f"[DeviceManager] 活动设备切换成功 | "
+            f"活动设备切换成功 | "
             f"原设备: {old_active_device or '无'} | "
             f"新设备: {device_uri} | "
             f"{sync_msg}"
@@ -290,10 +266,10 @@ class DeviceManager:
         """
         active_device = self.get_active_device()
         if not active_device:
-            self.logger.debug("[DeviceManager] 主动同步分辨率失败：无活动设备")
+            self.logger.debug("主动同步分辨率失败：无活动设备")
             return False
         
-        self.logger.debug(f"[DeviceManager] 开始主动同步活动设备分辨率：{active_device.device_uri}")
+        self.logger.debug(f"开始主动同步活动设备分辨率：{active_device.device_uri}")
         return self._sync_device_resolution(active_device)
 
     def disconnect_all(self) -> Tuple[int, int]:
@@ -306,10 +282,10 @@ class DeviceManager:
         total_count = len(self.devices)
         
         if total_count == 0:
-            self.logger.info("[DeviceManager] 无设备需要断开连接")
+            self.logger.info("无设备需要断开连接")
             return (0, 0)
         
-        self.logger.info(f"[DeviceManager] 开始断开所有设备连接（共{total_count}个设备）")
+        self.logger.info(f"开始断开所有设备连接（共{total_count}个设备）")
         for uri, device in list(self.devices.items()):
             if device.is_connected:
                 if device.disconnect():
@@ -320,7 +296,7 @@ class DeviceManager:
         self.devices.clear()
         self.active_device = None
         self.logger.info(
-            f"[DeviceManager] 所有设备断开连接完成 | "
+            f"所有设备断开连接完成 | "
             f"成功: {success_count}个 | "
             f"失败: {fail_count}个 | "
             f"总计: {total_count}个"
@@ -338,7 +314,7 @@ class DeviceManager:
             return None
         
         device_state = device.get_state()
-        self.logger.debug(f"[DeviceManager] 设备状态查询: {device_uri} - {device_state.name}")
+        self.logger.debug(f"设备状态查询: {device_uri} - {device_state.name}")
         return device_state
 
     def is_device_operable(self, device_uri: str) -> bool:
@@ -349,12 +325,12 @@ class DeviceManager:
         """
         device_state = self.get_device_state(device_uri)
         if not device_state:
-            self.logger.debug(f"[DeviceManager] 设备可操作性查询失败：设备不存在 - {device_uri}")
+            self.logger.debug(f"设备可操作性查询失败：设备不存在 - {device_uri}")
             return False
         
         operable = device_state in (DeviceState.CONNECTED, DeviceState.IDLE)
         self.logger.debug(
-            f"[DeviceManager] 设备可操作性查询: {device_uri} - {operable} | "
+            f"设备可操作性查询: {device_uri} - {operable} | "
             f"状态: {device_state.name}"
         )
         return operable

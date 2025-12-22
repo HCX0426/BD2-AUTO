@@ -719,7 +719,7 @@ class WindowsDevice(BaseDevice):
                     self.last_error = f"模板匹配结果格式错误: {match_rect}（需为4元组）"
                     self.logger.error(f"点击失败: {self.last_error}")
                     return False
-                target_pos = self.image_processor.get_center(match_rect)
+                target_pos = self.coord_transformer.get_rect_center(match_rect)
                 self.logger.debug(
                     f"模板匹配成功 | 模板: {matched_template} | 匹配矩形（逻辑坐标）: {match_rect} | "
                     f"中心点（逻辑坐标）: {target_pos}"
@@ -963,7 +963,7 @@ class WindowsDevice(BaseDevice):
                     if len(match_rect) != 4:
                         self.logger.warning(f"模板结果格式无效: {match_rect}，模板: {template}")
                         continue
-                    center_pos = self.image_processor.get_center(match_rect)
+                    center_pos = self.coord_transformer.get_rect_center(match_rect)
                     center_pos = tuple(map(int, center_pos)) if isinstance(
                         center_pos, (list, np.ndarray)) else center_pos
                     if not isinstance(center_pos, tuple) or len(center_pos) != 2:
