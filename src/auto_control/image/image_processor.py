@@ -9,7 +9,7 @@ import numpy as np
 from src.auto_control.config.auto_config import TEMPLATE_EXTENSIONS
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.utils.display_context import RuntimeDisplayContext
-from src.auto_control.utils.debug_image_saver import DebugImageSaver  # 导入公共调试图工具类
+from src.auto_control.utils.debug_image_saver import DebugImageSaver
 from src.core.path_manager import path_manager
 
 
@@ -27,15 +27,18 @@ class ImageProcessor:
     ) -> None:
         """
         初始化图像处理器（强制依赖上层传入有效实例）
-        :param original_base_res: 全屏录制的基准分辨率（必需）
-        :param logger: 日志实例（必需）
-        :param coord_transformer: 坐标转换器实例（必需）
-        :param display_context: 运行时上下文实例（必需）
-        :param template_dir: 模板目录（可选，默认使用path_manager的task_template路径）
-        :param test_mode: 测试模式开关（控制是否保存调试图+初始化清空历史图），默认False
-        :raises ValueError: 任何必需依赖缺失或无效时抛错
+
+        Args:
+            original_base_res: 全屏录制的基准分辨率（宽, 高）
+            logger: 日志实例（必需）
+            coord_transformer: 坐标转换器实例（必需）
+            display_context: 运行时上下文实例（必需）
+            template_dir: 模板目录（可选，默认使用path_manager的task_template路径）
+            test_mode: 测试模式开关（控制是否保存调试图+初始化清空历史图），默认False
+
+        Raises:
+            ValueError: 任何必需依赖缺失或无效时抛错
         """
-        # 强制检查所有必需依赖（不存在/无效直接抛错，不提供降级）
         if not logger:
             raise ValueError("初始化失败：logger不能为空（必须传入有效日志实例）")
         if not isinstance(original_base_res, (tuple, list)) or len(original_base_res) != 2:
@@ -47,7 +50,6 @@ class ImageProcessor:
         if not isinstance(display_context, RuntimeDisplayContext):
             raise ValueError("初始化失败：display_context必须是RuntimeDisplayContext实例")
 
-        # 赋值核心属性（已校验有效性，直接使用）
         self.logger = logger
         self.original_base_res = original_base_res
         self.coord_transformer = coord_transformer
@@ -55,24 +57,20 @@ class ImageProcessor:
         self.template_dir = template_dir or path_manager.get("task_template")
         self.test_mode = test_mode
 
-        # 初始化辅助属性
         self.templates: Dict[str, np.ndarray] = {}
         debug_dir = path_manager.get("match_temple_debug")
-        os.makedirs(debug_dir, exist_ok=True)  # 确保调试目录存在
+        os.makedirs(debug_dir, exist_ok=True)
 
-        # 初始化公共调试图保存工具
         self.debug_saver = DebugImageSaver(
             logger=logger,
             debug_dir=debug_dir,
             test_mode=test_mode
         )
 
-        # 匹配参数配置
         self.min_confidence = 0.8
         self.min_template_size = (10, 10)
         self.match_algorithm = cv2.TM_CCOEFF_NORMED
 
-        # 加载模板并输出初始化日志
         self.load_all_templates()
         self.logger.info(
             f"初始化完成 | 加载模板数: {len(self.templates)} | "
@@ -81,6 +79,16 @@ class ImageProcessor:
         )
 
     def load_template(self, template_name: str, template_path: Optional[str] = None) -> bool:
+        """
+        加载指定名称的模板图片
+
+        Args:
+            template_name: 模板名称
+            template_path: 模板文件路径（可选，未指定则从模板目录读取{template_name}.png）
+
+        Returns:
+            bool: 加载成功返回True，失败返回False
+        """
         try:
             if not template_path:
                 template_path = os.path.join(self.template_dir, f"{template_name}.png")
@@ -101,6 +109,7 @@ class ImageProcessor:
             return False
 
     def load_all_templates(self) -> None:
+        """遍历模板目录，加载所有符合扩展名的模板文件"""
         if not os.path.isdir(self.template_dir):
             self.logger.warning(f"模板目录不存在: {self.template_dir}")
             return
@@ -114,6 +123,15 @@ class ImageProcessor:
                     self.load_template(template_name, template_path)
 
     def get_template(self, template_name: str) -> Optional[np.ndarray]:
+        """
+        获取指定名称的模板数组，若不存在则尝试重新加载
+
+        Args:
+            template_name: 模板名称
+
+        Returns:
+            Optional[np.ndarray]: 模板数组（BGR格式），获取失败返回None
+        """
         template = self.templates.get(template_name)
         if template is None:
             self.logger.warning(f"模板未找到，尝试重新加载: {template_name}")
@@ -128,6 +146,18 @@ class ImageProcessor:
         threshold: float = 0.8,
         roi: Optional[Tuple[int, int, int, int]] = None
     ) -> Optional[Tuple[int, int, int, int]]:
+        """
+        在指定图像中匹配模板，支持ROI裁剪和模板分辨率自适应缩放
+
+        Args:
+            image: 待匹配的原始图像（BGR格式）
+            template: 模板名称或模板数组（BGR格式）
+            threshold: 匹配置信度阈值，默认0.8
+            roi: 感兴趣区域（逻辑坐标，x,y,w,h），可选，指定则仅在该区域内匹配
+
+        Returns:
+            Optional[Tuple[int, int, int, int]]: 匹配成功返回统一逻辑坐标的矩形（x,y,w,h），失败返回None
+        """
         try:
             is_fullscreen = self.display_context.is_fullscreen
             ctx = self.display_context
@@ -141,11 +171,10 @@ class ImageProcessor:
                 return None
             orig_image = image.copy()
             image_phys_h, image_phys_w = orig_image.shape[:2]
-            orig_roi_phys = None  # 原始ROI的物理坐标（用于标注）
-            processed_roi = roi   # 处理后的ROI（逻辑坐标）
+            orig_roi_phys = None
+            processed_roi = roi
             roi_offset_phys = (0, 0)
 
-            # 处理模板（原有逻辑不变）
             if isinstance(template, str):
                 template_bgr = self.get_template(template)
                 if template_bgr is None:
@@ -166,21 +195,18 @@ class ImageProcessor:
                 f"ROI: {roi} | 上下文全屏状态: {is_fullscreen}"
             )
 
-            # ------------------------------ 复用CoordinateTransformer的ROI处理 ------------------------------
             cropped_image = orig_image
             if roi:
-                # 调用公共ROI处理方法（禁用扩展，使用图像物理尺寸作为边界）
                 processed_roi_phys, roi_offset_phys = self.coord_transformer.process_roi(
                     roi=roi,
                     boundary_width=image_phys_w,
                     boundary_height=image_phys_h,
-                    enable_expand=False  # ImageProcessor不启用扩展
+                    enable_expand=False
                 )
                 if processed_roi_phys:
                     orig_roi_phys = processed_roi_phys
                     rx_phys, ry_phys, rw_phys, rh_phys = processed_roi_phys
                     cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
-                    # 新增：裁剪后子图有效性检查，为空则回退到原图
                     if cropped_image.size == 0:
                         self.logger.warning(f"ROI裁剪后子图为空，使用原图进行匹配 | 原始ROI: {roi} | 处理后ROI物理坐标: {processed_roi_phys}")
                         cropped_image = orig_image
@@ -196,26 +222,22 @@ class ImageProcessor:
                     roi_offset_phys = (0, 0)
                     orig_roi_phys = None
 
-            # ------------------------------ 修复：模板缩放比例计算（基于整体物理尺寸，与ROI无关） ------------------------------
-            # 核心修正：模板缩放比例 = 当前整体物理尺寸 / 基准分辨率（全屏=屏幕，窗口=客户区）
             if is_fullscreen:
                 target_phys_size = self.display_context.screen_physical_res
             else:
                 target_phys_size = self.display_context.client_physical_res
-            # 计算正确的缩放比例（仅依赖整体分辨率，不依赖ROI尺寸）
+
             scale_ratio = self.coord_transformer.calculate_template_scale_ratio(
                 target_phys_size=target_phys_size,
-                has_roi=False  # 模板缩放与ROI无关，仅需整体分辨率比例
+                has_roi=False
             )
             self.logger.debug(
                 f"模板缩放比例计算完成 | 基准分辨率: {self.original_base_res} | "
                 f"当前整体物理尺寸: {target_phys_size} | 缩放比例: {scale_ratio:.4f}"
             )
 
-            # 模板缩放（基于正确比例，保留尺寸限制逻辑）
             scaled_w = max(self.min_template_size[0], int(round(template_orig_w * scale_ratio)))
             scaled_h = max(self.min_template_size[1], int(round(template_orig_h * scale_ratio)))
-            # 确保缩放后模板不超过裁剪子图尺寸（避免匹配时模板超出范围）
             scaled_w = min(scaled_w, cropped_image.shape[1] - 2)
             scaled_h = min(scaled_h, cropped_image.shape[0] - 2)
             template_scaled_size = (scaled_w, scaled_h)
@@ -227,7 +249,6 @@ class ImageProcessor:
                 )
                 return None
 
-            # 优化：缩小用LANCZOS4（抗锯齿更好，保留模板细节），放大用CUBIC
             interpolation = cv2.INTER_LANCZOS4 if scale_ratio < 1.0 else cv2.INTER_CUBIC
             scaled_template = cv2.resize(template_bgr, (scaled_w, scaled_h), interpolation=interpolation)
             self.logger.debug(
@@ -235,7 +256,6 @@ class ImageProcessor:
                 f"插值方式: {interpolation} | 缩放比例: {scale_ratio:.4f}"
             )
 
-            # 模板匹配核心逻辑（原有不变）
             cropped_gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY) if len(cropped_image.shape) == 3 else cropped_image
             template_gray = cv2.cvtColor(scaled_template, cv2.COLOR_BGR2GRAY) if len(scaled_template.shape) == 3 else scaled_template
 
@@ -272,21 +292,16 @@ class ImageProcessor:
                     )
                 return None
 
-            # ------------------------------ 复用CoordinateTransformer的子图坐标→原图物理坐标 + 中心计算 ------------------------------
             match_x_sub, match_y_sub = max_loc
-            # 子图内矩形 → 原图物理矩形（应用ROI偏移）
             match_bbox_sub = (match_x_sub, match_y_sub, scaled_template.shape[1], scaled_template.shape[0])
             match_bbox_phys = self.coord_transformer.apply_roi_offset_to_subcoord(
                 sub_coord=match_bbox_sub,
                 roi_offset_phys=roi_offset_phys
             )
-            # 计算矩形中心（复用公共方法）
             center_phys = self.coord_transformer.get_rect_center(match_bbox_phys)
 
-            # ------------------------------ 复用CoordinateTransformer的全屏/窗口逻辑坐标统一转换 ------------------------------
             final_bbox_log = self.coord_transformer.get_unified_logical_rect(match_bbox_phys)
 
-            # 测试模式保存图片（原有逻辑不变）
             if self.test_mode:
                 self.debug_saver.save_template_debug(
                     orig_image=orig_image,

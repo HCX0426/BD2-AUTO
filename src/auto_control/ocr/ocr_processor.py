@@ -11,7 +11,16 @@ from src.auto_control.utils.debug_image_saver import DebugImageSaver
 from src.core.path_manager import path_manager
 import datetime
 
+
 class OCRProcessor:
+    """
+    OCR处理器封装类，统一调用不同OCR引擎并集成坐标转换能力。
+    核心特性：
+    1. 引擎适配：当前支持EasyOCR，可扩展其他OCR引擎
+    2. 坐标联动：集成CoordinateTransformer实现物理/逻辑坐标自动转换
+    3. 调试能力：支持测试模式，自动保存识别过程的调试图片
+    4. 参数统一：基于RuntimeDisplayContext获取全局显示状态，保证数据源唯一
+    """
     def __init__(self, 
                  engine: str = 'easyocr', 
                  logger=None, 
@@ -20,72 +29,81 @@ class OCRProcessor:
                  test_mode: bool = False,
                  **kwargs):
         """
-        OCR处理器封装类（统一调用不同OCR引擎，支持坐标转换）
+        初始化OCR处理器
         
-        :param engine: OCR引擎类型，目前只支持 'easyocr'（默认）
-        :param logger: 日志实例（从上层传递，如Auto类）
-        :param coord_transformer: 坐标转换器实例（用于处理坐标转换）
-        :param display_context: 运行时显示上下文（提供窗口状态和尺寸信息）
-        :param test_mode: 测试模式开关（控制是否保存调试图片+初始化清空历史图），默认False
-        :param kwargs: 引擎特定参数：
-            - languages: 自定义默认语言组合（如 'ch_tra+eng'，可选）
+        Args:
+            engine: OCR引擎类型，仅支持 'easyocr'（默认）
+            logger: 日志实例（必填，用于输出识别过程和错误信息）
+            coord_transformer: 坐标转换器实例（必填，处理坐标转换）
+            display_context: 运行时显示上下文（必填，提供窗口/屏幕状态）
+            test_mode: 测试模式开关（是否保存调试图片，默认False）
+            **kwargs: 引擎扩展参数：
+                - languages: 自定义识别语言组合（如 'ch_tra+eng'）
+        Raises:
+            ValueError: 必传参数缺失/类型错误、引擎类型不支持
         """
-
+        # 必传参数校验
         if not logger:
-            raise ValueError("初始化失败：logger不能为空（必须传入有效日志实例）")
+            raise ValueError("初始化失败：logger不能为空")
         if not isinstance(coord_transformer, CoordinateTransformer):
             raise ValueError("初始化失败：coord_transformer必须是CoordinateTransformer实例")
         if not isinstance(display_context, RuntimeDisplayContext):
             raise ValueError("初始化失败：display_context必须是RuntimeDisplayContext实例")
         
-        # 验证引擎类型
+        # 引擎类型校验
         self.engine_type = engine.lower()
         if self.engine_type != 'easyocr':
-            raise ValueError(f"不支持的OCR引擎: {engine}，目前只支持 'easyocr'")
+            raise ValueError(f"不支持的OCR引擎: {engine}，仅支持 'easyocr'")
         
-        # 初始化日志系统
+        # 核心属性初始化
         self.logger = logger
-        # 初始化坐标转换器和运行时上下文
         self.coord_transformer = coord_transformer
-        self.display_context = display_context
+        self.display_context = display_context  # 全局显示状态容器
+        self.test_mode = test_mode
         
-        # 处理默认语言参数（优先使用传入的languages，否则用配置默认值）
+        # 语言配置（默认/自定义）
         self._default_lang = kwargs.pop('languages', None) or get_default_languages(self.engine_type)
         
-        # 初始化调试工具（新增：公共调试图保存工具）
+        # 调试工具初始化
         self.debug_saver = DebugImageSaver(
             logger=self.logger,
             debug_dir=path_manager.get("match_ocr_debug"),
             test_mode=test_mode
         )
-        self.test_mode = test_mode
         
-        # 初始化指定的OCR引擎
+        # 初始化OCR引擎
         self.engine: BaseOCR = self._init_engine()
         
         # 初始化完成日志
         self.logger.info(
-            f"OCR处理器初始化完成 | "
-            f"引擎: {self.engine_type.upper()} | "
-            f"默认语言: {self._default_lang} | "
-            f"GPU加速: {'启用' if self.engine._use_gpu else '禁用'} | "
-            f"坐标系统: 已配置（上下文+转换器）| "
-            f"测试模式: {'启用（已清空历史调试图）' if self.test_mode else '禁用'}"
+            f"OCR处理器初始化完成 | 引擎: {self.engine_type.upper()} | "
+            f"默认语言: {self._default_lang} | GPU加速: {'启用' if self.engine._use_gpu else '禁用'} | "
+            f"坐标系统: 已配置 | 测试模式: {'启用（清空历史调试图）' if self.test_mode else '禁用'}"
         )
 
     def _init_engine(self) -> BaseOCR:
-        """根据引擎类型初始化具体OCR实例（确保返回BaseOCR子类）"""
-        self.logger.debug(f"开始初始化{self.engine_type.upper()}引擎")
+        """
+        初始化具体OCR引擎实例
+        
+        Returns:
+            BaseOCR: OCR引擎基类实例（当前为EasyOCRWrapper）
+        Raises:
+            ValueError: 引擎类型不支持
+        """
+        self.logger.debug(f"初始化{self.engine_type.upper()}引擎")
         
         if self.engine_type == 'easyocr':
-            # 初始化EasyOCR（参数通过配置文件读取，无需额外传入）
-            return EasyOCRWrapper(logger=self.logger)  # 传递日志实例给引擎
+            return EasyOCRWrapper(logger=self.logger)
         else:
-            # 为未来可能的引擎扩展预留接口
             raise ValueError(f"不支持的OCR引擎: {self.engine_type}")
 
     def enable_gpu(self, enable: bool = True):
-        """启用/禁用GPU加速（代理到基类方法）"""
+        """
+        启用/禁用GPU加速
+        
+        Args:
+            enable: True=启用，False=禁用（默认True）
+        """
         return self.engine.enable_gpu(enable)
 
     def find_text_position(self,
@@ -95,63 +113,73 @@ class OCRProcessor:
                         min_confidence: float = 0.9,
                         region: Optional[Tuple[int, int, int, int]] = None
         ) -> Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
+        """
+        查找目标文本在图像中的位置，返回逻辑/物理坐标
+        
+        Args:
+            image: 输入图像（numpy数组）
+            target_text: 待查找的目标文本
+            lang: 识别语言（默认使用初始化配置的语言）
+            min_confidence: 最小置信度阈值（默认0.9）
+            region: 识别区域ROI (x, y, w, h)（基于原始基准分辨率）
+        
+        Returns:
+            Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]: 
+                (逻辑坐标矩形, 物理坐标矩形) - 匹配成功；None - 匹配失败
+        """
+        # 1. 语言配置处理
         target_lang = lang or self._default_lang
         if target_lang and "ch_sim" not in target_lang:
             target_lang = f"ch_sim+{target_lang}"
         elif not target_lang:
             target_lang = "ch_sim"
         
-        # 1. 基础校验（不变）
+        # 2. 基础参数校验
         if image is None or image.size == 0:
-            self.logger.error("查找文本位置失败：无效的输入图像")
-            return None
-        target_text_clean = target_text.strip()
-        if not target_text_clean:
-            self.logger.error("查找文本位置失败：目标文本为空")
+            self.logger.error("查找文本失败：输入图像无效")
             return None
         
-        # 2. 关键参数（不变）
+        target_text_clean = target_text.strip()
+        if not target_text_clean:
+            self.logger.error("查找文本失败：目标文本为空")
+            return None
+        
+        # 3. 基础参数获取
         img_h, img_w = image.shape[:2]
         orig_image = image.copy()
-        region_offset_phys = (0, 0)
-        orig_region_phys = None
-        timestamp = datetime.datetime.now().strftime("%H%M%S%f")[:-3]
         is_fullscreen = self.display_context.is_fullscreen
-
-        # ------------------------------ 复用CoordinateTransformer的ROI处理 ------------------------------
-        processed_region_phys = None
-        if region:
-            # 调用公共ROI处理方法（启用扩展，使用图像物理尺寸作为边界）
-            processed_region_phys, region_offset_phys = self.coord_transformer.process_roi(
-                roi=region,
-                boundary_width=img_w,
-                boundary_height=img_h,
-                enable_expand=True,  # OCR启用安全扩展
-                expand_pixel=10  # 扩展10像素（可自定义）
-            )
-            orig_region_phys = processed_region_phys  # 记录用于标注的区域坐标
-
-        # 4. 裁剪截图（新增：子图有效性检查，避免裁剪后为空）
+        
+        # 4. ROI处理（坐标转换+安全扩展）
+        processed_region_phys, region_offset_phys = self.coord_transformer.process_roi(
+            roi=region,
+            boundary_width=img_w,
+            boundary_height=img_h,
+            enable_expand=True,
+            expand_pixel=10
+        )
+        orig_region_phys = processed_region_phys
+        
+        # 5. 图像裁剪
         cropped_image = orig_image
         if processed_region_phys:
             rx_phys, ry_phys, rw_phys, rh_phys = processed_region_phys
             cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
-            # 新增：裁剪后子图为空时回退到原图
+            
+            # 裁剪有效性检查
             if cropped_image.size == 0:
-                self.logger.warning(f"ROI裁剪后子图为空，切换为全图识别 | 原始ROI: {region} | 处理后ROI物理坐标: {processed_region_phys}")
+                self.logger.warning(
+                    f"ROI裁剪后子图为空，切换全图识别 | 原始ROI: {region} | 处理后ROI: {processed_region_phys}"
+                )
                 cropped_image = orig_image
                 region_offset_phys = (0, 0)
                 orig_region_phys = None
             else:
-                self.logger.debug(f"截图裁剪完成 | 裁剪后子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}")
+                self.logger.debug(f"图像裁剪完成 | 子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}")
         else:
-            self.logger.debug(f"全图查找，无需裁剪 | 原图尺寸: {img_w}x{img_h}")
-
-        # 后续逻辑（OCR识别、结果格式化、匹配逻辑）不变...
-        image_rgb = cropped_image
-        if len(image_rgb.shape) == 2:
-            image_rgb = cv2.cvtColor(image_rgb, cv2.COLOR_GRAY2RGB)
-
+            self.logger.debug(f"全图识别 | 原图尺寸: {img_w}x{img_h}")
+        
+        # 6. OCR识别
+        image_rgb = cropped_image if len(cropped_image.shape) == 3 else cv2.cvtColor(cropped_image, cv2.COLOR_GRAY2RGB)
         raw_results = self.engine.reader.readtext(
             image_rgb,
             detail=1,
@@ -164,10 +192,12 @@ class OCRProcessor:
             batch_size=1,
             workers=0
         )
-
+        
+        # 7. 识别结果格式化（子图→原图坐标转换）
         formatted_results = []
         for result in raw_results:
             bbox, text, confidence = result[:3]
+            # 子图内物理坐标计算
             x_coords = [int(point[0]) for point in bbox]
             y_coords = [int(point[1]) for point in bbox]
             x_phys_sub = min(x_coords)
@@ -175,8 +205,7 @@ class OCRProcessor:
             w_phys_sub = max(x_coords) - x_phys_sub
             h_phys_sub = max(y_coords) - y_phys_sub
             
-            # ------------------------------ 核心修改：复用坐标转换器的偏移计算方法 ------------------------------
-            # 子图内矩形 → 原图物理矩形（替换手动偏移计算）
+            # 子图坐标→原图物理坐标
             bbox_sub = (x_phys_sub, y_phys_sub, w_phys_sub, h_phys_sub)
             bbox_orig_phys = self.coord_transformer.apply_roi_offset_to_subcoord(
                 sub_coord=bbox_sub,
@@ -186,11 +215,11 @@ class OCRProcessor:
             formatted_results.append({
                 'text': text.strip(),
                 'bbox': bbox_sub,
-                'bbox_orig_phys': bbox_orig_phys,  # 使用公用方法计算的原图物理坐标
+                'bbox_orig_phys': bbox_orig_phys,
                 'confidence': float(confidence)
             })
-
-        # 核心匹配逻辑（不变）
+        
+        # 8. 精确匹配逻辑
         best_match_phys = None
         highest_confidence = 0.0
         exact_matches = []
@@ -203,31 +232,34 @@ class OCRProcessor:
                 if res['confidence'] > highest_confidence:
                     highest_confidence = res['confidence']
                 self.logger.debug(
-                    f"找到精确匹配 | 识别文本: '{res['text']}' | 置信度: {res['confidence']:.4f} | "
-                    f"是否达阈值({min_confidence}): {'是' if res['confidence'] >= min_confidence else '否'} | "
-                    f"原图物理坐标: {res['bbox_orig_phys']}"
+                    f"精确匹配文本: '{res['text']}' | 置信度: {res['confidence']:.4f} | "
+                    f"达标({min_confidence}): {'是' if res['confidence'] >= min_confidence else '否'} | "
+                    f"物理坐标: {res['bbox_orig_phys']}"
                 )
         
+        # 9. 匹配结果处理
+        match_info = ""
         if exact_matches:
-            if len(exact_matches) > 1:
-                self.logger.debug(f"找到{len(exact_matches)}个精确匹配结果，选择置信度最高的")
-                exact_matches.sort(key=lambda x: x['confidence'], reverse=True)
-            
+            # 按置信度排序取最高
+            exact_matches.sort(key=lambda x: x['confidence'], reverse=True)
             best_match = exact_matches[0]
             best_match_phys = best_match['bbox_orig_phys']
             highest_confidence = best_match['confidence']
             
+            # 置信度判定
             if highest_confidence >= min_confidence:
                 match_info = f"置信度达标({highest_confidence:.4f} ≥ {min_confidence})"
             else:
-                match_info = f"置信度未达阈值({highest_confidence:.4f} < {min_confidence})，但文本完全一致"
+                match_info = f"置信度未达标({highest_confidence:.4f} < {min_confidence})，文本一致"
         else:
+            # 未找到匹配
             all_recognized = [f"{r['text']}({r['confidence']:.2f})" for r in formatted_results]
             self.logger.warning(
-                f"未找到目标文本的精确匹配: '{target_text_clean}' | "
-                f"所有识别结果: {all_recognized} | 阈值: {min_confidence} | "
-                f"裁剪后子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}"  # 新增：日志补充子图尺寸，方便调试
+                f"未找到目标文本: '{target_text_clean}' | 识别结果: {all_recognized} | "
+                f"阈值: {min_confidence} | 子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}"
             )
+            
+            # 测试模式保存失败调试图
             if self.test_mode:
                 self.debug_saver.save_ocr_debug(
                     orig_image=orig_image,
@@ -242,8 +274,8 @@ class OCRProcessor:
                     region_offset_phys=region_offset_phys
                 )
             return None
-
-        # 测试模式保存图片（不变）
+        
+        # 10. 测试模式保存成功调试图
         if self.test_mode:
             self.debug_saver.save_ocr_debug(
                 orig_image=orig_image,
@@ -257,19 +289,28 @@ class OCRProcessor:
                 orig_region_phys=orig_region_phys,
                 region_offset_phys=region_offset_phys
             )
-
-        # ------------------------------ 复用CoordinateTransformer的矩形边界限制 + 全屏/窗口统一转换 ------------------------------
+        
+        # 11. 最终坐标处理（物理→逻辑转换+边界限制）
         if best_match_phys:
-            # 新增：统一转换物理矩形为逻辑矩形（自动适配全屏/窗口）
+            # 物理坐标→统一逻辑坐标
             final_bbox_log = self.coord_transformer.get_unified_logical_rect(best_match_phys)
+            # 逻辑坐标边界限制
+            final_bbox_log = self.coord_transformer.limit_rect_to_boundary(
+                rect=final_bbox_log,
+                boundary_width=self.display_context.client_logical_width,
+                boundary_height=self.display_context.client_logical_height
+            )
+            # 物理坐标边界限制
+            final_bbox_phys = self.coord_transformer.limit_rect_to_boundary(
+                rect=best_match_phys,
+                boundary_width=img_w,
+                boundary_height=img_h
+            )
             
-            # 保留原有物理坐标返回（兼容上层使用）
-            final_bbox_phys = best_match_phys
-
             self.logger.info(
-                f"找到目标文本（精确匹配） | 文本: '{target_text_clean}' | {match_info} | "
+                f"找到目标文本 | 文本: '{target_text_clean}' | {match_info} | "
                 f"逻辑坐标: {final_bbox_log} | 物理坐标: {final_bbox_phys} | "
-                f"匹配结果数: {len(exact_matches)}"
+                f"匹配数: {len(exact_matches)} | 显示模式: {'全屏' if is_fullscreen else '窗口'}"
             )
             return (final_bbox_log, final_bbox_phys)
         else:
