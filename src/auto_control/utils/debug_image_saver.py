@@ -45,17 +45,17 @@ class DebugImageSaver:
         if self.test_mode:
             self._clear_debug_dir()
 
-        # 统一标注样式配置（修复文本类样式的格式错误：color改为三元组，确保lineType是整数）
+        # ========== 核心样式修改 ==========
         self.style = {
-            "roi_rect": (255, 0, 0, 2, cv2.LINE_AA),  # 蓝色虚线：ROI区域（color拆分为三通道，兼容rectangle）
-            "match_rect": (0, 0, 255, 2, cv2.LINE_AA),  # 红色实线：匹配区域
-            "target_rect": (0, 255, 0, 2, cv2.LINE_AA),  # 绿色实线：OCR目标文本区域
-            "center_point": (0, 255, 0, 4, -1, cv2.LINE_AA),  # 绿色实心点：中心坐标
-            # 文本类样式修复：color为三元组，顺序：(color, font_scale, thickness, line_type)
+            "roi_rect": (255, 0, 0, 2, cv2.LINE_AA),  # 蓝色：传的原始ROI区域
+            "match_rect": (0, 0, 255, 2, cv2.LINE_AA),  # 红色：选中的ROI/匹配区域
+            "target_rect": (0, 0, 255, 2, cv2.LINE_AA),  # 红色：OCR选中的目标文本区域
+            "center_point": (0, 255, 0, 4, -1, cv2.LINE_AA),  # 绿色：中心坐标点
+            # 所有文本统一改为绿色
             "text_success": ((0, 255, 0), 0.5, 1, cv2.LINE_AA),  # 绿色：成功状态文本
-            "text_fail": ((0, 0, 255), 0.5, 1, cv2.LINE_AA),  # 红色：失败状态文本
-            "text_info": ((255, 255, 255), 0.4, 1, cv2.LINE_AA),  # 白色：辅助信息文本
-            "text_small": ((255, 255, 255), 0.35, 1, cv2.LINE_AA),  # 白色小字体：文本内容标注
+            "text_fail": ((0, 255, 0), 0.5, 1, cv2.LINE_AA),  # 绿色：失败状态文本（按要求改为绿色）
+            "text_info": ((0, 255, 0), 0.4, 1, cv2.LINE_AA),  # 绿色：辅助信息文本
+            "text_small": ((0, 255, 0), 0.35, 1, cv2.LINE_AA),  # 绿色：文本内容标注
         }
 
         # 合并自定义样式
@@ -164,41 +164,62 @@ class DebugImageSaver:
 
         y_offset = pos[1]
         for line in text_lines:
-            # 避免超出图片边界
-            if y_offset > img_h - 15:
+            # 避免超出图片边界（增加更严格的边界校验）
+            if y_offset > img_h - 20:  # 预留更多空间
                 self.logger.warning(f"文本'{line}'超出图片底部，停止绘制")
                 break
-            if pos[0] > img_w - 10:
+            if pos[0] > img_w - 50:  # 预留文本宽度空间
                 self.logger.warning(f"文本'{line}'超出图片右侧，跳过绘制")
                 continue
 
             # 优先绘制中文，失败则降级为CV2默认
             if any(ord(c) > 127 for c in line) and PIL_AVAILABLE:
+                # 修复：传入img副本，避免原数组被破坏
                 self._draw_chinese_text(img, line, (pos[0], y_offset), style_key)
             else:
                 self._draw_text(img, line, (pos[0], y_offset), style_key)
             y_offset += 20  # 行间距
 
     def _draw_chinese_text(self, img: np.ndarray, text: str, pos: Tuple[int, int], style_key: str) -> None:
-        """绘制中文文本（解决CV2默认不支持中文问题）"""
+        """绘制中文文本（修复黑块问题：通道匹配+避免直接覆盖原数组）"""
         try:
             color, font_scale, thickness, _ = self.style[style_key]
-            # 转换为PIL图片（BGR -> RGB）
-            pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            img_h, img_w = img.shape[:2]
+            # 1. 处理通道数：确保是3通道BGR
+            if len(img.shape) == 2:  # 灰度图转3通道
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+            else:  # BGR转RGB
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            
+            # 2. 创建PIL图片（基于副本，避免修改原数组）
+            pil_img = Image.fromarray(img_rgb).copy()
             draw = ImageDraw.Draw(pil_img)
 
-            # 加载中文字体，失败则降级
+            # 3. 加载中文字体（限制字体大小，避免越界）
+            font_size = int(12 * font_scale)
+            font_size = min(font_size, 16)  # 最大字体限制为16，防止黑块
             try:
-                font_size = int(12 * font_scale)  # 基础字体大小12，按缩放比例调整
                 font = ImageFont.truetype(self.chinese_font_path, font_size)
             except (FileNotFoundError, OSError):
                 self.logger.warning(f"中文字体文件'{self.chinese_font_path}'未找到，使用默认字体")
                 font = ImageFont.load_default()
 
-            # 绘制文本
-            draw.text(pos, text, fill=tuple(color), font=font)
-            # 转换回CV2格式
-            img[:] = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            # 4. 校验绘制坐标（避免越界）
+            draw_x = max(0, min(pos[0], img_w - 10))
+            draw_y = max(0, min(pos[1], img_h - 10))
+            
+            # 5. 绘制文本（使用tuple(color)确保PIL兼容）
+            draw.text((draw_x, draw_y), text, fill=tuple(color), font=font)
+
+            # 6. 转换回CV2格式并合并到原图（修复直接赋值问题）
+            pil_img_np = np.array(pil_img)
+            if len(img.shape) == 2:  # 灰度图还原
+                pil_img_bgr = cv2.cvtColor(pil_img_np, cv2.COLOR_RGB2GRAY)
+                img[:] = pil_img_bgr
+            else:  # 3通道还原
+                pil_img_bgr = cv2.cvtColor(pil_img_np, cv2.COLOR_RGB2BGR)
+                img[:] = pil_img_bgr
+
         except Exception as e:
             self.logger.warning(f"绘制中文文本失败，降级为CV2默认绘制 | 错误: {str(e)}")
             self._draw_text(img, text, pos, style_key)
@@ -212,9 +233,17 @@ class DebugImageSaver:
             font_scale = float(font_scale)
             thickness = int(thickness)
             line_type = int(line_type)
+            
+            # 限制字体缩放（避免过大导致黑块）
+            font_scale = min(font_scale, 0.8)
+            
+            # 校验绘制坐标
+            draw_x = max(0, min(pos[0], img.shape[1] - 10))
+            draw_y = max(0, min(pos[1], img.shape[0] - 10))
+            
             # 绘制文本
             cv2.putText(
-                img, text, pos, cv2.FONT_HERSHEY_SIMPLEX,
+                img, text, (draw_x, draw_y), cv2.FONT_HERSHEY_SIMPLEX,
                 font_scale, color, thickness, line_type
             )
         except Exception as e:
@@ -278,7 +307,7 @@ class DebugImageSaver:
 
             # 3. 匹配成功：标注匹配区域、中心坐标、详细参数（增加合法性校验）
             if is_success:
-                # 匹配区域矩形
+                # 匹配区域矩形（红色：选中的ROI）
                 if self._is_valid_bbox(match_bbox_phys) and self._is_bbox_in_image(match_bbox_phys, img_h, img_w):
                     mx, my, mw, mh = match_bbox_phys
                     color, thickness, line_type = self.style["match_rect"][:3]
@@ -287,7 +316,7 @@ class DebugImageSaver:
                 elif match_bbox_phys:
                     self.logger.warning(f"无效的匹配区域坐标: {match_bbox_phys}，跳过标注")
 
-                # 中心坐标点
+                # 中心坐标点（绿色）
                 if self._is_valid_point(center_phys) and 0 <= center_phys[0] < img_w and 0 <= center_phys[1] < img_h:
                     cx, cy = center_phys
                     color, radius, thickness, line_type = self.style["center_point"][:4]
@@ -313,9 +342,9 @@ class DebugImageSaver:
                     self._draw_text_wrap(debug_img, text, (10, y_offset), "text_info")
                     y_offset -= 20
 
-            # 保存图片（增强异常处理）
+            # 保存图片（增强异常处理，添加压缩参数避免黑块）
             try:
-                cv2.imwrite(save_path, debug_img)
+                cv2.imwrite(save_path, debug_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
                 self.logger.debug(f"模板匹配调试图已保存: {save_path}")
             except cv2.error as e:
                 self.logger.error(f"CV2保存图片失败 | 路径: {save_path} | 错误: {str(e)}")
@@ -350,6 +379,7 @@ class DebugImageSaver:
                 self.logger.error("OCR结果非列表类型，跳过保存")
                 return
 
+            # 修复：创建深度拷贝，避免原图像被修改导致黑块
             debug_img = orig_image.copy()
             img_h, img_w = debug_img.shape[:2]
             timestamp = datetime.datetime.now().strftime("%H%M%S%f")[:-3]
@@ -357,7 +387,7 @@ class DebugImageSaver:
             img_type = "ocr_success" if is_success else "ocr_fail"
             save_path = os.path.join(self.debug_dir, f"{img_type}_{safe_text}_{timestamp}.png")
 
-            # 1. 标注筛选区域（region）（增加合法性校验）
+            # 1. 标注筛选区域（region）（蓝色：传的ROI）
             if self._is_valid_bbox(orig_region_phys) and self._is_bbox_in_image(orig_region_phys, img_h, img_w):
                 rx, ry, rw, rh = orig_region_phys
                 color, thickness, line_type = self.style["roi_rect"][:3]
@@ -366,7 +396,7 @@ class DebugImageSaver:
             elif orig_region_phys:
                 self.logger.warning(f"无效的OCR区域坐标: {orig_region_phys}，跳过区域标注")
 
-            # 2. 标注所有OCR识别结果（红色矩形）（增加参数校验）
+            # 2. 标注所有OCR识别结果（红色：选中的ROI）
             for idx, res in enumerate(ocr_results):
                 # 校验OCR结果格式
                 if not isinstance(res, dict) or "bbox" not in res or "text" not in res or "confidence" not in res:
@@ -381,41 +411,44 @@ class DebugImageSaver:
                 # 还原到原图物理坐标（加上区域偏移）
                 x_orig = x_sub + region_offset_phys[0]
                 y_orig = y_sub + region_offset_phys[1]
-                # 校验还原后的坐标是否在图片内
-                if not (0 <= x_orig < img_w and 0 <= y_orig < img_h):
-                    self.logger.warning(f"第{idx}个OCR结果还原后坐标超出图片范围: ({x_orig},{y_orig})，跳过标注")
+                # 校验还原后的坐标是否在图片内（更严格）
+                if not (0 <= x_orig < img_w and 0 <= y_orig < img_h and x_orig + w_sub <= img_w and y_orig + h_sub <= img_h):
+                    self.logger.warning(f"第{idx}个OCR结果还原后坐标超出图片范围: ({x_orig},{y_orig},{w_sub},{h_sub})，跳过标注")
                     continue
 
                 text = res["text"].strip()
                 conf = res["confidence"]
 
-                # 绘制识别文本框
+                # 绘制识别文本框（红色，限制厚度）
                 color, thickness, line_type = self.style["match_rect"][:3]
-                cv2.rectangle(debug_img, (x_orig, y_orig), (x_orig+w_sub, y_orig+h_sub), color, int(thickness), int(line_type))
-                # 标注文本内容和置信度（自动调整位置，避免越界）
+                thickness = min(int(thickness), 2)  # 最大厚度2，防止黑块
+                cv2.rectangle(debug_img, (x_orig, y_orig), (x_orig+w_sub, y_orig+h_sub), color, thickness, int(line_type))
+                # 标注文本内容和置信度（绿色文字）
                 text_y = y_orig - 10 if (y_orig - 10) > 10 else (y_orig + h_sub + 20)
                 text_pos = (x_orig+5, text_y)
                 self._draw_text_wrap(debug_img, f"{text} ({conf:.2f})", text_pos, "text_small")
 
-            # 3. 标注目标文本（找到时用绿色矩形突出）
+            # 3. 标注目标文本（红色：选中的ROI，绿色文字）
             if is_success and self._is_valid_bbox(target_bbox_phys) and self._is_bbox_in_image(target_bbox_phys, img_h, img_w):
                 tx, ty, tw, th = target_bbox_phys
                 color, thickness, line_type = self.style["target_rect"][:3]
-                cv2.rectangle(debug_img, (tx, ty), (tx+tw, ty+th), color, int(thickness), int(line_type))
+                thickness = min(int(thickness), 2)  # 限制厚度
+                cv2.rectangle(debug_img, (tx, ty), (tx+tw, ty+th), color, thickness, int(line_type))
                 self._draw_text_wrap(debug_img, f"Target: {target_text}", (tx+5, ty+20), "text_success")
-                # 标注目标文本中心坐标
+                # 标注目标文本中心坐标（绿色）
                 cx = tx + tw // 2
                 cy = ty + th // 2
                 if 0 <= cx < img_w and 0 <= cy < img_h:
                     circle_color, radius, circle_thickness, line_type = self.style["center_point"][:4]
-                    cv2.circle(debug_img, (cx, cy), int(radius), circle_color, int(circle_thickness), int(line_type))
+                    radius = min(int(radius), 4)  # 限制半径
+                    cv2.circle(debug_img, (cx, cy), radius, circle_color, int(circle_thickness), int(line_type))
                     self._draw_text_wrap(debug_img, f"Center(Phys): ({cx},{cy})", (cx+10, cy-10), "text_small")
                 else:
                     self.logger.warning(f"目标文本中心坐标超出图片范围: ({cx},{cy})，跳过中心标注")
             elif is_success and target_bbox_phys:
                 self.logger.warning(f"无效的目标文本bbox: {target_bbox_phys}，跳过目标标注")
 
-            # 4. 标注顶部状态信息（自动换行）
+            # 4. 标注顶部状态信息（绿色文字）
             top_texts = [
                 f"Target Text: '{target_text}'",
                 f"Status: {'Found' if is_success else 'Not Found'}",
@@ -428,7 +461,7 @@ class DebugImageSaver:
                 self._draw_text_wrap(debug_img, text, (10, y_offset), text_style)
                 y_offset += 20
 
-            # 5. 标注底部辅助信息（自动换行）
+            # 5. 标注底部辅助信息（绿色文字）
             bottom_texts = [
                 f"Image Size(Phys): {img_w}x{img_h}",
                 f"Region Offset: {region_offset_phys}"
@@ -438,9 +471,9 @@ class DebugImageSaver:
                 self._draw_text_wrap(debug_img, text, (10, y_offset), "text_info")
                 y_offset -= 20
 
-            # 保存图片（增强异常处理）
+            # 保存图片（增强异常处理，添加压缩参数避免黑块）
             try:
-                cv2.imwrite(save_path, debug_img)
+                cv2.imwrite(save_path, debug_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
                 self.logger.debug(f"OCR调试图已保存: {save_path}")
             except cv2.error as e:
                 self.logger.error(f"CV2保存图片失败 | 路径: {save_path} | 错误: {str(e)}")
