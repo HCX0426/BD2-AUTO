@@ -231,7 +231,7 @@ class CoordinateTransformer:
 
     def convert_client_logical_to_physical(self, x: int, y: int) -> Tuple[int, int]:
         """
-        客户区逻辑坐标 → 客户区物理坐标（适配DPI缩放）
+        客户区逻辑坐标 → 客户区物理坐标（适配DPI缩放，全屏模式跳过缩放）
         
         Args:
             x: 客户区逻辑X坐标
@@ -239,6 +239,17 @@ class CoordinateTransformer:
         Returns:
             Tuple[int, int]: 客户区物理坐标（确保在物理客户区内）
         """
+        # 全屏模式：逻辑坐标 = 物理坐标，跳过DPI缩放
+        if self.is_fullscreen:
+            ctx = self._display_context
+            phys_w, phys_h = ctx.screen_physical_res  # 全屏用屏幕物理尺寸
+            x, y = self._ensure_coords_in_boundary(x, y, phys_w, phys_h)
+            self.logger.debug(
+                f"坐标转换：逻辑→物理（全屏模式） | 输入: ({x},{y}) → 输出: ({x},{y}) | 转换比: 1.00"
+            )
+            return (x, y)
+        
+        # 窗口模式：正常执行DPI缩放
         ctx = self._display_context
         ratio = ctx.logical_to_physical_ratio
         phys_w, phys_h = ctx.client_physical_res
@@ -285,7 +296,7 @@ class CoordinateTransformer:
 
     def convert_client_logical_to_screen_physical(self, x: int, y: int) -> Tuple[int, int]:
         """
-        客户区逻辑坐标 → 屏幕全局物理坐标（窗口内→全局映射）
+        客户区逻辑坐标 → 屏幕全局物理坐标（窗口内→全局映射，全屏模式直接返回）
         
         Args:
             x: 客户区逻辑X坐标
@@ -299,8 +310,17 @@ class CoordinateTransformer:
             self.logger.error("坐标转换失败：未设置窗口句柄")
             return (x, y)
 
-        # 逻辑→客户区物理→屏幕全局
+        # 逻辑→客户区物理（全屏模式已跳过DPI缩放）
         phys_x, phys_y = self.convert_client_logical_to_physical(x, y)
+        
+        # 全屏模式：客户区物理坐标 = 屏幕全局坐标，无需ClientToScreen转换
+        if self.is_fullscreen:
+            self.logger.debug(
+                f"坐标转换：逻辑→屏幕物理（全屏模式） | 逻辑: ({x},{y}) → 全局: ({phys_x},{phys_y})"
+            )
+            return (phys_x, phys_y)
+        
+        # 窗口模式：执行客户区→屏幕全局映射
         try:
             screen_x, screen_y = win32gui.ClientToScreen(hwnd, (phys_x, phys_y))
             self.logger.debug(

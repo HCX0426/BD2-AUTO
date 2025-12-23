@@ -549,13 +549,13 @@ class Auto:
             return None
 
         text_pos_log, text_pos_phys = ocr_result
-        x_log, y_log, w_log, h_log = text_pos_log
-        click_center = (x_log + w_log // 2, y_log + h_log // 2)
+        x_phys, y_phys, w_phys, h_phys = text_pos_phys
+        click_center = (x_phys + w_phys // 2, y_phys + h_phys // 2)
 
         is_fullscreen = self.coord_transformer.is_fullscreen
         self.logger.info(
             f"识别到文本 '{target_text}' | 模式: {'全屏' if is_fullscreen else '窗口'} | "
-            f"客户区逻辑坐标: ({x_log},{y_log},{w_log},{h_log}) | 点击中心点: {click_center}"
+            f"客户区物理坐标: ({x_phys},{y_phys},{w_phys},{h_phys}) | 点击中心点: {click_center}"
         )
 
         if click:
@@ -563,7 +563,8 @@ class Auto:
                 pos=click_center,
                 duration=duration,
                 click_time=click_time,
-                right_click=right_click
+                right_click=right_click,
+                is_physical_coord=True  # 标识点击坐标为物理坐标
             )
             if not click_result:
                 self.last_error = device.last_error or "文本点击执行失败"

@@ -678,167 +678,185 @@ class WindowsDevice(BaseDevice):
             return None
 
     def click(
-            self,
-            pos: Union[Tuple[int, int], str, List[str]],
-            click_time: int = 1,
-            duration: float = 0.1,
-            right_click: bool = False,
-            is_base_coord: bool = False,
-            roi: Optional[Tuple[int, int, int, int]] = None
-    ) -> bool:
-        """
-        鼠标点击操作（支持直接坐标点击和模板匹配点击）
-        
-        Args:
-            pos: 点击目标（2元组坐标/单个模板名/模板名列表）
-            click_time: 点击次数（默认1次）
-            duration: 单次点击按住时长（秒，默认0.1s）
-            right_click: 是否右键点击（默认False：左键）
-            is_base_coord: pos为坐标时，是否是基准坐标（默认False：客户区逻辑坐标）
-            roi: 模板匹配时的搜索区域（基准ROI，None则全图搜索）
-        
-        Returns:
-            点击成功返回True，失败返回False
-        """
-        # 基础有效性校验
-        if not self.hwnd or self.state != DeviceState.CONNECTED:
-            self.last_error = "设备未连接或状态异常"
-            self.logger.error(f"点击失败: {self.last_error}")
-            return False
-
-        try:
-            # 激活窗口（确保点击生效）
-            if not self.set_foreground():
-                self.last_error = "无法激活窗口至前台"
+                self,
+                pos: Union[Tuple[int, int], str, List[str]],
+                click_time: int = 1,
+                duration: float = 0.1,
+                right_click: bool = False,
+                is_base_coord: bool = False,
+                roi: Optional[Tuple[int, int, int, int]] = None,
+                is_physical_coord: bool = False  # 标识pos是否为物理坐标
+        ) -> bool:
+            """
+            鼠标点击操作（支持直接坐标点击和模板匹配点击）
+            
+            Args:
+                pos: 点击目标（2元组坐标/单个模板名/模板名列表）
+                click_time: 点击次数（默认1次）
+                duration: 单次点击按住时长（秒，默认0.1s）
+                right_click: 是否右键点击（默认False：左键）
+                is_base_coord: pos为坐标时，是否是基准坐标（默认False：客户区逻辑坐标）
+                roi: 模板匹配时的搜索区域（基准ROI，None则全图搜索）
+                is_physical_coord: pos为坐标时，是否是客户区物理坐标（默认False：逻辑坐标）
+            
+            Returns:
+                点击成功返回True，失败返回False
+            """
+            # 基础有效性校验（不变）
+            if not self.hwnd or self.state != DeviceState.CONNECTED:
+                self.last_error = "设备未连接或状态异常"
                 self.logger.error(f"点击失败: {self.last_error}")
                 return False
 
-            time.sleep(0.1)  # 激活后稳定等待
-            target_pos: Optional[Tuple[int, int]] = None
-            ctx = self.display_context
-            click_source = "直接坐标"
-
-            # 模板匹配点击逻辑
-            if isinstance(pos, (str, list)):
-                click_source = "模板匹配"
-                # 截图并执行模板匹配
-                screen_img = self.capture_screen()
-                if screen_img is None:
-                    self.last_error = "截图失败，无法执行模板匹配"
+            try:
+                # 激活窗口（不变）
+                if not self.set_foreground():
+                    self.last_error = "无法激活窗口至前台"
                     self.logger.error(f"点击失败: {self.last_error}")
                     return False
 
-                # ROI预处理
-                processed_roi = roi
-                if roi:
-                    # 统一校验ROI格式
-                    is_valid, err_msg = self.coord_transformer.validate_roi_format(roi)
-                    if not is_valid:
-                        self.logger.warning(f"ROI预处理失败: {err_msg}，切换为全图匹配")
-                        processed_roi = None
-                    else:
-                        # 根据模式获取对应的边界尺寸，自动适配全屏/窗口
-                        boundary_w, boundary_h = (
-                            ctx.screen_physical_res if ctx.is_fullscreen else ctx.client_logical_res
+                time.sleep(0.1)  # 激活后稳定等待
+                target_pos: Optional[Tuple[int, int]] = None
+                ctx = self.display_context
+                click_source = "直接坐标"
+
+                # 模板匹配点击逻辑（不变）
+                if isinstance(pos, (str, list)):
+                    click_source = "模板匹配"
+                    # 截图并执行模板匹配（原有逻辑完全不变）
+                    screen_img = self.capture_screen()
+                    if screen_img is None:
+                        self.last_error = "截图失败，无法执行模板匹配"
+                        self.logger.error(f"点击失败: {self.last_error}")
+                        return False
+
+                    # ROI预处理（原有逻辑完全不变）
+                    processed_roi = roi
+                    if roi:
+                        is_valid, err_msg = self.coord_transformer.validate_roi_format(roi)
+                        if not is_valid:
+                            self.logger.warning(f"ROI预处理失败: {err_msg}，切换为全图匹配")
+                            processed_roi = None
+                        else:
+                            boundary_w, boundary_h = (
+                                ctx.screen_physical_res if ctx.is_fullscreen else ctx.client_logical_res
+                            )
+                            processed_roi = self.coord_transformer.limit_rect_to_boundary(roi, boundary_w, boundary_h)
+                            self.logger.debug(f"ROI预处理完成 | 原始: {roi} → 处理后: {processed_roi}")
+
+                    # 多模板匹配（原有逻辑完全不变）
+                    templates = [pos] if isinstance(pos, str) else pos
+                    matched_template = None
+                    match_result = None
+                    for template_name in templates:
+                        match_result = self.image_processor.match_template(
+                            image=screen_img,
+                            template=template_name,
+                            threshold=0.6,
+                            roi=processed_roi
                         )
-                        # 限制ROI在有效边界内
-                        processed_roi = self.coord_transformer.limit_rect_to_boundary(roi, boundary_w, boundary_h)
-                        self.logger.debug(f"ROI预处理完成 | 原始: {roi} → 处理后: {processed_roi}")
+                        if match_result is not None:
+                            matched_template = template_name
+                            break
 
-                # 多模板匹配（按顺序尝试，找到即停止）
-                templates = [pos] if isinstance(pos, str) else pos
-                matched_template = None
-                match_result = None
-                for template_name in templates:
-                    match_result = self.image_processor.match_template(
-                        image=screen_img,
-                        template=template_name,
-                        threshold=0.6,
-                        roi=processed_roi
+                    if match_result is None:
+                        self.last_error = f"所有模板匹配失败: {templates}"
+                        self.logger.error(f"点击失败: {self.last_error}")
+                        return False
+
+                    # 解析匹配结果（原有逻辑完全不变）
+                    match_rect = self.coord_transformer._convert_numpy_to_tuple(match_result)
+                    is_valid, err_msg = self.coord_transformer.validate_roi_format(match_rect)
+                    if not is_valid:
+                        self.last_error = f"模板匹配结果无效: {err_msg} | 模板: {matched_template}"
+                        self.logger.error(f"点击失败: {self.last_error}")
+                        return False
+                    target_pos = self.coord_transformer.get_rect_center(match_rect)
+                    self.logger.debug(
+                        f"模板匹配成功 | 模板: {matched_template} | 匹配矩形: {match_rect} | 逻辑中心点: {target_pos}"
                     )
-                    if match_result is not None:
-                        matched_template = template_name
-                        break
+                    is_base_coord = False
 
-                if match_result is None:
-                    self.last_error = f"所有模板匹配失败: {templates}"
+                # 直接坐标点击逻辑（不变）
+                else:
+                    target_pos = self.coord_transformer._convert_numpy_to_tuple(pos)
+                    if not isinstance(target_pos, tuple) or len(target_pos) != 2:
+                        self.last_error = f"点击坐标格式无效（需2元组）: {pos}"
+                        self.logger.error(f"点击失败: {self.last_error}")
+                        return False
+                    x, y = target_pos
+                    if x < 0 or y < 0:
+                        self.last_error = f"点击坐标无效（非负）: ({x},{y})"
+                        self.logger.error(f"点击失败: {self.last_error}")
+                        return False
+
+                # 坐标转换（核心修改：适配物理/逻辑坐标）
+                if not target_pos:
+                    self.last_error = "未获取到有效点击坐标"
                     self.logger.error(f"点击失败: {self.last_error}")
                     return False
 
-                # 解析匹配结果
-                match_rect = self.coord_transformer._convert_numpy_to_tuple(match_result)
-                is_valid, err_msg = self.coord_transformer.validate_roi_format(match_rect)
-                if not is_valid:
-                    self.last_error = f"模板匹配结果无效: {err_msg} | 模板: {matched_template}"
-                    self.logger.error(f"点击失败: {self.last_error}")
-                    return False
-                # 计算矩形中心点（逻辑坐标）
-                target_pos = self.coord_transformer.get_rect_center(match_rect)
-                self.logger.debug(
-                    f"模板匹配成功 | 模板: {matched_template} | 匹配矩形: {match_rect} | 逻辑中心点: {target_pos}"
+                x_target, y_target = target_pos
+                logical_x, logical_y = 0, 0
+
+                # 1. 区分物理坐标/基准坐标/普通逻辑坐标
+                if is_physical_coord:
+                    # 传入的是物理坐标：直接转屏幕坐标（跳过基准→逻辑→物理）
+                    logical_x, logical_y = x_target, y_target  # 占位，后续直接用物理坐标转屏幕
+                    self.logger.debug(f"坐标类型：物理坐标 | 输入: ({x_target},{y_target})")
+                elif is_base_coord:
+                    # 传入的是基准坐标：先转逻辑坐标
+                    logical_x, logical_y = self.coord_transformer.convert_original_to_current_client(x_target, y_target)
+                    self.logger.debug(f"基准坐标转换 | 基准: ({x_target},{y_target}) → 逻辑: ({logical_x},{logical_y})")
+                else:
+                    # 传入的是逻辑坐标：直接复用
+                    logical_x, logical_y = x_target, y_target
+
+                # 2. 逻辑/物理坐标 → 屏幕坐标（核心适配）
+                ctx = self.display_context
+                if ctx.is_fullscreen:
+                    # 全屏：直接用坐标（物理/逻辑都一样）
+                    screen_x, screen_y = logical_x, logical_y
+                    screen_w, screen_h = ctx.screen_physical_res
+                    screen_x = max(0, min(screen_x, screen_w - 1))
+                    screen_y = max(0, min(screen_y, screen_h - 1))
+                    self.logger.debug(f"全屏模式跳过坐标转换 | 最终点击坐标: ({screen_x},{screen_y}) | 屏幕边界: {screen_w}x{screen_h}")
+                else:
+                    if is_physical_coord:
+                        # 窗口+物理坐标：直接转屏幕坐标（ClientToScreen）
+                        screen_x, screen_y = self.coord_transformer.convert_client_physical_to_screen_physical(logical_x, logical_y)
+                        self.logger.debug(f"窗口模式物理坐标转换 | 物理: ({logical_x},{logical_y}) → 屏幕: ({screen_x},{screen_y})")
+                    else:
+                        # 窗口+逻辑坐标：原有转换逻辑
+                        screen_x, screen_y = self.coord_transformer.convert_client_logical_to_screen_physical(logical_x, logical_y)
+                        self.logger.debug(f"窗口模式逻辑坐标转换 | 逻辑: ({logical_x},{logical_y}) → 屏幕: ({screen_x},{screen_y})")
+
+                # 执行鼠标点击（不变）
+                win32api.SetCursorPos((screen_x, screen_y))
+                time.sleep(0.05)
+
+                mouse_down = win32con.MOUSEEVENTF_RIGHTDOWN if right_click else win32con.MOUSEEVENTF_LEFTDOWN
+                mouse_up = win32con.MOUSEEVENTF_RIGHTUP if right_click else win32con.MOUSEEVENTF_LEFTUP
+
+                for i in range(click_time):
+                    if i > 0:
+                        time.sleep(0.1)
+                    win32api.mouse_event(mouse_down, 0, 0, 0, 0)
+                    time.sleep(duration)
+                    win32api.mouse_event(mouse_up, 0, 0, 0, 0)
+
+                # 日志输出（不变）
+                click_type = "右键" if right_click else "左键"
+                self.logger.info(
+                    f"点击成功 | 类型: {click_type} | 次数: {click_time} | 按住时长: {duration}s | "
+                    f"屏幕坐标: ({screen_x},{screen_y}) | 模式: {'全屏' if ctx.is_fullscreen else '窗口'} | 来源: {click_source}"
                 )
-                is_base_coord = False  # 模板匹配结果已为逻辑坐标，无需额外转换
+                return True
 
-            # 直接坐标点击逻辑
-            else:
-                # 坐标格式校验和标准化
-                target_pos = self.coord_transformer._convert_numpy_to_tuple(pos)
-                if not isinstance(target_pos, tuple) or len(target_pos) != 2:
-                    self.last_error = f"点击坐标格式无效（需2元组）: {pos}"
-                    self.logger.error(f"点击失败: {self.last_error}")
-                    return False
-                x, y = target_pos
-                # 坐标有效性校验（非负）
-                if x < 0 or y < 0:
-                    self.last_error = f"点击坐标无效（非负）: ({x},{y})"
-                    self.logger.error(f"点击失败: {self.last_error}")
-                    return False
-
-            # 坐标转换
-            if not target_pos:
-                self.last_error = "未获取到有效点击坐标"
-                self.logger.error(f"点击失败: {self.last_error}")
+            except Exception as e:
+                self.last_error = f"点击执行异常: {str(e)}"
+                self.logger.error(f"点击失败: {self.last_error}", exc_info=True)
                 return False
-
-            x_target, y_target = target_pos
-            # 1. 基准坐标→客户区逻辑坐标（如需）
-            if is_base_coord:
-                logical_x, logical_y = self.coord_transformer.convert_original_to_current_client(x_target, y_target)
-                self.logger.debug(f"基准坐标转换 | 基准: ({x_target},{y_target}) → 逻辑: ({logical_x},{logical_y})")
-            else:
-                logical_x, logical_y = x_target, y_target
-
-            # 2. 逻辑坐标→屏幕物理坐标
-            screen_x, screen_y = self.coord_transformer.convert_client_logical_to_screen_physical(logical_x, logical_y)
-
-            # 执行鼠标点击
-            win32api.SetCursorPos((screen_x, screen_y))
-            time.sleep(0.05)
-
-            # 配置鼠标事件（左键/右键）
-            mouse_down = win32con.MOUSEEVENTF_RIGHTDOWN if right_click else win32con.MOUSEEVENTF_LEFTDOWN
-            mouse_up = win32con.MOUSEEVENTF_RIGHTUP if right_click else win32con.MOUSEEVENTF_LEFTUP
-
-            # 执行多次点击
-            for i in range(click_time):
-                if i > 0:
-                    time.sleep(0.1)  # 多次点击间隔
-                win32api.mouse_event(mouse_down, 0, 0, 0, 0)
-                time.sleep(duration)
-                win32api.mouse_event(mouse_up, 0, 0, 0, 0)
-
-            # 日志输出
-            click_type = "右键" if right_click else "左键"
-            self.logger.info(
-                f"点击成功 | 类型: {click_type} | 次数: {click_time} | 按住时长: {duration}s | "
-                f"屏幕坐标: ({screen_x},{screen_y}) | 模式: {'全屏' if ctx.is_fullscreen else '窗口'} | 来源: {click_source}"
-            )
-            return True
-
-        except Exception as e:
-            self.last_error = f"点击执行异常: {str(e)}"
-            self.logger.error(f"点击失败: {self.last_error}", exc_info=True)
-            return False
 
     def swipe(
             self,
