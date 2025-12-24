@@ -1,6 +1,7 @@
 import time
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.pc.public import back_to_main, click_back
+from src.auto_tasks.utils.roi_config import rois
 
 
 def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
@@ -20,11 +21,14 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
     state = "init"  # 状态机: init -> entered -> collecting -> completing
     
     # 奖励位置配置
+    # 从rois字典获取奖励位置
     reward_positions = [
-        (420, 330),  # 第一个奖励位置
-        (420, 430),  # 第二个奖励位置
-        (420, 530),  # 第三个奖励位置
-        # (420, 630)   # 第四个奖励位置
+        rois["pass_rewards_reward_pos_1"][:2],  # 只取(x, y)
+        rois["pass_rewards_reward_pos_2"][:2],
+        rois["pass_rewards_reward_pos_3"][:2],
+        rois["pass_rewards_reward_pos_4"][:2],
+        rois["pass_rewards_reward_pos_5"][:2],
+        rois["pass_rewards_reward_pos_6"][:2]
     ]
     current_reward = 0
     

@@ -1,5 +1,6 @@
 import time
 from src.auto_control.core.auto import Auto
+from src.auto_tasks.utils.roi_config import rois
 from src.auto_tasks.pc.public import back_to_main, back_to_map
 
 
@@ -25,7 +26,7 @@ def login(auto: Auto, timeout: int = 300) -> bool:
                 logger.info("检测到停止信号，退出任务")
                 return True
 
-            if auto.text_click("确认",roi=(795,613,340,70)):
+            if auto.text_click("确认", roi=rois["login_confirm_button"]):
                 logger.info("检测到确认按钮，点击")
                 auto.sleep(2)
                 continue

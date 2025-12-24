@@ -45,6 +45,9 @@ class PathManager:
             self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
         else:
             self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
+        
+        # 3. ROI配置文件（rois.json）：自动化任务中使用的ROI区域配置
+        self.rois_config_path = os.path.join(self.static_base, "config", self.env, "rois.json")
 
         # 3. 其他原有路径
         self.task_template_path = os.path.join(self.static_base, "src", "auto_tasks", "pc", "templates")
@@ -85,6 +88,7 @@ class PathManager:
         path_map = {
             "backend_settings": self.backend_settings_path,
             "ui_app_settings": self.ui_app_settings_path,
+            "rois_config": self.rois_config_path,
             "task_template": self.task_template_path,
             "log": self.log_path,
             "cache": self.cache_path,

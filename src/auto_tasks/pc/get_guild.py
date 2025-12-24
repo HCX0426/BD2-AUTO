@@ -1,6 +1,7 @@
 import time
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.pc.public import back_to_main
+from src.auto_tasks.utils.roi_config import roi_config
 
 
 def get_guild(auto: Auto, timeout: int = 60) -> bool:
@@ -28,7 +29,8 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
             # 初始状态：进入公会界面
             if state == "init":
                 if back_to_main(auto):
-                    if auto.template_click("get_guild/公会标识",roi=(310,111,130,100)):
+                    roi = roi_config.get_roi("guild_icon", "get_guild")
+                    if auto.template_click("get_guild/公会标识", roi=roi):
                         logger.info("成功进入公会界面")
                         auto.sleep(4)
                         state = "entered"
@@ -36,7 +38,8 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                 
             # 检查公会商店
             if state == "entered":
-                if auto.check_element_exist("get_guild/公会商店",roi=(1631,16,230,70)):
+                roi = roi_config.get_roi("guild_shop", "get_guild")
+                if auto.check_element_exist("get_guild/公会商店", roi=roi):
                     logger.info("检测到公会商店")
                     state = "checking"
                 else:
@@ -46,7 +49,8 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                 
             # 返回处理
             if state == "checking":
-                if auto.template_click("public/返回键1",roi=(120,20,100,66)):
+                roi = roi_config.get_roi("back_button_1")  # 使用全局ROI
+                if auto.template_click("public/返回键1", roi=roi):
                     logger.info("成功点击返回键")
                     auto.sleep(2)
                     state = "completed"

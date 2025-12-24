@@ -1,0 +1,49 @@
+{
+  "global": {
+    "main_menu": [1720, 20, 120, 70],
+    "back_button_1": [120, 20, 100, 66],
+    "dodge_indicator": [1600, 833, 170, 140],
+    "map_indicator": [1740, 20, 175, 88],
+    "cancel_button": [850, 600, 60, 40],
+    "confirm_dialog": [655, 344, 600, 700],
+    "backpack": [330, 1000, 57, 43],
+    "confirm_button": [795, 613, 340, 70]
+  },
+  "tasks": {
+    "get_guild": {
+      "guild_icon": [310, 111, 130, 100],
+      "guild_shop": [1631, 16, 230, 70]
+    },
+    "intensive_decomposition": {
+      "equipment_icon": [149, 222, 60, 60],
+      "filter_icon": [1680, 73, 60, 60],
+      "one_click_decompose": [1645, 986, 125, 35],
+      "confirm_button": [1748, 973, 65, 62],
+      "decompose_button": [960, 672, 177, 58]
+    },
+    "daily_missions": {
+      "missions": [600, 900, 170, 150],
+      "task_button": [600, 900, 170, 150]
+    },
+    "login": {
+      "confirm_button": [795, 613, 340, 70]
+    },
+    "pass_rewards": {
+      "basic_rewards": [1235, 300, 69, 37],
+      "collect_all": [1390, 750, 100, 30],
+      "quick_hunt": [1713, 278, 100, 44],
+      "reward_pos_1": [420, 330, 60, 40],
+      "reward_pos_2": [420, 450, 60, 40],
+      "reward_pos_3": [420, 570, 60, 40],
+      "reward_pos_4": [420, 690, 60, 40],
+      "reward_pos_5": [420, 810, 60, 40],
+      "reward_pos_6": [420, 930, 60, 40]
+    },
+    "sweep_daily": {
+      "quick_hunt": [1713, 278, 100, 44]
+    },
+    "lucky_draw": {
+      "lucky_area": [350, 200, 120, 250]
+    }
+  }
+}

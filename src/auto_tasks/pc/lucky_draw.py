@@ -47,10 +47,10 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
                             logger.info("滑动抽抽乐")
                             auto.sleep(1)
 
-                    if auto.click((410, 310), click_time=2,is_base_coord=True):
-                        auto.click((410, 310), click_time=2,is_base_coord=True)
+                    if auto.click((410, 310), click_time=2, is_base_coord=True):
+                        auto.click((410, 310), click_time=2, is_base_coord=True)
                         auto.sleep(1)
-                        auto.click((410, 310), click_time=2,is_base_coord=True)
+                        auto.click((410, 310), click_time=2, is_base_coord=True)
                         auto.sleep(1)
                         logger.info("点击抽抽乐")
                         

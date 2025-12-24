@@ -1,6 +1,7 @@
 import time
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.pc.public import back_to_main, click_back
+from src.auto_tasks.utils.roi_config import rois
 
 
 def daily_missions(auto: Auto, timeout: int = 60) -> bool:
@@ -28,7 +29,7 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
             # 初始状态：检查主界面
             if state == "init":
                 if back_to_main(auto):
-                    if pos := auto.text_click("任务", click=False,roi=(600,900,170,150)):
+                    if pos := auto.text_click("任务", click=False, roi=rois["daily_missions_task_button"]):
                         logger.info(f"进入任务界面")
                         auto.click(pos, click_time=2)
                         auto.sleep(2)
