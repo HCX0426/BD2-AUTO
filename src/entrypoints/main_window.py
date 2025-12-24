@@ -2,7 +2,7 @@
 import time
 
 from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QFont, QIcon, QTextCursor
+from PyQt6.QtGui import QCloseEvent, QFont, QIcon, QTextCursor
 from PyQt6.QtWidgets import (QApplication, QButtonGroup, QCheckBox,
                              QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
                              QGroupBox, QHBoxLayout, QLabel, QLineEdit,
@@ -38,7 +38,7 @@ class TaskWorker(QThread):
     def run(self):
         """执行任务主逻辑，包含可中断点"""
         self.is_running = True
-        self.should_stop = False
+        # 不重置 should_stop 标志，保留之前可能设置的停止信号
         total_tasks = len(self.task_ids)
         
         try:
@@ -96,9 +96,8 @@ class TaskWorker(QThread):
     def stop(self):
         """请求任务停止"""
         self.should_stop = True
-        # 等待线程结束，最多等2秒
-        if self.is_running and not self.wait(2000):
-            self.log_signal.emit("任务线程未能正常停止，将强制终止")
+        # 移除阻塞的 wait 调用，改为非阻塞方式
+        self.log_signal.emit("已发送任务停止请求")
     
 
 class MainWindow(QMainWindow):
@@ -762,8 +761,10 @@ class MainWindow(QMainWindow):
         if not self.task_running:
             return
             
-        self.log("收到停止指令，正在终止任务...")
-        self.start_stop_btn.setEnabled(False)
+        # 使用QTimer确保在主线程中执行UI操作
+        QTimer.singleShot(0, lambda: self.log("收到停止指令，正在终止任务..."))
+        QTimer.singleShot(0, lambda: self.start_stop_btn.setEnabled(False))
+        
         self.stop_attempts = 0  # 重置尝试次数
         
         # 通知任务停止
@@ -778,10 +779,14 @@ class MainWindow(QMainWindow):
         if self.stop_timer and self.stop_timer.isActive():
             self.stop_timer.stop()
             
-        self.stop_timer = QTimer()
-        self.stop_timer.setInterval(500)  # 每500ms检查一次
-        self.stop_timer.timeout.connect(self.check_task_stopped)
-        self.stop_timer.start()
+        # 创建新的定时器，确保在主线程中执行
+        def start_check_timer():
+            self.stop_timer = QTimer()
+            self.stop_timer.setInterval(500)  # 每500ms检查一次
+            self.stop_timer.timeout.connect(self.check_task_stopped)
+            self.stop_timer.start()
+            
+        QTimer.singleShot(0, start_check_timer)
 
     def check_task_stopped(self):
         """轮询检查任务是否已停止，避免重复清理"""
@@ -795,43 +800,48 @@ class MainWindow(QMainWindow):
             # 只有在任务仍在运行状态时才进行清理，避免重复
             if self.task_running:
                 self.reset_task_state()
-                self.log("任务已完全终止")
-            self.start_stop_btn.setEnabled(True)
+                # 使用QTimer确保在主线程中执行UI操作
+                QTimer.singleShot(0, lambda: self.log("任务已完全终止"))
+            QTimer.singleShot(0, lambda: self.start_stop_btn.setEnabled(True))
         else:
             # 显示剩余等待时间，让用户了解进度
             remaining_seconds = (self.max_stop_attempts - self.stop_attempts) * 0.5
-            self.log(f"等待任务终止中... (剩余约 {remaining_seconds:.1f} 秒)")
+            QTimer.singleShot(0, lambda: self.log(f"等待任务终止中... (剩余约 {remaining_seconds:.1f} 秒)"))
             
             # 达到最大尝试次数，强制终止
             if self.stop_attempts >= self.max_stop_attempts:
-                self.log(f"超过最大等待次数 ({self.max_stop_attempts}次)，将强制终止任务")
+                QTimer.singleShot(0, lambda: self.log(f"超过最大等待次数 ({self.max_stop_attempts}次)，将强制终止任务"))
                 self.stop_timer.stop()
                 
-                # 显示确认对话框
-                reply = QMessageBox.warning(
-                    self, 
-                    "任务终止超时", 
-                    "任务无法正常终止，是否强制结束？这可能导致数据不一致。",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
-                )
-                
-                if reply == QMessageBox.StandardButton.Yes:
-                    self.reset_task_state(force=True)
-                    self.log("已强制终止任务")
-                else:
-                    self.log("用户取消强制终止，任务可能仍在运行")
-                    self.set_task_running_state(False)  # 至少更新UI状态
+                # 显示确认对话框必须在主线程中执行
+                def show_confirm_dialog():
+                    reply = QMessageBox.warning(
+                        self, 
+                        "任务终止超时", 
+                        "任务无法正常终止，是否强制结束？这可能导致数据不一致。",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No
+                    )
                     
-                self.start_stop_btn.setEnabled(True)
+                    if reply == QMessageBox.StandardButton.Yes:
+                        self.reset_task_state(force=True)
+                        QTimer.singleShot(0, lambda: self.log("已强制终止任务"))
+                    else:
+                        QTimer.singleShot(0, lambda: self.log("用户取消强制终止，任务可能仍在运行"))
+                        self.set_task_running_state(False)  # 至少更新UI状态
+                    
+                    self.start_stop_btn.setEnabled(True)
+                
+                QTimer.singleShot(0, show_confirm_dialog)
 
     @pyqtSlot()
     def on_task_finished(self):
         """任务完成后的处理，避免与定时器重复清理"""
         # 只有在任务仍在运行状态时才进行清理
         if self.task_running:
-            self.reset_task_state()
-            self.log("所有任务执行完毕")
+            # 使用QTimer.singleShot确保在主线程中执行reset_task_state
+            QTimer.singleShot(0, lambda: self.reset_task_state())
+            QTimer.singleShot(0, lambda: self.log("所有任务执行完毕"))
 
     def reset_task_state(self, force=False):
         """重置任务状态和UI，增加状态检查避免重复清理"""
@@ -839,9 +849,15 @@ class MainWindow(QMainWindow):
         if not self.task_running and not force:
             return
             
+        # 确保在主线程中更新UI
+        if not self.thread().isRunning() or self.thread() != QThread.currentThread():
+            # 如果不在主线程，使用QTimer.singleShot在主线程中执行
+            QTimer.singleShot(0, lambda: self.reset_task_state(force))
+            return
+            
         # 首先更新状态标志
-        self.set_task_running_state(False)
-        self.progress_bar.setValue(0)
+        QTimer.singleShot(0, lambda: self.set_task_running_state(False))
+        QTimer.singleShot(0, lambda: self.progress_bar.setValue(0))
         
         # 清理worker并断开信号连接
         if self.task_worker:
@@ -856,12 +872,18 @@ class MainWindow(QMainWindow):
                 
                 # 如果仍在运行，尝试停止
                 if self.task_worker.isRunning():
-                    self.log("任务worker仍在运行，尝试停止...")
+                    QTimer.singleShot(0, lambda: self.log("任务worker仍在运行，尝试停止..."))
                     self.task_worker.stop()
                     if force and self.task_worker.isRunning():
-                        self.log("强制终止worker线程")
+                        QTimer.singleShot(0, lambda: self.log("强制终止worker线程"))
                         self.task_worker.terminate()
-                        self.task_worker.wait(1000)
+                        # 避免使用阻塞的 wait 调用，改为异步等待
+                        def check_terminated():
+                            if not self.task_worker.isRunning():
+                                QTimer.singleShot(0, lambda: self.log("worker线程已强制终止"))
+                            else:
+                                QTimer.singleShot(0, lambda: self.log("警告：worker线程未能在预期时间内终止"))
+                        QTimer.singleShot(1000, check_terminated)
             except Exception as e:
                 self.log(f"清理worker时出错: {str(e)}")
             finally:
@@ -880,8 +902,8 @@ class MainWindow(QMainWindow):
                 if "shutdown" not in str(e).lower():
                     self.log(f"清理auto实例时出错: {str(e)}")
         
-        self.start_stop_btn.setEnabled(True)
-        self.log("任务状态已重置")
+        QTimer.singleShot(0, lambda: self.start_stop_btn.setEnabled(True))
+        QTimer.singleShot(0, lambda: self.log("任务状态已重置"))
 
     def set_task_running_state(self, running):
         """设置任务运行状态"""
@@ -962,7 +984,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(value)
 
     def closeEvent(self, event):
-        """窗口关闭事件，确保任务完全终止后再关闭"""
+        """窗口关闭事件，确保任务完全终止后再关闭，优化避免主线程阻塞"""
         # 保存窗口大小
         self.settings_manager.set_setting("window_size", [self.width(), self.height()])
         
@@ -971,15 +993,33 @@ class MainWindow(QMainWindow):
             self.log("检测到正在运行的任务，尝试终止后再关闭窗口...")
             self.stop_task()
             
-            # 等待任务终止，最多等5秒
-            wait_time = 0
-            while self.task_running and wait_time < 50:  # 50 * 100ms = 5秒
-                QApplication.processEvents()
-                time.sleep(0.1)
-                wait_time += 1
-                
-            if self.task_running:
-                # 仍在运行，询问用户是否强制关闭
+            # 不阻塞主线程，改为使用定时器检查任务是否已终止
+            self.close_event = event
+            self.close_timer = QTimer()
+            self.close_timer.setInterval(200)  # 每200ms检查一次
+            self.close_timer.timeout.connect(self.check_task_stopped_before_close)
+            self.close_timer.start()
+            self.close_wait_time = 0
+            event.ignore()  # 先忽略关闭事件，等待任务终止
+            return
+        
+        # 任务未运行，直接关闭
+        self.perform_close()
+        
+    def check_task_stopped_before_close(self):
+        """检查任务是否已停止，用于窗口关闭前的异步等待"""
+        self.close_wait_time += 1
+        
+        if not self.task_running:
+            # 任务已终止，执行关闭
+            self.close_timer.stop()
+            self.perform_close()
+        elif self.close_wait_time > 25:  # 5秒超时 (25 * 200ms)
+            # 超时，询问用户是否强制关闭
+            self.close_timer.stop()
+            
+            # 确保在主线程中显示对话框
+            def show_close_confirm():
                 reply = QMessageBox.warning(
                     self, 
                     "任务仍在运行", 
@@ -988,22 +1028,48 @@ class MainWindow(QMainWindow):
                     QMessageBox.StandardButton.No
                 )
                 
-                if reply != QMessageBox.StandardButton.Yes:
-                    event.ignore()  # 取消关闭
-                    return
-                else:
-                    # 强制清理
+                if reply == QMessageBox.StandardButton.Yes:
+                    # 强制清理并关闭
                     self.reset_task_state(force=True)
+                    self.perform_close()
+            
+            QTimer.singleShot(0, show_close_confirm)
+    
+    def perform_close(self):
+        """执行实际的关闭操作"""
+        # 确保在主线程中执行关闭操作
+        if self.thread() != QThread.currentThread():
+            QTimer.singleShot(0, self.perform_close)
+            return
         
         # 确保auto_instance被正确清理
         if self.auto_instance:
             try:
-                self.auto_instance.stop()
-            except:
-                pass
-            self.auto_instance = None
+                # 异步清理auto_instance，避免阻塞
+                self.auto_instance.set_should_stop(True)
+                # 使用QTimer避免可能的阻塞操作
+                def cleanup_auto_instance():
+                    try:
+                        self.auto_instance.stop()
+                        self.auto_instance = None
+                    except Exception as e:
+                        self.log(f"关闭auto_instance时出错: {str(e)}")
+                        self.auto_instance = None
+                
+                QTimer.singleShot(0, cleanup_auto_instance)
+            except Exception as e:
+                self.log(f"准备关闭auto_instance时出错: {str(e)}")
+                self.auto_instance = None
         
         # 保存其他设置
-        self.settings_manager.save_settings()
+        try:
+            self.settings_manager.save_settings()
+        except Exception as e:
+            self.log(f"保存设置时出错: {str(e)}")
         
-        super().closeEvent(event)
+        # 直接接受关闭事件，避免递归调用
+        if hasattr(self, 'close_event') and self.close_event:
+            self.close_event.accept()
+        else:
+            # 如果没有保存的close_event，调用父类的close方法
+            super().close()

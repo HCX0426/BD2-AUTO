@@ -98,7 +98,8 @@ class Auto:
             logger=self.ocr_processor_logger,
             coord_transformer=self.coord_transformer,
             display_context=self.display_context,
-            test_mode=self.test_mode
+            test_mode=self.test_mode,
+            stop_event=self.stop_event
         )
 
         self.default_device_uri = device_uri
@@ -606,7 +607,7 @@ class Auto:
 
         self.last_result = device.minimize_window()
         if self.last_result:
-            time.sleep(0.3)
+            self._apply_delay(0.3)
             self.device_manager.sync_active_device_resolution()
             self.logger.info("窗口最小化成功，已同步分辨率")
         else:
@@ -645,7 +646,7 @@ class Auto:
 
         self.last_result = device.maximize_window()
         if self.last_result:
-            time.sleep(0.3)
+            self._apply_delay(0.3)
             self.device_manager.sync_active_device_resolution()
             self.logger.info("窗口最大化成功，已同步分辨率")
         else:

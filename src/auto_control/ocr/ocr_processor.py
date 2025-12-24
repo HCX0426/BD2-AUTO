@@ -27,6 +27,7 @@ class OCRProcessor:
                  coord_transformer: CoordinateTransformer = None,
                  display_context: RuntimeDisplayContext = None,
                  test_mode: bool = False,
+                 stop_event=None,
                  **kwargs):
         """
         初始化OCR处理器
@@ -60,6 +61,7 @@ class OCRProcessor:
         self.coord_transformer = coord_transformer
         self.display_context = display_context  # 全局显示状态容器
         self.test_mode = test_mode
+        self.stop_event = stop_event
         
         # 语言配置（默认/自定义）
         self._default_lang = kwargs.pop('languages', None) or get_default_languages(self.engine_type)
@@ -178,24 +180,64 @@ class OCRProcessor:
         else:
             self.logger.debug(f"全图识别 | 原图尺寸: {img_w}x{img_h}")
         
-        # 6. OCR识别
+        # 6. OCR识别前检查是否需要停止
+        if self.stop_event and self.stop_event.is_set():
+            self.logger.info("OCR识别被中断：收到停止信号")
+            return None
+            
         image_rgb = cropped_image if len(cropped_image.shape) == 3 else cv2.cvtColor(cropped_image, cv2.COLOR_GRAY2RGB)
-        raw_results = self.engine.reader.readtext(
-            image_rgb,
-            detail=1,
-            paragraph=False,
-            text_threshold=0.5,
-            low_text=0.3,
-            link_threshold=0.7,
-            canvas_size=2048,
-            mag_ratio=1.8,
-            batch_size=1,
-            workers=0
-        )
+        
+        # 使用线程执行OCR识别，支持中断
+        from threading import Thread, Event
+        result_event = Event()
+        raw_results = []
+        
+        def ocr_worker():
+            nonlocal raw_results
+            try:
+                raw_results = self.engine.reader.readtext(
+                    image_rgb,
+                    detail=1,
+                    paragraph=False,
+                    text_threshold=0.5,
+                    low_text=0.3,
+                    link_threshold=0.7,
+                    canvas_size=2048,
+                    mag_ratio=1.8,
+                    batch_size=1,
+                    workers=0
+                )
+                result_event.set()
+            except Exception as e:
+                self.logger.error(f"OCR识别异常: {str(e)}")
+                result_event.set()
+        
+        # 启动OCR线程
+        ocr_thread = Thread(target=ocr_worker, daemon=True)
+        ocr_thread.start()
+        
+        # 等待识别完成或停止信号
+        while not result_event.is_set():
+            if self.stop_event and self.stop_event.is_set():
+                self.logger.info("OCR识别过程中被中断：收到停止信号")
+                return None
+            # 短暂休眠，避免CPU占用过高
+            from time import sleep
+            sleep(0.1)
+        
+        # OCR识别后检查是否需要停止
+        if self.stop_event and self.stop_event.is_set():
+            self.logger.info("OCR识别完成后被中断：收到停止信号")
+            return None
         
         # 7. 识别结果格式化（子图→原图坐标转换）
         formatted_results = []
         for result in raw_results:
+            # 检查是否需要停止
+            if self.stop_event and self.stop_event.is_set():
+                self.logger.info("OCR结果处理被中断：收到停止信号")
+                return None
+                
             bbox, text, confidence = result[:3]
             # 子图内物理坐标计算
             x_coords = [int(point[0]) for point in bbox]
