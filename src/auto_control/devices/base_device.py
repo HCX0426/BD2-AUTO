@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import Enum, auto
-from typing import Optional, Tuple, Callable
+from typing import Optional, Tuple, Callable, Union, List
 from threading import Lock
 from functools import wraps
 from typing import Callable, Any
@@ -158,9 +158,14 @@ class BaseDevice(ABC):
         pass
 
     @abstractmethod
-    def click(self, x: int, y: int, duration: float = 0.1, time: int = 1, 
-              right_click: bool = False, is_relative: bool = False) -> bool:
-        """点击指定位置"""
+    def click(self, pos: Union[Tuple[int, int], str, List[str]],
+              click_time: int = 1,
+              duration: float = 0.1,
+              right_click: bool = False,
+              is_base_coord: bool = False,
+              roi: Optional[Tuple[int, int, int, int]] = None,
+              is_physical_coord: bool = False) -> bool:
+        """点击指定位置或模板"""
         pass
 
     @abstractmethod
