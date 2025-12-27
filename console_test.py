@@ -1,4 +1,4 @@
-# C:\Users\hcx\Desktop\BD2-AUTO\console_run.py
+
 import io
 import os
 import sys
@@ -6,14 +6,12 @@ import sys
 from src.auto_control.config import *
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.pc import *
-from src.auto_tasks.pc.public import back_to_main
 
 # 获取当前脚本的绝对路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # 获取项目根目录（即 BD2-AUTO 目录）
-project_root = os.path.dirname(os.path.dirname(current_dir))  # 这里修正：当前脚本在 BD2-AUTO 根目录，所以直接取 current_dir 即可！
-# 修正路径逻辑（原代码 project_root 计算错误，导致 sys.path 加错）
-project_root = current_dir  # 因为 console_run.py 直接在 BD2-AUTO 根目录，current_dir 就是项目根
+project_root = os.path.dirname(os.path.dirname(current_dir))
+project_root = current_dir
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
     print(f"项目根目录已添加到sys.path: {project_root}")

@@ -1,0 +1,51 @@
+name: Build and Release
+
+on:
+  release:
+    types: [ published ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: [ '3.12' ]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements/dev.txt
+        pip install pyinstaller
+
+    - name: Prepare OCR models
+      run: |
+        mkdir -p runtime/dev/ocr_models
+        # 创建空的模型文件占位符（实际使用时会下载）
+        echo "model placeholder" > runtime/dev/ocr_models/craft_mlt_25k.pth
+        echo "model placeholder" > runtime/dev/ocr_models/zh_sim_g2.pth
+
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --noconfirm packaging/pyinstaller/main.spec
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: BD2-AUTO-${{ github.sha }}
+        path: dist/BD2-AUTO/
+
+    - name: Upload to Release
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/BD2-AUTO/
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

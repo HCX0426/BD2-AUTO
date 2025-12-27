@@ -1,4 +1,5 @@
 {
+  "version": "1.0.0",
   "debug": true,
   "framework": {
     "default_ocr_engine": "easyocr",
