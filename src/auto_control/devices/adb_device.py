@@ -1,5 +1,6 @@
 from src.auto_control.devices.base_device import BaseDevice
 
+
 class ADBDevice(BaseDevice):
     def connect(self):
         pass

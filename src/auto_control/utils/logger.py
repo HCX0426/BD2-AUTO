@@ -1,16 +1,15 @@
-import os
 import gzip
 import logging
+import os
 import shutil
-from pathlib import Path
-from typing import Optional, Dict, Any, Union
-from logging.handlers import TimedRotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 # 导入 path_manager（保持原有依赖）
 from src.core.path_manager import path_manager
-
 
 # 全局共享：系统统一日志的文件处理器（供所有日志器同步日志到 system.log）
 _global_system_file_handler: Optional[TimedRotatingFileHandler] = None
@@ -145,7 +144,7 @@ class Logger:
         compress_old_logs: Optional[bool] = None,
         is_task_logger: bool = False,
         is_system_logger: bool = False,
-        test_mode: bool = False  # 测试模式开关（默认关闭）
+        test_mode: bool = False,  # 测试模式开关（默认关闭）
     ):
         """
         初始化日志器
@@ -183,12 +182,13 @@ class Logger:
         self.interval = interval or self.DEFAULT_LOG_CONFIG["INTERVAL"]
         self.backup_count = backup_count or self.DEFAULT_LOG_CONFIG["BACKUP_COUNT"]
         self.async_logging = async_logging if async_logging is not None else self.DEFAULT_LOG_CONFIG["ASYNC_LOGGING"]
-        self.compress_old_logs = compress_old_logs if compress_old_logs is not None else self.DEFAULT_LOG_CONFIG["COMPRESS_OLD_LOGS"]
+        self.compress_old_logs = (
+            compress_old_logs if compress_old_logs is not None else self.DEFAULT_LOG_CONFIG["COMPRESS_OLD_LOGS"]
+        )
 
         # 日志格式（包含时间、日志器名称、级别、内容）
         self.formatter = logging.Formatter(
-            "%(asctime)s - [%(name)s] - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            "%(asctime)s - [%(name)s] - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
 
         # 日志目录和文件路径规划
@@ -226,7 +226,7 @@ class Logger:
             "INFO": logging.INFO,
             "WARNING": logging.WARNING,
             "ERROR": logging.ERROR,
-            "CRITICAL": logging.CRITICAL
+            "CRITICAL": logging.CRITICAL,
         }
         return level_map.get(level.upper(), logging.INFO)  # 默认 INFO 级别
 
@@ -310,7 +310,7 @@ class Logger:
             interval=self.interval,
             backupCount=self.backup_count,
             encoding="utf-8",
-            compress=self.compress_old_logs
+            compress=self.compress_old_logs,
         )
         handler.setLevel(self.file_log_level)
         handler.setFormatter(self.formatter)
@@ -350,7 +350,7 @@ class Logger:
             console_log_level=logging.WARNING,
             async_logging=self.async_logging,
             is_task_logger=False,
-            test_mode=self.test_mode
+            test_mode=self.test_mode,
         )
 
     def create_task_logger(self, task_name: str) -> "Logger":
@@ -365,7 +365,7 @@ class Logger:
             console_log_level=logging.INFO,
             async_logging=self.async_logging,
             is_task_logger=True,
-            test_mode=self.test_mode  # 继承测试模式
+            test_mode=self.test_mode,  # 继承测试模式
         )
 
     def debug(self, message: str) -> None:

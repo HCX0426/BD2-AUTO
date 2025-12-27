@@ -4,10 +4,12 @@ from typing import Dict, List
 import cv2
 import numpy as np
 
-from src.auto_control.config.ocr_config import (convert_lang_code,
-                                                get_default_languages,
-                                                get_engine_config,
-                                                validate_lang_combination)
+from src.auto_control.config.ocr_config import (
+    convert_lang_code,
+    get_default_languages,
+    get_engine_config,
+    validate_lang_combination,
+)
 from src.auto_control.ocr.base_ocr import BaseOCR
 
 
@@ -23,28 +25,28 @@ class EasyOCRWrapper(BaseOCR):
         import easyocr
 
         # 加载引擎配置
-        config = get_engine_config('easyocr')
-        gpu_config = config['gpu']
-        if gpu_config == 'auto':
+        config = get_engine_config("easyocr")
+        gpu_config = config["gpu"]
+        if gpu_config == "auto":
             # 自动检测GPU可用性
             self._use_gpu = self._check_gpu_available()
         else:
             # 强制启用/禁用（但启用前仍需检测可用性）
             self._use_gpu = gpu_config and self._check_gpu_available()
-        self.timeout = config['timeout']
-        self.model_storage = config.get('model_storage')
+        self.timeout = config["timeout"]
+        self.model_storage = config.get("model_storage")
 
         # 初始化默认语言
-        default_langs = get_default_languages('easyocr').split('+')
+        default_langs = get_default_languages("easyocr").split("+")
         self._lang_list = self._convert_lang_param(default_langs)
-        self._current_lang = '+'.join(default_langs)
+        self._current_lang = "+".join(default_langs)
 
         # 创建EasyOCR Reader实例
         self.reader = easyocr.Reader(
             lang_list=self._lang_list,
             gpu=self._use_gpu,
             model_storage_directory=self.model_storage,
-            download_enabled=True  # 允许自动下载缺失的模型
+            download_enabled=True,  # 允许自动下载缺失的模型
         )
 
         self.logger.debug(
@@ -57,9 +59,9 @@ class EasyOCRWrapper(BaseOCR):
     def _convert_lang_param(self, langs: List[str]) -> List[str]:
         """将语言参数转换为EasyOCR支持的格式"""
         # 验证语言组合合法性
-        validated_langs = validate_lang_combination(langs, 'easyocr')
+        validated_langs = validate_lang_combination(langs, "easyocr")
         # 转换语言代码
-        converted_langs = [convert_lang_code(lang, 'easyocr') for lang in validated_langs]
+        converted_langs = [convert_lang_code(lang, "easyocr") for lang in validated_langs]
 
         self.logger.debug(f"语言参数转换 | 原始: {langs} → 转换后: {converted_langs}")
         return converted_langs
@@ -73,6 +75,7 @@ class EasyOCRWrapper(BaseOCR):
                 return False
 
             import torch
+
             available = torch.cuda.is_available()
             self.logger.debug(f"GPU可用性检测 | 可用: {available} | 设备数: {torch.cuda.device_count()}")
             return available
@@ -86,7 +89,7 @@ class EasyOCRWrapper(BaseOCR):
             # 切换语言（如果与当前语言不同）
             if lang != self._current_lang:
                 self._current_lang = lang
-                self._lang_list = self._convert_lang_param(lang.split('+'))
+                self._lang_list = self._convert_lang_param(lang.split("+"))
                 self.logger.info(f"切换OCR语言: {lang}")
 
             # EasyOCR需要RGB格式图像
@@ -99,11 +102,7 @@ class EasyOCRWrapper(BaseOCR):
 
             # 调用EasyOCR识别（detail=1返回详细结果）
             raw_results = self.reader.readtext(
-                image_rgb,
-                detail=1,
-                paragraph=False,  # 不合并为段落
-                text_threshold=0.7,  # 文本置信度阈值
-                batch_size=1
+                image_rgb, detail=1, paragraph=False, text_threshold=0.7, batch_size=1  # 不合并为段落  # 文本置信度阈值
             )
 
             # 格式化结果（统一输出格式）
@@ -119,16 +118,14 @@ class EasyOCRWrapper(BaseOCR):
                 w = max(x_coords) - x
                 h = max(y_coords) - y
 
-                formatted_results.append({
-                    'text': text.strip(),
-                    'bbox': (x, y, w, h),
-                    'confidence': float(confidence)
-                })
+                formatted_results.append({"text": text.strip(), "bbox": (x, y, w, h), "confidence": float(confidence)})
 
             # 日志添加最高置信度信息
             if formatted_results:
-                max_confidence = max([r['confidence'] for r in formatted_results])
-                self.logger.info(f"文本检测完成 | 有效结果数量: {len(formatted_results)} | 最高置信度: {max_confidence:.2f}")
+                max_confidence = max([r["confidence"] for r in formatted_results])
+                self.logger.info(
+                    f"文本检测完成 | 有效结果数量: {len(formatted_results)} | 最高置信度: {max_confidence:.2f}"
+                )
             else:
                 self.logger.info(f"文本检测完成 | 有效结果数量: 0")
 
@@ -144,7 +141,7 @@ class EasyOCRWrapper(BaseOCR):
             # 切换语言（如果需要）
             if lang != self._current_lang:
                 self._current_lang = lang
-                self._lang_list = self._convert_lang_param(lang.split('+'))
+                self._lang_list = self._convert_lang_param(lang.split("+"))
                 self.logger.info(f"批量处理语言切换: {lang}")
 
             self.logger.info(f"开始批量处理 | 图像总数: {len(images)} | 语言: {lang}")
@@ -154,10 +151,7 @@ class EasyOCRWrapper(BaseOCR):
 
             # 使用EasyOCR的批量接口（效率更高）
             raw_batch_results = self.reader.readtext_batched(
-                images_rgb,
-                detail=1,
-                paragraph=False,
-                batch_size=len(images)  # 批量大小等于图像数量
+                images_rgb, detail=1, paragraph=False, batch_size=len(images)  # 批量大小等于图像数量
             )
 
             # 格式化批量结果
@@ -173,11 +167,7 @@ class EasyOCRWrapper(BaseOCR):
                     w = max(x_coords) - x
                     h = max(y_coords) - y
 
-                    formatted.append({
-                        'text': text.strip(),
-                        'bbox': (x, y, w, h),
-                        'confidence': float(confidence)
-                    })
+                    formatted.append({"text": text.strip(), "bbox": (x, y, w, h), "confidence": float(confidence)})
                 formatted_batch_results.append(formatted)
                 self.logger.debug(f"批量图像 {idx}/{len(images)} 处理完成 | 结果数: {len(formatted)}")
 

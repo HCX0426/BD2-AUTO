@@ -6,11 +6,11 @@ from src.auto_tasks.pc.public import back_to_main
 
 def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
     """抽抽乐
-    
+
     Args:
         timeout: 任务超时时间(秒)
         target_count: 目标抽奖次数
-    
+
     Returns:
         bool: 是否成功完成抽抽乐流程
     """
@@ -39,23 +39,22 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
                 else:
                     if last_count != target_count:
                         last_count = target_count
-                        if auto.swipe((410, 410), (410, 203), duration=2, steps=2, is_base_coord=True):
+                        if auto.swipe((410, 410), (410, 203), duration=2, steps=2, coord_type="BASE"):
                             logger.info("滑动抽抽乐")
                             auto.sleep(2)
                     else:
-                        if auto.swipe((410, 310), (410, 203), duration=1, steps=2, is_base_coord=True):
+                        if auto.swipe((410, 310), (410, 203), duration=1, steps=2, coord_type="BASE"):
                             logger.info("滑动抽抽乐")
                             auto.sleep(1)
 
-                    if auto.click((410, 310), click_time=2, is_base_coord=True):
-                        auto.click((410, 310), click_time=2, is_base_coord=True)
+                    if auto.click((410, 310), click_time=2, coord_type="BASE"):
+                        auto.click((410, 310), click_time=2, coord_type="BASE")
                         auto.sleep(1)
-                        auto.click((410, 310), click_time=2, is_base_coord=True)
+                        auto.click((410, 310), click_time=2, coord_type="BASE")
                         auto.sleep(1)
                         logger.info("点击抽抽乐")
-                        
 
-                if auto.text_click("购买",click_time=2):
+                if auto.text_click("购买", click_time=2):
                     logger.info("点击购买")
                     auto.sleep(2)
                 pos = None
@@ -66,7 +65,7 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
                 if auto.check_element_exist("lucky_draw/抽完标识"):
                     logger.info("检测到抽完标识")
                     auto.sleep(1)
-                    auto.key_press('esc')
+                    auto.key_press("esc")
                     auto.sleep(1)
                     target_count -= 1
             else:

@@ -1,4 +1,5 @@
 import time
+
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.pc.public import back_to_main
 from src.auto_tasks.utils.roi_config import roi_config
@@ -6,26 +7,26 @@ from src.auto_tasks.utils.roi_config import roi_config
 
 def get_guild(auto: Auto, timeout: int = 60) -> bool:
     """公会奖励领取
-    
+
     Args:
         auto: Auto控制对象
         timeout: 超时时间(秒)
-        
+
     Returns:
         bool: 是否成功完成领取
     """
     logger = auto.get_task_logger("get_guild")
     logger.info("开始领取公会奖励")
-    
+
     start_time = time.time()
     state = "init"  # 状态机: init -> entered -> checking -> completed
-    
+
     try:
         while time.time() - start_time < timeout:
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
-            
+
             # 初始状态：进入公会界面
             if state == "init":
                 if back_to_main(auto):
@@ -35,7 +36,7 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                         auto.sleep(4)
                         state = "entered"
                 continue
-                
+
             # 检查公会商店
             if state == "entered":
                 roi = roi_config.get_roi("guild_shop", "get_guild")
@@ -46,7 +47,7 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                     logger.warning("未检测到公会商店，重新尝试")
                     state = "init"
                 continue
-                
+
             # 返回处理
             if state == "checking":
                 roi = roi_config.get_roi("back_button_1")  # 使用全局ROI
@@ -58,7 +59,7 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                     logger.warning("返回失败，重新尝试")
                     state = "entered"
                 continue
-                
+
             # 完成状态：返回主界面
             if state == "completed":
                 if back_to_main(auto):
@@ -67,12 +68,12 @@ def get_guild(auto: Auto, timeout: int = 60) -> bool:
                 logger.warning("返回主界面失败，重试中...")
                 state = "init"
                 continue
-                
+
             auto.sleep(0.5)
 
         logger.error("领取公会奖励超时")
         return False
-        
+
     except Exception as e:
         logger.error(f"领取公会奖励过程中出错: {e}")
         return False

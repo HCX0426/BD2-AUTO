@@ -8,8 +8,8 @@ import numpy as np
 
 from src.auto_control.config.auto_config import TEMPLATE_EXTENSIONS
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
-from src.auto_control.utils.display_context import RuntimeDisplayContext
 from src.auto_control.utils.debug_image_saver import DebugImageSaver
+from src.auto_control.utils.display_context import RuntimeDisplayContext
 from src.core.path_manager import path_manager
 
 
@@ -23,7 +23,7 @@ class ImageProcessor:
         coord_transformer: Optional[CoordinateTransformer] = None,
         display_context: Optional[RuntimeDisplayContext] = None,
         template_dir: str = None,
-        test_mode: bool = False
+        test_mode: bool = False,
     ) -> None:
         """
         初始化图像处理器（强制依赖上层传入有效实例）
@@ -61,11 +61,7 @@ class ImageProcessor:
         debug_dir = path_manager.get("match_temple_debug")
         os.makedirs(debug_dir, exist_ok=True)
 
-        self.debug_saver = DebugImageSaver(
-            logger=logger,
-            debug_dir=debug_dir,
-            test_mode=test_mode
-        )
+        self.debug_saver = DebugImageSaver(logger=logger, debug_dir=debug_dir, test_mode=test_mode)
 
         self.min_confidence = 0.8
         self.min_template_size = (10, 10)
@@ -118,7 +114,11 @@ class ImageProcessor:
             for filename in files:
                 if filename.lower().endswith(TEMPLATE_EXTENSIONS):
                     rel_path = os.path.relpath(root, self.template_dir)
-                    template_name = os.path.join(rel_path, os.path.splitext(filename)[0]).replace('\\', '/') if rel_path != "." else os.path.splitext(filename)[0]
+                    template_name = (
+                        os.path.join(rel_path, os.path.splitext(filename)[0]).replace("\\", "/")
+                        if rel_path != "."
+                        else os.path.splitext(filename)[0]
+                    )
                     template_path = os.path.join(root, filename)
                     self.load_template(template_name, template_path)
 
@@ -144,7 +144,7 @@ class ImageProcessor:
         image: np.ndarray,
         template: Union[str, np.ndarray],
         threshold: float = 0.8,
-        roi: Optional[Tuple[int, int, int, int]] = None
+        roi: Optional[Tuple[int, int, int, int]] = None,
     ) -> Optional[Tuple[int, int, int, int]]:
         """
         在指定图像中匹配模板，支持ROI裁剪和模板分辨率自适应缩放
@@ -198,17 +198,16 @@ class ImageProcessor:
             cropped_image = orig_image
             if roi:
                 processed_roi_phys, roi_offset_phys = self.coord_transformer.process_roi(
-                    roi=roi,
-                    boundary_width=image_phys_w,
-                    boundary_height=image_phys_h,
-                    enable_expand=False
+                    roi=roi, boundary_width=image_phys_w, boundary_height=image_phys_h, enable_expand=False
                 )
                 if processed_roi_phys:
                     orig_roi_phys = processed_roi_phys
                     rx_phys, ry_phys, rw_phys, rh_phys = processed_roi_phys
-                    cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
+                    cropped_image = orig_image[ry_phys : ry_phys + rh_phys, rx_phys : rx_phys + rw_phys]
                     if cropped_image.size == 0:
-                        self.logger.warning(f"ROI裁剪后子图为空，使用原图进行匹配 | 原始ROI: {roi} | 处理后ROI物理坐标: {processed_roi_phys}")
+                        self.logger.warning(
+                            f"ROI裁剪后子图为空，使用原图进行匹配 | 原始ROI: {roi} | 处理后ROI物理坐标: {processed_roi_phys}"
+                        )
                         cropped_image = orig_image
                         roi_offset_phys = (0, 0)
                         orig_roi_phys = None
@@ -228,8 +227,7 @@ class ImageProcessor:
                 target_phys_size = self.display_context.client_physical_res
 
             scale_ratio = self.coord_transformer.calculate_template_scale_ratio(
-                target_phys_size=target_phys_size,
-                has_roi=False
+                target_phys_size=target_phys_size, has_roi=False
             )
             self.logger.debug(
                 f"模板缩放比例计算完成 | 基准分辨率: {self.original_base_res} | "
@@ -256,8 +254,14 @@ class ImageProcessor:
                 f"插值方式: {interpolation} | 缩放比例: {scale_ratio:.4f}"
             )
 
-            cropped_gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY) if len(cropped_image.shape) == 3 else cropped_image
-            template_gray = cv2.cvtColor(scaled_template, cv2.COLOR_BGR2GRAY) if len(scaled_template.shape) == 3 else scaled_template
+            cropped_gray = (
+                cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY) if len(cropped_image.shape) == 3 else cropped_image
+            )
+            template_gray = (
+                cv2.cvtColor(scaled_template, cv2.COLOR_BGR2GRAY)
+                if len(scaled_template.shape) == 3
+                else scaled_template
+            )
 
             if (template_gray.shape[0] > cropped_gray.shape[0]) or (template_gray.shape[1] > cropped_gray.shape[1]):
                 self.logger.error(
@@ -288,15 +292,14 @@ class ImageProcessor:
                         threshold=threshold,
                         is_fullscreen=is_fullscreen,
                         orig_roi_phys=orig_roi_phys,
-                        processed_roi=processed_roi
+                        processed_roi=processed_roi,
                     )
                 return None
 
             match_x_sub, match_y_sub = max_loc
             match_bbox_sub = (match_x_sub, match_y_sub, scaled_template.shape[1], scaled_template.shape[0])
             match_bbox_phys = self.coord_transformer.apply_roi_offset_to_subcoord(
-                sub_coord=match_bbox_sub,
-                roi_offset_phys=roi_offset_phys
+                sub_coord=match_bbox_sub, roi_offset_phys=roi_offset_phys
             )
             center_phys = self.coord_transformer.get_rect_center(match_bbox_phys)
 
@@ -316,7 +319,7 @@ class ImageProcessor:
                     center_phys=center_phys,
                     final_bbox_log=final_bbox_log,
                     template_orig_size=template_orig_size,
-                    template_scaled_size=template_scaled_size
+                    template_scaled_size=template_scaled_size,
                 )
 
             self.logger.info(

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 
 @dataclass
@@ -8,6 +8,7 @@ class RuntimeDisplayContext:
     全局共享的显示状态容器，统一管理运行时窗口/屏幕参数，为坐标转换提供基础数据。
     核心能力：支撑「基准坐标→逻辑坐标→物理坐标」的完整转换流程，适配不同分辨率、DPI、显示模式（全屏/窗口）。
     """
+
     # ========== 固定基准参数（初始化后不修改） ==========
     original_base_width: int
     """原始基准宽度（坐标转换的基准参照，默认对应1920x1080采集分辨率）"""
@@ -21,25 +22,25 @@ class RuntimeDisplayContext:
     """显示模式标识：True=全屏，False=窗口（决定坐标转换规则）"""
     dpi_scale: float = 1.0
     """DPI缩放因子（物理像素/逻辑像素，如1.25=125%缩放，解决高DPI坐标偏移）"""
-    
+
     # 客户区逻辑尺寸（应用感知的视觉尺寸，与DPI无关）
     client_logical_width: int = 0
     """客户区逻辑宽度（窗口内可交互区域的视觉宽度）"""
     client_logical_height: int = 0
     """客户区逻辑高度（窗口内可交互区域的视觉高度）"""
-    
+
     # 客户区物理尺寸（屏幕实际渲染像素，逻辑尺寸 × DPI缩放）
     client_physical_width: int = 0
     """客户区物理宽度（窗口内可交互区域的实际像素宽度）"""
     client_physical_height: int = 0
     """客户区物理高度（窗口内可交互区域的实际像素高度）"""
-    
+
     # 屏幕物理分辨率（硬件原生分辨率，无缩放）
     screen_physical_width: int = 0
     """屏幕物理宽度（显示器原生像素宽度）"""
     screen_physical_height: int = 0
     """屏幕物理高度（显示器原生像素高度）"""
-    
+
     # 客户区屏幕原点（客户区左上角在全局屏幕的物理坐标）
     client_screen_origin_x: int = 0
     """客户区左上角X轴全局物理坐标"""
@@ -86,11 +87,11 @@ class RuntimeDisplayContext:
         """
         orig_w, orig_h = self.original_base_res
         curr_w, curr_h = self.effective_physical_res
-        
+
         # 避免除零异常，返回默认缩放比
         if orig_w <= 0 or orig_h <= 0 or curr_w <= 0 or curr_h <= 0:
             return 1.0
-        
+
         return min(curr_w / orig_w, curr_h / orig_h)
 
     @property
@@ -109,11 +110,11 @@ class RuntimeDisplayContext:
     def logical_to_physical(self, x: int, y: int) -> Tuple[int, int]:
         """
         将客户区逻辑坐标转换为物理坐标（自动适配全屏/窗口模式）。
-        
+
         Args:
             x: 客户区逻辑X坐标
             y: 客户区逻辑Y坐标
-            
+
         Returns:
             对应的客户区物理坐标 (x, y)
         """
@@ -121,18 +122,20 @@ class RuntimeDisplayContext:
         return (int(round(x * ratio)), int(round(y * ratio)))
 
     # ========== 状态更新方法 ==========
-    def update_from_window(self, 
-                          hwnd: Optional[int] = None,
-                          is_fullscreen: Optional[bool] = None,
-                          dpi_scale: Optional[float] = None,
-                          client_logical: Optional[Tuple[int, int]] = None,
-                          client_physical: Optional[Tuple[int, int]] = None,
-                          screen_physical: Optional[Tuple[int, int]] = None,
-                          client_origin: Optional[Tuple[int, int]] = None) -> None:
+    def update_from_window(
+        self,
+        hwnd: Optional[int] = None,
+        is_fullscreen: Optional[bool] = None,
+        dpi_scale: Optional[float] = None,
+        client_logical: Optional[Tuple[int, int]] = None,
+        client_physical: Optional[Tuple[int, int]] = None,
+        screen_physical: Optional[Tuple[int, int]] = None,
+        client_origin: Optional[Tuple[int, int]] = None,
+    ) -> None:
         """
         批量更新窗口相关动态参数（仅更新传入的非None值）。
         调用时机：窗口尺寸/位置/显示模式/DPI变化时。
-        
+
         Args:
             hwnd: 窗口句柄
             is_fullscreen: 显示模式标识

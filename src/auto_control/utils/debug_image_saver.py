@@ -1,13 +1,15 @@
 import datetime
 import logging
 import os
-from typing import List, Dict, Optional, Tuple, Union, TypeGuard
+from typing import Dict, List, Optional, Tuple, TypeGuard, Union
+
 import cv2
 import numpy as np
 
 # 处理PIL导入（中文绘制依赖），兼容无PIL环境
 try:
     from PIL import Image, ImageDraw, ImageFont
+
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -23,7 +25,7 @@ class DebugImageSaver:
         debug_dir: str,
         test_mode: bool = False,
         custom_style: Optional[Dict] = None,
-        chinese_font_path: str = "simhei.ttf"
+        chinese_font_path: str = "simhei.ttf",
     ):
         """
         初始化调试图保存工具
@@ -72,22 +74,40 @@ class DebugImageSaver:
                 raise ValueError(f"自定义样式键'{key}'无效，合法键：{list(valid_keys)}")
             # 校验值的格式
             if key in ["roi_rect", "match_rect", "target_rect"]:
-                if not (isinstance(value, (list, tuple)) and len(value) == 5 and
-                        isinstance(value[0], (int, float)) and isinstance(value[1], (int, float)) and
-                        isinstance(value[2], (int, float)) and isinstance(value[3], int) and
-                        isinstance(value[4], int)):
+                if not (
+                    isinstance(value, (list, tuple))
+                    and len(value) == 5
+                    and isinstance(value[0], (int, float))
+                    and isinstance(value[1], (int, float))
+                    and isinstance(value[2], (int, float))
+                    and isinstance(value[3], int)
+                    and isinstance(value[4], int)
+                ):
                     raise ValueError(f"样式'{key}'格式错误，需为(color_r, color_g, color_b, thickness, line_type)")
             elif key == "center_point":
-                if not (isinstance(value, (list, tuple)) and len(value) == 6 and
-                        isinstance(value[0], (int, float)) and isinstance(value[1], (int, float)) and
-                        isinstance(value[2], (int, float)) and isinstance(value[3], int) and
-                        isinstance(value[4], int) and isinstance(value[5], int)):
-                    raise ValueError(f"样式'{key}'格式错误，需为(color_r, color_g, color_b, radius, thickness, line_type)")
+                if not (
+                    isinstance(value, (list, tuple))
+                    and len(value) == 6
+                    and isinstance(value[0], (int, float))
+                    and isinstance(value[1], (int, float))
+                    and isinstance(value[2], (int, float))
+                    and isinstance(value[3], int)
+                    and isinstance(value[4], int)
+                    and isinstance(value[5], int)
+                ):
+                    raise ValueError(
+                        f"样式'{key}'格式错误，需为(color_r, color_g, color_b, radius, thickness, line_type)"
+                    )
             elif key.startswith("text_"):
-                if not (isinstance(value, (list, tuple)) and len(value) == 4 and
-                        isinstance(value[0], (list, tuple)) and len(value[0]) == 3 and
-                        isinstance(value[1], (int, float)) and isinstance(value[2], int) and
-                        isinstance(value[3], int)):
+                if not (
+                    isinstance(value, (list, tuple))
+                    and len(value) == 4
+                    and isinstance(value[0], (list, tuple))
+                    and len(value[0]) == 3
+                    and isinstance(value[1], (int, float))
+                    and isinstance(value[2], int)
+                    and isinstance(value[3], int)
+                ):
                     raise ValueError(f"样式'{key}'格式错误，需为((r,g,b), font_scale, thickness, line_type)")
 
     def _clear_debug_dir(self) -> None:
@@ -147,7 +167,9 @@ class DebugImageSaver:
         x, y, w, h = bbox
         return x + w <= img_w and y + h <= img_h and x >= 0 and y >= 0
 
-    def _draw_text_wrap(self, img: np.ndarray, text: str, pos: Tuple[int, int], style_key: str, max_char_per_line: int = 30) -> None:
+    def _draw_text_wrap(
+        self, img: np.ndarray, text: str, pos: Tuple[int, int], style_key: str, max_char_per_line: int = 30
+    ) -> None:
         """
         自动换行绘制文本（支持中文）
         :param img: 待绘制图像
@@ -160,7 +182,7 @@ class DebugImageSaver:
         # 拆分长文本为多行
         text_lines = []
         for i in range(0, len(text), max_char_per_line):
-            text_lines.append(text[i:i + max_char_per_line])
+            text_lines.append(text[i : i + max_char_per_line])
 
         y_offset = pos[1]
         for line in text_lines:
@@ -190,7 +212,7 @@ class DebugImageSaver:
                 img_rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
             else:  # BGR转RGB
                 img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            
+
             # 2. 创建PIL图片（基于副本，避免修改原数组）
             pil_img = Image.fromarray(img_rgb).copy()
             draw = ImageDraw.Draw(pil_img)
@@ -207,7 +229,7 @@ class DebugImageSaver:
             # 4. 校验绘制坐标（避免越界）
             draw_x = max(0, min(pos[0], img_w - 10))
             draw_y = max(0, min(pos[1], img_h - 10))
-            
+
             # 5. 绘制文本（使用tuple(color)确保PIL兼容）
             draw.text((draw_x, draw_y), text, fill=tuple(color), font=font)
 
@@ -233,19 +255,16 @@ class DebugImageSaver:
             font_scale = float(font_scale)
             thickness = int(thickness)
             line_type = int(line_type)
-            
+
             # 限制字体缩放（避免过大导致黑块）
             font_scale = min(font_scale, 0.8)
-            
+
             # 校验绘制坐标
             draw_x = max(0, min(pos[0], img.shape[1] - 10))
             draw_y = max(0, min(pos[1], img.shape[0] - 10))
-            
+
             # 绘制文本
-            cv2.putText(
-                img, text, (draw_x, draw_y), cv2.FONT_HERSHEY_SIMPLEX,
-                font_scale, color, thickness, line_type
-            )
+            cv2.putText(img, text, (draw_x, draw_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, line_type)
         except Exception as e:
             self.logger.warning(f"绘制文本失败 | 文本: {text} | 错误: {str(e)}")
 
@@ -263,7 +282,7 @@ class DebugImageSaver:
         center_phys: Optional[Tuple[int, int]] = None,
         final_bbox_log: Optional[Tuple[int, int, int, int]] = None,
         template_orig_size: Optional[Tuple[int, int]] = None,
-        template_scaled_size: Optional[Tuple[int, int]] = None
+        template_scaled_size: Optional[Tuple[int, int]] = None,
     ) -> None:
         """
         保存模板匹配调试图（对应ImageProcessor的需求，参数完全不变）
@@ -284,11 +303,11 @@ class DebugImageSaver:
             if self._is_valid_bbox(orig_roi_phys) and self._is_bbox_in_image(orig_roi_phys, img_h, img_w):
                 rx, ry, rw, rh = orig_roi_phys
                 color, thickness, line_type = self.style["roi_rect"][:3]
-                cv2.rectangle(debug_img, (rx, ry), (rx+rw, ry+rh), color, int(thickness), int(line_type))
-                self._draw_text_wrap(debug_img, "Original ROI", (rx+5, ry+20), "text_info")
+                cv2.rectangle(debug_img, (rx, ry), (rx + rw, ry + rh), color, int(thickness), int(line_type))
+                self._draw_text_wrap(debug_img, "Original ROI", (rx + 5, ry + 20), "text_info")
                 # 窗口模式标注逻辑坐标
                 if not is_fullscreen and self._is_valid_bbox(processed_roi):
-                    self._draw_text_wrap(debug_img, f"ROI(Log): {processed_roi}", (rx+5, ry+40), "text_small")
+                    self._draw_text_wrap(debug_img, f"ROI(Log): {processed_roi}", (rx + 5, ry + 40), "text_small")
             elif orig_roi_phys:
                 self.logger.warning(f"无效的ROI坐标: {orig_roi_phys}，跳过ROI标注")
 
@@ -297,7 +316,7 @@ class DebugImageSaver:
                 f"Template: {template_name}",
                 f"Status: {'Match Success' if is_success else 'Match Failed'}",
                 f"Score: {match_score:.4f} | Threshold: {threshold}",
-                f"Mode: {'Fullscreen' if is_fullscreen else 'Window'}"
+                f"Mode: {'Fullscreen' if is_fullscreen else 'Window'}",
             ]
             text_style = "text_success" if is_success else "text_fail"
             y_offset = 30
@@ -311,8 +330,8 @@ class DebugImageSaver:
                 if self._is_valid_bbox(match_bbox_phys) and self._is_bbox_in_image(match_bbox_phys, img_h, img_w):
                     mx, my, mw, mh = match_bbox_phys
                     color, thickness, line_type = self.style["match_rect"][:3]
-                    cv2.rectangle(debug_img, (mx, my), (mx+mw, my+mh), color, int(thickness), int(line_type))
-                    self._draw_text_wrap(debug_img, "Matched Area", (mx+5, my+20), "text_info")
+                    cv2.rectangle(debug_img, (mx, my), (mx + mw, my + mh), color, int(thickness), int(line_type))
+                    self._draw_text_wrap(debug_img, "Matched Area", (mx + 5, my + 20), "text_info")
                 elif match_bbox_phys:
                     self.logger.warning(f"无效的匹配区域坐标: {match_bbox_phys}，跳过标注")
 
@@ -321,7 +340,7 @@ class DebugImageSaver:
                     cx, cy = center_phys
                     color, radius, thickness, line_type = self.style["center_point"][:4]
                     cv2.circle(debug_img, (cx, cy), int(radius), color, int(thickness), int(line_type))
-                    self._draw_text_wrap(debug_img, f"Center(Phys): ({cx},{cy})", (cx+10, cy-10), "text_small")
+                    self._draw_text_wrap(debug_img, f"Center(Phys): ({cx},{cy})", (cx + 10, cy - 10), "text_small")
                 elif center_phys:
                     self.logger.warning(f"无效的中心坐标: {center_phys}，跳过中心标注")
 
@@ -365,7 +384,7 @@ class DebugImageSaver:
         ocr_results: List[Dict],
         target_bbox_phys: Optional[Tuple[int, int, int, int]] = None,
         orig_region_phys: Optional[Tuple[int, int, int, int]] = None,
-        region_offset_phys: Tuple[int, int] = (0, 0)
+        region_offset_phys: Tuple[int, int] = (0, 0),
     ) -> None:
         """
         保存OCR识别调试图（对应OCRProcessor的需求，参数完全不变）
@@ -391,8 +410,8 @@ class DebugImageSaver:
             if self._is_valid_bbox(orig_region_phys) and self._is_bbox_in_image(orig_region_phys, img_h, img_w):
                 rx, ry, rw, rh = orig_region_phys
                 color, thickness, line_type = self.style["roi_rect"][:3]
-                cv2.rectangle(debug_img, (rx, ry), (rx+rw, ry+rh), color, int(thickness), int(line_type))
-                self._draw_text_wrap(debug_img, "OCR Region", (rx+5, ry+20), "text_info")
+                cv2.rectangle(debug_img, (rx, ry), (rx + rw, ry + rh), color, int(thickness), int(line_type))
+                self._draw_text_wrap(debug_img, "OCR Region", (rx + 5, ry + 20), "text_info")
             elif orig_region_phys:
                 self.logger.warning(f"无效的OCR区域坐标: {orig_region_phys}，跳过区域标注")
 
@@ -412,8 +431,12 @@ class DebugImageSaver:
                 x_orig = x_sub + region_offset_phys[0]
                 y_orig = y_sub + region_offset_phys[1]
                 # 校验还原后的坐标是否在图片内（更严格）
-                if not (0 <= x_orig < img_w and 0 <= y_orig < img_h and x_orig + w_sub <= img_w and y_orig + h_sub <= img_h):
-                    self.logger.warning(f"第{idx}个OCR结果还原后坐标超出图片范围: ({x_orig},{y_orig},{w_sub},{h_sub})，跳过标注")
+                if not (
+                    0 <= x_orig < img_w and 0 <= y_orig < img_h and x_orig + w_sub <= img_w and y_orig + h_sub <= img_h
+                ):
+                    self.logger.warning(
+                        f"第{idx}个OCR结果还原后坐标超出图片范围: ({x_orig},{y_orig},{w_sub},{h_sub})，跳过标注"
+                    )
                     continue
 
                 text = res["text"].strip()
@@ -422,19 +445,25 @@ class DebugImageSaver:
                 # 绘制识别文本框（红色，限制厚度）
                 color, thickness, line_type = self.style["match_rect"][:3]
                 thickness = min(int(thickness), 2)  # 最大厚度2，防止黑块
-                cv2.rectangle(debug_img, (x_orig, y_orig), (x_orig+w_sub, y_orig+h_sub), color, thickness, int(line_type))
+                cv2.rectangle(
+                    debug_img, (x_orig, y_orig), (x_orig + w_sub, y_orig + h_sub), color, thickness, int(line_type)
+                )
                 # 标注文本内容和置信度（绿色文字）
                 text_y = y_orig - 10 if (y_orig - 10) > 10 else (y_orig + h_sub + 20)
-                text_pos = (x_orig+5, text_y)
+                text_pos = (x_orig + 5, text_y)
                 self._draw_text_wrap(debug_img, f"{text} ({conf:.2f})", text_pos, "text_small")
 
             # 3. 标注目标文本（红色：选中的ROI，绿色文字）
-            if is_success and self._is_valid_bbox(target_bbox_phys) and self._is_bbox_in_image(target_bbox_phys, img_h, img_w):
+            if (
+                is_success
+                and self._is_valid_bbox(target_bbox_phys)
+                and self._is_bbox_in_image(target_bbox_phys, img_h, img_w)
+            ):
                 tx, ty, tw, th = target_bbox_phys
                 color, thickness, line_type = self.style["target_rect"][:3]
                 thickness = min(int(thickness), 2)  # 限制厚度
-                cv2.rectangle(debug_img, (tx, ty), (tx+tw, ty+th), color, thickness, int(line_type))
-                self._draw_text_wrap(debug_img, f"Target: {target_text}", (tx+5, ty+20), "text_success")
+                cv2.rectangle(debug_img, (tx, ty), (tx + tw, ty + th), color, thickness, int(line_type))
+                self._draw_text_wrap(debug_img, f"Target: {target_text}", (tx + 5, ty + 20), "text_success")
                 # 标注目标文本中心坐标（绿色）
                 cx = tx + tw // 2
                 cy = ty + th // 2
@@ -442,7 +471,7 @@ class DebugImageSaver:
                     circle_color, radius, circle_thickness, line_type = self.style["center_point"][:4]
                     radius = min(int(radius), 4)  # 限制半径
                     cv2.circle(debug_img, (cx, cy), radius, circle_color, int(circle_thickness), int(line_type))
-                    self._draw_text_wrap(debug_img, f"Center(Phys): ({cx},{cy})", (cx+10, cy-10), "text_small")
+                    self._draw_text_wrap(debug_img, f"Center(Phys): ({cx},{cy})", (cx + 10, cy - 10), "text_small")
                 else:
                     self.logger.warning(f"目标文本中心坐标超出图片范围: ({cx},{cy})，跳过中心标注")
             elif is_success and target_bbox_phys:
@@ -453,7 +482,7 @@ class DebugImageSaver:
                 f"Target Text: '{target_text}'",
                 f"Status: {'Found' if is_success else 'Not Found'}",
                 f"Match Score: {match_score:.4f} | Min Confidence: {min_confidence}",
-                f"OCR Results Count: {len(ocr_results)} | Mode: {'Fullscreen' if is_fullscreen else 'Window'}"
+                f"OCR Results Count: {len(ocr_results)} | Mode: {'Fullscreen' if is_fullscreen else 'Window'}",
             ]
             text_style = "text_success" if is_success else "text_fail"
             y_offset = 30
@@ -462,10 +491,7 @@ class DebugImageSaver:
                 y_offset += 20
 
             # 5. 标注底部辅助信息（绿色文字）
-            bottom_texts = [
-                f"Image Size(Phys): {img_w}x{img_h}",
-                f"Region Offset: {region_offset_phys}"
-            ]
+            bottom_texts = [f"Image Size(Phys): {img_w}x{img_h}", f"Region Offset: {region_offset_phys}"]
             y_offset = img_h - 30
             for text in reversed(bottom_texts):
                 self._draw_text_wrap(debug_img, text, (10, y_offset), "text_info")

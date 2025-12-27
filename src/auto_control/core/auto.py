@@ -6,30 +6,39 @@ from typing import List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
-from ..config import (DEFAULT_BASE_RESOLUTION, DEFAULT_CHECK_ELEMENT_DELAY,
-                      DEFAULT_CLICK_DELAY, DEFAULT_DEVICE_URI,
-                      DEFAULT_KEY_DURATION, DEFAULT_OCR_ENGINE,
-                      DEFAULT_SCREENSHOT_DELAY, DEFAULT_TASK_TIMEOUT,
-                      DEFAULT_WINDOW_OPERATION_DELAY)
+from ...core.path_manager import config, path_manager
+from ..config import (
+    DEFAULT_BASE_RESOLUTION,
+    DEFAULT_CHECK_ELEMENT_DELAY,
+    DEFAULT_CLICK_DELAY,
+    DEFAULT_DEVICE_URI,
+    DEFAULT_KEY_DURATION,
+    DEFAULT_OCR_ENGINE,
+    DEFAULT_SCREENSHOT_DELAY,
+    DEFAULT_TASK_TIMEOUT,
+    DEFAULT_WINDOW_OPERATION_DELAY,
+)
 from ..devices.base_device import BaseDevice
 from ..devices.device_manager import DeviceManager
+from ..devices.windows_device import CoordType
 from ..image.image_processor import ImageProcessor
 from ..ocr.ocr_processor import OCRProcessor
 from ..utils.coordinate_transformer import CoordinateTransformer
 from ..utils.display_context import RuntimeDisplayContext
 from ..utils.logger import Logger
-from ...core.path_manager import config, path_manager
 
 
 class Auto:
     """
     自动化系统调用层：对外提供统一操作接口，衔接业务逻辑与底层工具（设备/图像/OCR）
-    
+
     坐标体系说明：
+    - 客户区逻辑坐标（默认）：当前窗口客户区的相对坐标（与窗口实际分辨率无关，0<=x<=客户区宽度，0<=y<=客户区高度）
+      当coord_type="LOGICAL"时传入（默认），直接传递给device层执行
+    - 客户区物理坐标：当前窗口客户区的物理像素坐标（考虑DPI缩放）
+      当coord_type="PHYSICAL"时传入，内部自动转换为客户区逻辑坐标
     - 基准坐标：全屏场景下采集的原始坐标（基于默认基准分辨率1920x1080），适用于窗口缩放适配
-      当is_base_coord=True时传入，内部自动转换为当前窗口的客户区逻辑坐标
-    - 客户区逻辑坐标：当前窗口客户区的相对坐标（与窗口实际分辨率无关，0<=x<=客户区宽度，0<=y<=客户区高度）
-      当is_base_coord=False时传入（默认），直接传递给device层执行
+      当coord_type="BASE"时传入，内部自动转换为当前窗口的客户区逻辑坐标
     - ROI格式：(x, y, width, height)，默认传递基准ROI，内部自动转换为客户区逻辑坐标
     """
 
@@ -37,7 +46,7 @@ class Auto:
         self,
         ocr_engine: str = DEFAULT_OCR_ENGINE,
         device_uri: str = DEFAULT_DEVICE_URI,
-        original_base_res: Tuple[int, int] = DEFAULT_BASE_RESOLUTION
+        original_base_res: Tuple[int, int] = DEFAULT_BASE_RESOLUTION,
     ):
         """
         初始化自动化系统核心实例
@@ -59,12 +68,11 @@ class Auto:
             file_log_level=logging.DEBUG,
             console_log_level=logging.INFO,
             is_system_logger=True,
-            test_mode=self.test_mode
+            test_mode=self.test_mode,
         )
 
         self.display_context: RuntimeDisplayContext = RuntimeDisplayContext(
-            original_base_width=original_base_res[0],
-            original_base_height=original_base_res[1]
+            original_base_width=original_base_res[0], original_base_height=original_base_res[1]
         )
 
         self.coord_transformer_logger = self.logger.create_component_logger("CoordinateTransformer")
@@ -73,8 +81,7 @@ class Auto:
         self.ocr_processor_logger = self.logger.create_component_logger("OCRProcessor")
 
         self.coord_transformer: CoordinateTransformer = CoordinateTransformer(
-            logger=self.coord_transformer_logger,
-            display_context=self.display_context
+            logger=self.coord_transformer_logger, display_context=self.display_context
         )
 
         self.image_processor: ImageProcessor = ImageProcessor(
@@ -82,7 +89,7 @@ class Auto:
             logger=self.image_processor_logger,
             coord_transformer=self.coord_transformer,
             display_context=self.display_context,
-            test_mode=self.test_mode
+            test_mode=self.test_mode,
         )
 
         self.device_manager: DeviceManager = DeviceManager(
@@ -90,7 +97,7 @@ class Auto:
             image_processor=self.image_processor,
             coord_transformer=self.coord_transformer,
             display_context=self.display_context,
-            stop_event=self.stop_event
+            stop_event=self.stop_event,
         )
 
         self.ocr_processor: OCRProcessor = OCRProcessor(
@@ -99,7 +106,7 @@ class Auto:
             coord_transformer=self.coord_transformer,
             display_context=self.display_context,
             test_mode=self.test_mode,
-            stop_event=self.stop_event
+            stop_event=self.stop_event,
         )
 
         self.default_device_uri = device_uri
@@ -148,7 +155,7 @@ class Auto:
         device = self.device_manager.get_device(target_uri) or self.device_manager.get_active_device()
 
         if device:
-            dev_uri = getattr(device, 'device_uri', "未知URI")
+            dev_uri = getattr(device, "device_uri", "未知URI")
             self.logger.debug(f"使用设备: {dev_uri}")
         else:
             self.last_error = "未找到可用设备"
@@ -320,20 +327,22 @@ class Auto:
             device_states[uri] = {
                 "state": dev.get_state().name,
                 "is_connected": dev.is_connected,
-                "client_size": dev.get_resolution() if dev.is_connected else None
+                "client_size": dev.get_resolution() if dev.is_connected else None,
             }
 
         status = {
             "system_running": self.running,
             "task_should_stop": self.check_should_stop(),
-            "active_device": active_device.device_uri if (active_device and hasattr(active_device, 'device_uri')) else None,
+            "active_device": (
+                active_device.device_uri if (active_device and hasattr(active_device, "device_uri")) else None
+            ),
             "active_device_state": active_device.get_state().name if active_device else None,
             "total_devices": len(self.device_manager),
             "device_list": list(self.device_manager.devices.keys()),
             "device_states": device_states,
             "loaded_templates": len(self.image_processor.templates) if self.image_processor else 0,
             "last_error": self.last_error,
-            "last_result": self.last_result
+            "last_result": self.last_result,
         }
         self.logger.debug(f"系统状态查询结果: {status}")
         return status
@@ -345,7 +354,7 @@ class Auto:
         click_time: int = 1,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
-        is_base_coord: bool = False
+        coord_type: str = "LOGICAL",
     ) -> bool:
         """
         坐标点击操作（自动进行坐标转换）
@@ -355,7 +364,7 @@ class Auto:
             click_time: 点击次数，默认1次
             delay: 执行前延迟时间（秒），默认DEFAULT_CLICK_DELAY
             device_uri: 目标设备URI（None使用默认设备）
-            is_base_coord: pos是否为基准坐标（默认False：客户区逻辑坐标；True：全屏采集的基准坐标）
+            coord_type: 坐标类型（默认"LOGICAL"：客户区逻辑坐标；"BASE"：基准分辨率坐标；"PHYSICAL"：客户区物理坐标）
 
         Returns:
             bool: 点击成功返回True，失败返回False
@@ -371,16 +380,26 @@ class Auto:
             self.last_result = False
             return False
 
-        self.last_result = device.click(
-            (pos[0], pos[1]), click_time=click_time, is_base_coord=is_base_coord
-        )
+        # 根据字符串类型转换为CoordType枚举
+        if coord_type == "BASE":
+            device_coord_type = CoordType.BASE
+        elif coord_type == "PHYSICAL":
+            device_coord_type = CoordType.PHYSICAL
+        else:  # 默认LOGICAL
+            device_coord_type = CoordType.LOGICAL
+
+        self.last_result = device.click((pos[0], pos[1]), click_time=click_time, coord_type=device_coord_type)
 
         if not self.last_result:
             self.last_error = device.last_error or "点击执行失败"
             self.logger.error(self.last_error)
         else:
-            coord_type = "基准坐标" if is_base_coord else "客户区逻辑坐标"
-            self.logger.info(f"点击成功: {coord_type}{pos} | 点击次数{click_time}")
+            coord_type_str = (
+                "基准坐标"
+                if coord_type == "BASE"
+                else ("客户区物理坐标" if coord_type == "PHYSICAL" else "客户区逻辑坐标")
+            )
+            self.logger.info(f"点击成功: {coord_type_str}{pos} | 点击次数{click_time}")
 
         return self.last_result
 
@@ -389,7 +408,7 @@ class Auto:
         key: str,
         duration: float = DEFAULT_KEY_DURATION,
         delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None
+        device_uri: Optional[str] = None,
     ) -> bool:
         """
         按键操作（支持系统按键和普通字符键）
@@ -431,7 +450,7 @@ class Auto:
         duration: float = 0.1,
         click_time: int = 1,
         right_click: bool = False,
-        roi: Optional[Tuple[int, int, int, int]] = None
+        roi: Optional[Tuple[int, int, int, int]] = None,
     ) -> bool:
         """
         模板匹配点击（支持多模板、ROI筛选，自动适配分辨率）
@@ -471,11 +490,7 @@ class Auto:
         self.logger.debug(f"模板点击请求: {templates}{param_log}")
 
         self.last_result = device.click(
-            pos=templates,
-            duration=duration,
-            click_time=click_time,
-            right_click=right_click,
-            roi=roi
+            pos=templates, duration=duration, click_time=click_time, right_click=right_click, roi=roi
         )
 
         if not self.last_result:
@@ -496,7 +511,7 @@ class Auto:
         device_uri: Optional[str] = None,
         duration: float = 0.1,
         click_time: int = 1,
-        right_click: bool = False
+        right_click: bool = False,
     ) -> Optional[Tuple[int, int]]:
         """
         OCR文本识别并点击（支持ROI筛选，自动坐标适配）
@@ -536,12 +551,7 @@ class Auto:
         if roi:
             self.logger.debug(f"文本识别请求: '{target_text}' | 基准ROI: {roi}")
 
-        ocr_result = self.ocr_processor.find_text_position(
-            image=screen,
-            target_text=target_text,
-            lang=lang,
-            region=roi
-        )
+        ocr_result = self.ocr_processor.find_text_position(image=screen, target_text=target_text, lang=lang, region=roi)
 
         if not ocr_result:
             self.last_error = f"文本点击失败: 未识别到文本 '{target_text}'"
@@ -565,7 +575,7 @@ class Auto:
                 duration=duration,
                 click_time=click_time,
                 right_click=right_click,
-                is_physical_coord=True  # 标识点击坐标为物理坐标
+                coord_type=CoordType.PHYSICAL,  # 标识点击坐标为物理坐标
             )
             if not click_result:
                 self.last_error = device.last_error or "文本点击执行失败"
@@ -577,11 +587,7 @@ class Auto:
             return click_center
 
     # ======================== 窗口管理方法 ========================
-    def minimize_window(
-        self,
-        delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
-        device_uri: Optional[str] = None
-    ) -> bool:
+    def minimize_window(self, delay: float = DEFAULT_WINDOW_OPERATION_DELAY, device_uri: Optional[str] = None) -> bool:
         """
         最小化目标窗口（窗口状态变化后自动同步分辨率）
 
@@ -616,11 +622,7 @@ class Auto:
 
         return self.last_result
 
-    def maximize_window(
-        self,
-        delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
-        device_uri: Optional[str] = None
-    ) -> bool:
+    def maximize_window(self, delay: float = DEFAULT_WINDOW_OPERATION_DELAY, device_uri: Optional[str] = None) -> bool:
         """
         最大化目标窗口（窗口状态变化后自动同步分辨率）
 
@@ -661,7 +663,7 @@ class Auto:
         template_name: Union[str, List[str]],
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
         device_uri: Optional[str] = None,
-        roi: Optional[Tuple[int, int, int, int]] = None
+        roi: Optional[Tuple[int, int, int, int]] = None,
     ) -> bool:
         """
         检查模板元素是否存在（支持多模板、ROI筛选）
@@ -717,10 +719,7 @@ class Auto:
             return False
 
     def screenshot(
-        self,
-        save_path: str = None,
-        delay: float = DEFAULT_SCREENSHOT_DELAY,
-        device_uri: str = None
+        self, save_path: str = None, delay: float = DEFAULT_SCREENSHOT_DELAY, device_uri: str = None
     ) -> Optional[np.ndarray]:
         """
         截图并可选保存（返回BGR格式图像，自动适配窗口状态）
@@ -756,9 +755,7 @@ class Auto:
                 return None
 
             client_res = self.display_context.client_logical_res
-            self.logger.debug(
-                f"截图成功 | 图像尺寸: {screen.shape[1]}x{screen.shape[0]} | 客户区尺寸: {client_res}"
-            )
+            self.logger.debug(f"截图成功 | 图像尺寸: {screen.shape[1]}x{screen.shape[0]} | 客户区尺寸: {client_res}")
 
             if save_path:
                 try:
@@ -783,7 +780,7 @@ class Auto:
         timeout: float = DEFAULT_TASK_TIMEOUT,
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
         device_uri: Optional[str] = None,
-        roi: Optional[Tuple[int, int, int, int]] = None
+        roi: Optional[Tuple[int, int, int, int]] = None,
     ) -> bool:
         """
         等待模板元素出现（超时返回False，支持多模板、ROI筛选）
@@ -846,10 +843,10 @@ class Auto:
         steps: int = 10,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
-        is_base_coord: bool = False
+        coord_type: str = "LOGICAL",
     ) -> bool:
         """
-        滑动操作（支持基准坐标/客户区逻辑坐标，自动平滑移动）
+        滑动操作（支持多种坐标类型，自动平滑移动）
 
         Args:
             start_pos: 滑动起始坐标 (x, y)
@@ -858,7 +855,7 @@ class Auto:
             steps: 滑动步数（步数越多越平滑，默认10步）
             delay: 执行前延迟时间（秒），默认DEFAULT_CLICK_DELAY
             device_uri: 目标设备URI（None使用默认设备）
-            is_base_coord: 坐标是否为基准坐标（默认False：客户区逻辑坐标；True：全屏采集的基准坐标）
+            coord_type: 坐标类型（默认LOGICAL：客户区逻辑坐标；PHYSICAL：客户区物理坐标；BASE：基准分辨率采集的坐标）
 
         Returns:
             bool: 滑动成功返回True，失败返回False
@@ -885,7 +882,14 @@ class Auto:
             self.last_result = False
             return False
 
-        if not is_base_coord:
+        # 坐标类型验证
+        valid_coord_types = {"LOGICAL", "PHYSICAL", "BASE"}
+        if coord_type not in valid_coord_types:
+            self.logger.warning(f"无效的坐标类型: {coord_type}，使用默认类型LOGICAL")
+            coord_type = "LOGICAL"
+
+        # 坐标范围检查（仅针对逻辑坐标）
+        if coord_type == "LOGICAL":
             client_w, client_h = self.display_context.client_logical_res
             sx, sy = start_pos
             ex, ey = end_pos
@@ -894,31 +898,34 @@ class Auto:
             if not (0 <= ex <= client_w and 0 <= ey <= client_h):
                 self.logger.warning(f"结束坐标超出客户区范围: {end_pos} | 客户区: {client_w}x{client_h}")
 
+        # 转换字符串到CoordType枚举
+        from auto_control.devices.windows_device import CoordType
+
+        coord_type_enum = getattr(CoordType, coord_type.upper())
+
         self.last_result = device.swipe(
-            start_x=start_pos[0], start_y=start_pos[1],
-            end_x=end_pos[0], end_y=end_pos[1],
+            start_x=start_pos[0],
+            start_y=start_pos[1],
+            end_x=end_pos[0],
+            end_y=end_pos[1],
             duration=duration,
             steps=steps,
-            is_base_coord=is_base_coord
+            coord_type=coord_type_enum,
         )
 
         if not self.last_result:
             self.last_error = device.last_error or "滑动执行失败"
             self.logger.error(self.last_error)
         else:
-            coord_type = "基准坐标" if is_base_coord else "客户区逻辑坐标"
-            self.logger.info(
-                f"滑动成功: 从{start_pos}到{end_pos} | 类型:{coord_type} | 时长{duration}s"
+            coord_type_name = {"LOGICAL": "客户区逻辑坐标", "PHYSICAL": "客户区物理坐标", "BASE": "基准坐标"}.get(
+                coord_type.upper(), "未知坐标类型"
             )
+            self.logger.info(f"滑动成功: 从{start_pos}到{end_pos} | 类型:{coord_type_name} | 时长{duration}s")
 
         return self.last_result
 
     def text_input(
-        self,
-        text: str,
-        interval: float = 0.05,
-        delay: float = DEFAULT_CLICK_DELAY,
-        device_uri: Optional[str] = None
+        self, text: str, interval: float = 0.05, delay: float = DEFAULT_CLICK_DELAY, device_uri: Optional[str] = None
     ) -> bool:
         """
         文本输入（优先粘贴模式，粘贴失败时自动降级为逐字符输入）

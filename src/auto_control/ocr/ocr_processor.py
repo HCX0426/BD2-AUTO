@@ -1,15 +1,17 @@
+import datetime
 import os
-from typing import Optional, Tuple, List, Dict
-import numpy as np
+from typing import Dict, List, Optional, Tuple
+
 import cv2
+import numpy as np
+
+from src.auto_control.config.ocr_config import get_default_languages
 from src.auto_control.ocr.base_ocr import BaseOCR
 from src.auto_control.ocr.easyocr_wrapper import EasyOCRWrapper
-from src.auto_control.config.ocr_config import get_default_languages
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
-from src.auto_control.utils.display_context import RuntimeDisplayContext
 from src.auto_control.utils.debug_image_saver import DebugImageSaver
+from src.auto_control.utils.display_context import RuntimeDisplayContext
 from src.core.path_manager import path_manager
-import datetime
 
 
 class OCRProcessor:
@@ -21,17 +23,20 @@ class OCRProcessor:
     3. 调试能力：支持测试模式，自动保存识别过程的调试图片
     4. 参数统一：基于RuntimeDisplayContext获取全局显示状态，保证数据源唯一
     """
-    def __init__(self, 
-                 engine: str = 'easyocr', 
-                 logger=None, 
-                 coord_transformer: CoordinateTransformer = None,
-                 display_context: RuntimeDisplayContext = None,
-                 test_mode: bool = False,
-                 stop_event=None,
-                 **kwargs):
+
+    def __init__(
+        self,
+        engine: str = "easyocr",
+        logger=None,
+        coord_transformer: CoordinateTransformer = None,
+        display_context: RuntimeDisplayContext = None,
+        test_mode: bool = False,
+        stop_event=None,
+        **kwargs,
+    ):
         """
         初始化OCR处理器
-        
+
         Args:
             engine: OCR引擎类型，仅支持 'easyocr'（默认）
             logger: 日志实例（必填，用于输出识别过程和错误信息）
@@ -50,32 +55,30 @@ class OCRProcessor:
             raise ValueError("初始化失败：coord_transformer必须是CoordinateTransformer实例")
         if not isinstance(display_context, RuntimeDisplayContext):
             raise ValueError("初始化失败：display_context必须是RuntimeDisplayContext实例")
-        
+
         # 引擎类型校验
         self.engine_type = engine.lower()
-        if self.engine_type != 'easyocr':
+        if self.engine_type != "easyocr":
             raise ValueError(f"不支持的OCR引擎: {engine}，仅支持 'easyocr'")
-        
+
         # 核心属性初始化
         self.logger = logger
         self.coord_transformer = coord_transformer
         self.display_context = display_context  # 全局显示状态容器
         self.test_mode = test_mode
         self.stop_event = stop_event
-        
+
         # 语言配置（默认/自定义）
-        self._default_lang = kwargs.pop('languages', None) or get_default_languages(self.engine_type)
-        
+        self._default_lang = kwargs.pop("languages", None) or get_default_languages(self.engine_type)
+
         # 调试工具初始化
         self.debug_saver = DebugImageSaver(
-            logger=self.logger,
-            debug_dir=path_manager.get("match_ocr_debug"),
-            test_mode=test_mode
+            logger=self.logger, debug_dir=path_manager.get("match_ocr_debug"), test_mode=test_mode
         )
-        
+
         # 初始化OCR引擎
         self.engine: BaseOCR = self._init_engine()
-        
+
         # 初始化完成日志
         self.logger.info(
             f"OCR处理器初始化完成 | 引擎: {self.engine_type.upper()} | "
@@ -86,15 +89,15 @@ class OCRProcessor:
     def _init_engine(self) -> BaseOCR:
         """
         初始化具体OCR引擎实例
-        
+
         Returns:
             BaseOCR: OCR引擎基类实例（当前为EasyOCRWrapper）
         Raises:
             ValueError: 引擎类型不支持
         """
         self.logger.debug(f"初始化{self.engine_type.upper()}引擎")
-        
-        if self.engine_type == 'easyocr':
+
+        if self.engine_type == "easyocr":
             return EasyOCRWrapper(logger=self.logger)
         else:
             raise ValueError(f"不支持的OCR引擎: {self.engine_type}")
@@ -102,31 +105,32 @@ class OCRProcessor:
     def enable_gpu(self, enable: bool = True):
         """
         启用/禁用GPU加速
-        
+
         Args:
             enable: True=启用，False=禁用（默认True）
         """
         return self.engine.enable_gpu(enable)
 
-    def find_text_position(self,
-                        image: np.ndarray,
-                        target_text: str,
-                        lang: Optional[str] = None,
-                        min_confidence: float = 0.9,
-                        region: Optional[Tuple[int, int, int, int]] = None
-        ) -> Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
+    def find_text_position(
+        self,
+        image: np.ndarray,
+        target_text: str,
+        lang: Optional[str] = None,
+        min_confidence: float = 0.9,
+        region: Optional[Tuple[int, int, int, int]] = None,
+    ) -> Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
         """
         查找目标文本在图像中的位置，返回逻辑/物理坐标
-        
+
         Args:
             image: 输入图像（numpy数组）
             target_text: 待查找的目标文本
             lang: 识别语言（默认使用初始化配置的语言）
             min_confidence: 最小置信度阈值（默认0.9）
             region: 识别区域ROI (x, y, w, h)（基于原始基准分辨率）
-        
+
         Returns:
-            Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]: 
+            Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
                 (逻辑坐标矩形, 物理坐标矩形) - 匹配成功；None - 匹配失败
         """
         # 1. 语言配置处理
@@ -135,38 +139,34 @@ class OCRProcessor:
             target_lang = f"ch_sim+{target_lang}"
         elif not target_lang:
             target_lang = "ch_sim"
-        
+
         # 2. 基础参数校验
         if image is None or image.size == 0:
             self.logger.error("查找文本失败：输入图像无效")
             return None
-        
+
         target_text_clean = target_text.strip()
         if not target_text_clean:
             self.logger.error("查找文本失败：目标文本为空")
             return None
-        
+
         # 3. 基础参数获取
         img_h, img_w = image.shape[:2]
         orig_image = image.copy()
         is_fullscreen = self.display_context.is_fullscreen
-        
+
         # 4. ROI处理（坐标转换+安全扩展）
         processed_region_phys, region_offset_phys = self.coord_transformer.process_roi(
-            roi=region,
-            boundary_width=img_w,
-            boundary_height=img_h,
-            enable_expand=True,
-            expand_pixel=10
+            roi=region, boundary_width=img_w, boundary_height=img_h, enable_expand=True, expand_pixel=10
         )
         orig_region_phys = processed_region_phys
-        
+
         # 5. 图像裁剪
         cropped_image = orig_image
         if processed_region_phys:
             rx_phys, ry_phys, rw_phys, rh_phys = processed_region_phys
-            cropped_image = orig_image[ry_phys:ry_phys+rh_phys, rx_phys:rx_phys+rw_phys]
-            
+            cropped_image = orig_image[ry_phys : ry_phys + rh_phys, rx_phys : rx_phys + rw_phys]
+
             # 裁剪有效性检查
             if cropped_image.size == 0:
                 self.logger.warning(
@@ -179,19 +179,20 @@ class OCRProcessor:
                 self.logger.debug(f"图像裁剪完成 | 子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}")
         else:
             self.logger.debug(f"全图识别 | 原图尺寸: {img_w}x{img_h}")
-        
+
         # 6. OCR识别前检查是否需要停止
         if self.stop_event and self.stop_event.is_set():
             self.logger.info("OCR识别被中断：收到停止信号")
             return None
-            
+
         image_rgb = cropped_image if len(cropped_image.shape) == 3 else cv2.cvtColor(cropped_image, cv2.COLOR_GRAY2RGB)
-        
+
         # 使用线程执行OCR识别，支持中断
-        from threading import Thread, Event
+        from threading import Event, Thread
+
         result_event = Event()
         raw_results = []
-        
+
         def ocr_worker():
             nonlocal raw_results
             try:
@@ -205,17 +206,17 @@ class OCRProcessor:
                     canvas_size=2048,
                     mag_ratio=1.8,
                     batch_size=1,
-                    workers=0
+                    workers=0,
                 )
                 result_event.set()
             except Exception as e:
                 self.logger.error(f"OCR识别异常: {str(e)}")
                 result_event.set()
-        
+
         # 启动OCR线程
         ocr_thread = Thread(target=ocr_worker, daemon=True)
         ocr_thread.start()
-        
+
         # 等待识别完成或停止信号
         while not result_event.is_set():
             if self.stop_event and self.stop_event.is_set():
@@ -223,13 +224,14 @@ class OCRProcessor:
                 return None
             # 短暂休眠，避免CPU占用过高
             from time import sleep
+
             sleep(0.1)
-        
+
         # OCR识别后检查是否需要停止
         if self.stop_event and self.stop_event.is_set():
             self.logger.info("OCR识别完成后被中断：收到停止信号")
             return None
-        
+
         # 7. 识别结果格式化（子图→原图坐标转换）
         formatted_results = []
         for result in raw_results:
@@ -237,7 +239,7 @@ class OCRProcessor:
             if self.stop_event and self.stop_event.is_set():
                 self.logger.info("OCR结果处理被中断：收到停止信号")
                 return None
-                
+
             bbox, text, confidence = result[:3]
             # 子图内物理坐标计算
             x_coords = [int(point[0]) for point in bbox]
@@ -246,48 +248,49 @@ class OCRProcessor:
             y_phys_sub = min(y_coords)
             w_phys_sub = max(x_coords) - x_phys_sub
             h_phys_sub = max(y_coords) - y_phys_sub
-            
+
             # 子图坐标→原图物理坐标
             bbox_sub = (x_phys_sub, y_phys_sub, w_phys_sub, h_phys_sub)
             bbox_orig_phys = self.coord_transformer.apply_roi_offset_to_subcoord(
-                sub_coord=bbox_sub,
-                roi_offset_phys=region_offset_phys
+                sub_coord=bbox_sub, roi_offset_phys=region_offset_phys
             )
-            
-            formatted_results.append({
-                'text': text.strip(),
-                'bbox': bbox_sub,
-                'bbox_orig_phys': bbox_orig_phys,
-                'confidence': float(confidence)
-            })
-        
+
+            formatted_results.append(
+                {
+                    "text": text.strip(),
+                    "bbox": bbox_sub,
+                    "bbox_orig_phys": bbox_orig_phys,
+                    "confidence": float(confidence),
+                }
+            )
+
         # 8. 精确匹配逻辑
         best_match_phys = None
         highest_confidence = 0.0
         exact_matches = []
         target_text_normalized = target_text_clean.replace(" ", "")
-        
+
         for res in formatted_results:
-            res_text_normalized = res['text'].replace(" ", "")
+            res_text_normalized = res["text"].replace(" ", "")
             if res_text_normalized == target_text_normalized:
                 exact_matches.append(res)
-                if res['confidence'] > highest_confidence:
-                    highest_confidence = res['confidence']
+                if res["confidence"] > highest_confidence:
+                    highest_confidence = res["confidence"]
                 self.logger.debug(
                     f"精确匹配文本: '{res['text']}' | 置信度: {res['confidence']:.4f} | "
                     f"达标({min_confidence}): {'是' if res['confidence'] >= min_confidence else '否'} | "
                     f"物理坐标: {res['bbox_orig_phys']}"
                 )
-        
+
         # 9. 匹配结果处理
         match_info = ""
         if exact_matches:
             # 按置信度排序取最高
-            exact_matches.sort(key=lambda x: x['confidence'], reverse=True)
+            exact_matches.sort(key=lambda x: x["confidence"], reverse=True)
             best_match = exact_matches[0]
-            best_match_phys = best_match['bbox_orig_phys']
-            highest_confidence = best_match['confidence']
-            
+            best_match_phys = best_match["bbox_orig_phys"]
+            highest_confidence = best_match["confidence"]
+
             # 置信度判定
             if highest_confidence >= min_confidence:
                 match_info = f"置信度达标({highest_confidence:.4f} ≥ {min_confidence})"
@@ -300,7 +303,7 @@ class OCRProcessor:
                 f"未找到目标文本: '{target_text_clean}' | 识别结果: {all_recognized} | "
                 f"阈值: {min_confidence} | 子图尺寸: {cropped_image.shape[1]}x{cropped_image.shape[0]}"
             )
-            
+
             # 测试模式保存失败调试图
             if self.test_mode:
                 self.debug_saver.save_ocr_debug(
@@ -313,10 +316,10 @@ class OCRProcessor:
                     ocr_results=formatted_results,
                     target_bbox_phys=None,
                     orig_region_phys=orig_region_phys,
-                    region_offset_phys=region_offset_phys
+                    region_offset_phys=region_offset_phys,
                 )
             return None
-        
+
         # 10. 测试模式保存成功调试图
         if self.test_mode:
             self.debug_saver.save_ocr_debug(
@@ -329,9 +332,9 @@ class OCRProcessor:
                 ocr_results=formatted_results,
                 target_bbox_phys=best_match_phys,
                 orig_region_phys=orig_region_phys,
-                region_offset_phys=region_offset_phys
+                region_offset_phys=region_offset_phys,
             )
-        
+
         # 11. 最终坐标处理（物理→逻辑转换+边界限制）
         if best_match_phys:
             # 物理坐标→统一逻辑坐标
@@ -340,15 +343,13 @@ class OCRProcessor:
             final_bbox_log = self.coord_transformer.limit_rect_to_boundary(
                 rect=final_bbox_log,
                 boundary_width=self.display_context.client_logical_width,
-                boundary_height=self.display_context.client_logical_height
+                boundary_height=self.display_context.client_logical_height,
             )
             # 物理坐标边界限制
             final_bbox_phys = self.coord_transformer.limit_rect_to_boundary(
-                rect=best_match_phys,
-                boundary_width=img_w,
-                boundary_height=img_h
+                rect=best_match_phys, boundary_width=img_w, boundary_height=img_h
             )
-            
+
             self.logger.info(
                 f"找到目标文本 | 文本: '{target_text_clean}' | {match_info} | "
                 f"逻辑坐标: {final_bbox_log} | 物理坐标: {final_bbox_phys} | "

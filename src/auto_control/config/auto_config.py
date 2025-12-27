@@ -1,6 +1,6 @@
 """自动化框架全局配置"""
-from src.core.path_manager import config
 
+from src.core.path_manager import config
 
 # OCR与设备相关
 DEFAULT_OCR_ENGINE = config.get("framework.default_ocr_engine", "easyocr")  # 默认值兜底
@@ -17,4 +17,4 @@ DEFAULT_KEY_DURATION = config.get("framework.default_key_duration", 0.1)
 
 # 分辨率与路径相关
 DEFAULT_BASE_RESOLUTION = config.get("framework.default_base_resolution", (1920, 1080))
-TEMPLATE_EXTENSIONS = tuple(config.get("framework.template_extensions", ('.png', '.jpg', '.jpeg', '.bmp')))
+TEMPLATE_EXTENSIONS = tuple(config.get("framework.template_extensions", (".png", ".jpg", ".jpeg", ".bmp")))

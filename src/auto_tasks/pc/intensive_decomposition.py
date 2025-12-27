@@ -69,7 +69,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if auto.text_click("一键分解",roi=(1645,986,125,35)):
                         logger.info("执行一键分解")
                         auto.sleep(2)
-                        if auto.click((785, 200),is_base_coord=True):  # 选择装备位置
+                        if auto.click((785, 200),coord_type="BASE"):  # 选择装备位置
                             auto.sleep(1)
                     if pos := auto.check_element_exist("intensive_decomposition/确认",roi=(1748,973,65,62)):
                         auto.click(pos)
@@ -135,7 +135,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
                 
                 if state == "confirm":
-                    if auto.click((785, 200),is_base_coord=True):  # 选择装备位置
+                    if auto.click((785, 200),coord_type="BASE"):  # 选择装备位置
                         logger.info("选择装备")
                         auto.sleep(1)
                         if auto.text_click("精炼",click_time=3):

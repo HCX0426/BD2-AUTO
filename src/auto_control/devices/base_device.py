@@ -1,19 +1,19 @@
 from abc import ABC, abstractmethod
 from enum import Enum, auto
-from typing import Optional, Tuple, Callable, Union, List
-from threading import Lock
 from functools import wraps
-from typing import Callable, Any
+from threading import Lock
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 
 class DeviceState(Enum):
     """设备状态枚举，覆盖全生命周期的互斥状态"""
+
     DISCONNECTED = auto()  # 设备已断开
-    CONNECTING = auto()    # 连接中
-    CONNECTED = auto()     # 设备已连接（基础状态）
-    BUSY = auto()          # 设备忙（执行操作中）
-    IDLE = auto()          # 设备空闲（已连接且可操作）
-    ERROR = auto()         # 设备错误
+    CONNECTING = auto()  # 连接中
+    CONNECTED = auto()  # 设备已连接（基础状态）
+    BUSY = auto()  # 设备忙（执行操作中）
+    IDLE = auto()  # 设备空闲（已连接且可操作）
+    ERROR = auto()  # 设备错误
 
 
 class BaseDevice(ABC):
@@ -23,6 +23,7 @@ class BaseDevice(ABC):
     - 线程安全（状态更新加锁）
     - 状态变化回调（支持上层监听）
     """
+
     # 合法状态转换表：key为当前状态，value为允许转换到的状态列表
     _VALID_TRANSITIONS = {
         DeviceState.DISCONNECTED: [DeviceState.CONNECTING, DeviceState.ERROR],
@@ -30,7 +31,7 @@ class BaseDevice(ABC):
         DeviceState.CONNECTED: [DeviceState.IDLE, DeviceState.DISCONNECTED, DeviceState.ERROR],
         DeviceState.IDLE: [DeviceState.BUSY, DeviceState.DISCONNECTED, DeviceState.ERROR],
         DeviceState.BUSY: [DeviceState.IDLE, DeviceState.DISCONNECTED, DeviceState.ERROR],
-        DeviceState.ERROR: [DeviceState.DISCONNECTED, DeviceState.CONNECTING]
+        DeviceState.ERROR: [DeviceState.DISCONNECTED, DeviceState.CONNECTING],
     }
 
     def __init__(self, device_uri: str):
@@ -58,16 +59,16 @@ class BaseDevice(ABC):
         :return: 状态是否更新成功
         """
         with self._state_lock:  # 加锁保证原子操作
-            
+
             current_state = self.state
             if new_state == current_state:
                 return True  # 相同状态不触发转换
-            
+
             # 校验转换状态转换转换合法性
             if new_state not in self._VALID_TRANSITIONS.get(current_state, []):
                 print(f"状态转换错误: 不允许从 {current_state.name} 转换到 {new_state.name}")
                 return False
-            
+
             # 执行状态更新
             old_state = current_state
             self.state = new_state
@@ -103,6 +104,7 @@ class BaseDevice(ABC):
         """
         类方法装饰器：校验设备是否可操作，并尝试切换为BUSY状态
         """
+
         @wraps(func)
         def wrapper(self, *args, **kwargs):
             # 1. 校验设备是否可操作（CONNECTED/IDLE）
@@ -130,10 +132,9 @@ class BaseDevice(ABC):
                 error_msg = f"{func.__name__} 执行异常: {str(e)}"
                 print(error_msg)
                 self.last_error = error_msg
-                
+
                 # 根据错误类型决定是否转为ERROR状态
-                if hasattr(self, '_should_change_to_error_state') and \
-                self._should_change_to_error_state(error_msg):
+                if hasattr(self, "_should_change_to_error_state") and self._should_change_to_error_state(error_msg):
                     self._update_device_state(DeviceState.ERROR)
                 else:
                     self._update_device_state(DeviceState.IDLE)
@@ -158,13 +159,15 @@ class BaseDevice(ABC):
         pass
 
     @abstractmethod
-    def click(self, pos: Union[Tuple[int, int], str, List[str]],
-              click_time: int = 1,
-              duration: float = 0.1,
-              right_click: bool = False,
-              is_base_coord: bool = False,
-              roi: Optional[Tuple[int, int, int, int]] = None,
-              is_physical_coord: bool = False) -> bool:
+    def click(
+        self,
+        pos: Union[Tuple[int, int], str, List[str]],
+        click_time: int = 1,
+        duration: float = 0.1,
+        right_click: bool = False,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        coord_type=None,
+    ) -> bool:
         """点击指定位置或模板"""
         pass
 
@@ -179,8 +182,16 @@ class BaseDevice(ABC):
         pass
 
     @abstractmethod
-    def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, 
-              duration: float = 0.5) -> bool:
+    def swipe(
+        self,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        duration: float = 0.5,
+        steps: int = 10,
+        coord_type=None,
+    ) -> bool:
         """滑动操作"""
         pass
 
@@ -214,4 +225,3 @@ class BaseDevice(ABC):
     def get_state(self) -> DeviceState:
         """获取设备当前状态"""
         return self.state
-    
