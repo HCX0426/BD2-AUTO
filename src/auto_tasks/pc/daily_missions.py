@@ -31,34 +31,35 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
             if state == "init":
                 if back_to_main(auto):
                     if pos := auto.text_click(
-                        "任务", click=False, roi=roi_config.get_roi("daily_missions_task_button", "daily_missions")
+                        "任务", click=False, roi=roi_config.get_roi("daily_missions_text", "daily_missions")
                     ):
-                        logger.info(f"进入任务界面")
-                        auto.click(pos, click_time=2, coord_type="PHYSICAL")
+                        logger.info(f"进入任务界面, next: main_checked")
+                        auto.click(pos, click_time=2, coord_type="LOGICAL")
                         auto.sleep(2)
                         state = "main_checked"
                 continue
 
             # 领取每日任务奖励
             if state == "main_checked":
-                if not auto.text_click("每日任务", click=False):
+                if not auto.text_click("每日任务", click=False, roi=roi_config.get_roi("daily_tasks", "daily_missions")):
                     logger.info("未在任务界面，返回主界面重试")
                     state = "init"
                     continue
 
-                if pos := auto.text_click("全部获得", click=False):
+                if pos := auto.text_click("全部获得", click=False, roi=roi_config.get_roi("receive", "daily_missions")):
                     logger.info("领取每日任务奖励")
-                    auto.click(pos, click_time=2, coord_type="PHYSICAL")
+                    auto.click(pos, click_time=2, coord_type="LOGICAL")
                     auto.sleep(1)
-                    auto.click(pos, click_time=2, coord_type="PHYSICAL")
+                    auto.click(pos, click_time=2, coord_type="LOGICAL")
                     auto.sleep(1)
                     if click_back(auto):
                         logger.info("每日任务奖励领取成功")
                     else:
-                        logger.info("每日任务奖励领取失败")
+                        logger.info("无每日任务奖励")
                 else:
                     logger.warning("无奖励可以领取")
-
+                
+                logger.info("领取每日任务奖励完成, next: daily_received")
                 state = "daily_received"
                 continue
 
@@ -66,9 +67,9 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
             if state == "daily_received":
                 if click_back(auto):
                     logger.info("领取成功")
-                if auto.text_click("每周任务", click_time=2):
+                if auto.text_click("每周任务", click_time=2, roi=roi_config.get_roi("weekly_missions_text", "daily_missions")):
                     logger.info("进入每周任务界面")
-                    if auto.text_click("全部获得", click_time=2):
+                    if auto.text_click("全部获得", click_time=2, roi=roi_config.get_roi("receive", "daily_missions")):
                         logger.info("成功领取每周任务奖励")
                         auto.sleep(2)
 
@@ -76,12 +77,15 @@ def daily_missions(auto: Auto, timeout: int = 60) -> bool:
                         logger.warning("领取成功")
                     else:
                         logger.info("无奖励可领取")
-
+                    
+                    logger.info("领取每周任务奖励完成, next: weekly_received")
                     state = "weekly_received"
                 continue
 
             # 返回主界面
             if state == "weekly_received":
+                auto.key_press("esc")
+                auto.sleep(1)
                 if back_to_main(auto):
                     logger.info("成功返回主界面")
                     return True

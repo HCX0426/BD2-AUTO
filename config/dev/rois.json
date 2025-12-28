@@ -26,8 +26,10 @@
       "decompose_button": [960, 672, 177, 58]
     },
     "daily_missions": {
-      "missions": [600, 900, 170, 150],
-      "task_button": [600, 900, 170, 150]
+      "daily_tasks": [218, 120, 359, 147],
+      "daily_missions_text": [630, 994, 102, 36],
+      "receive": [1622, 984, 146, 46],
+      "weekly_missions_text": [211, 190, 171, 62]
     },
     "login": {
       "confirm_button": [795, 613, 340, 70],
