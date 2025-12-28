@@ -7,7 +7,7 @@
     "cancel_button": [850, 600, 60, 40],
     "confirm_dialog": [655, 344, 600, 700],
     "backpack": [330, 1000, 57, 43],
-    "confirm_button_pvp": [795, 613, 340, 70],
+    "confirm_button_pvp": [795, 906, 399, 137],
     "end_game_text": [806, 429, 313, 137],
     "login_confirm_button": [],
     "back_image_text": [811, 935, 327, 95],
@@ -66,6 +66,12 @@
       "repeat_battle_result": [838, 306, 264, 74],
       "close_battle_result": [1155, 278, 69, 60],
       "leave_battle": [1652, 992, 152, 38]
+    },
+    "get_restaurant": {
+      "business_management": [103, 228, 188, 249],
+      "obtain_restaurant_reward": [997, 704, 198, 71],
+      "immediate_go": [1036, 335, 232, 82],
+      "frequent_visitor": [117, 300, 112, 57]
     }
   }
 }

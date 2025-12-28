@@ -92,8 +92,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                         "get_pvp/选项完成", roi=roi_config.get_roi("option_completed", "get_pvp")
                     ):
                         logger.info("开始战斗")
-                        auto.click(pos, click_time=2, coord_type="PHYSICAL")
-                        auto.click(pos, click_time=2, coord_type="PHYSICAL")
+                        auto.click(pos, click_time=2, coord_type="LOGICAL")
+                        auto.click(pos, click_time=2, coord_type="LOGICAL")
                     continue
 
                 # 处理战斗结果
@@ -104,7 +104,7 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                         "get_pvp/X", roi=roi_config.get_roi("close_battle_result", "get_pvp")
                     ):
                         logger.info("关闭战斗结果")
-                        auto.click(pos, click_time=2, coord_type="PHYSICAL")
+                        auto.click(pos, click_time=2, coord_type="LOGICAL")
                         auto.sleep(1)
 
                 # 离开战斗

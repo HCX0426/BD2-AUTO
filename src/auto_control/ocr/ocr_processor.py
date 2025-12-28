@@ -264,14 +264,17 @@ class OCRProcessor:
                 }
             )
 
-        # 8. 精确匹配逻辑
+        # 8. 匹配逻辑：精确匹配 + 部分匹配
         best_match_phys = None
         highest_confidence = 0.0
         exact_matches = []
+        partial_matches = []
         target_text_normalized = target_text_clean.replace(" ", "")
 
         for res in formatted_results:
             res_text_normalized = res["text"].replace(" ", "")
+
+            # 精确匹配
             if res_text_normalized == target_text_normalized:
                 exact_matches.append(res)
                 if res["confidence"] > highest_confidence:
@@ -281,21 +284,29 @@ class OCRProcessor:
                     f"达标({min_confidence}): {'是' if res['confidence'] >= min_confidence else '否'} | "
                     f"物理坐标: {res['bbox_orig_phys']}"
                 )
+            # 部分匹配：目标文本是识别文本的子字符串
+            elif target_text_normalized in res_text_normalized:
+                partial_matches.append(res)
+                if res["confidence"] > highest_confidence:
+                    highest_confidence = res["confidence"]
+                self.logger.debug(
+                    f"部分匹配文本: '{res['text']}' | 置信度: {res['confidence']:.4f} | "
+                    f"达标({min_confidence}): {'是' if res['confidence'] >= min_confidence else '否'} | "
+                    f"物理坐标: {res['bbox_orig_phys']}"
+                )
 
         # 9. 匹配结果处理
         match_info = ""
-        if exact_matches:
-            # 按置信度排序取最高
-            exact_matches.sort(key=lambda x: x["confidence"], reverse=True)
-            best_match = exact_matches[0]
-            best_match_phys = best_match["bbox_orig_phys"]
-            highest_confidence = best_match["confidence"]
+        best_matches = []
 
-            # 置信度判定
-            if highest_confidence >= min_confidence:
-                match_info = f"置信度达标({highest_confidence:.4f} ≥ {min_confidence})"
-            else:
-                match_info = f"置信度未达标({highest_confidence:.4f} < {min_confidence})，文本一致"
+        # 优先使用精确匹配结果
+        if exact_matches:
+            best_matches = exact_matches
+            match_type = "精确匹配"
+        # 精确匹配失败时使用部分匹配结果
+        elif partial_matches:
+            best_matches = partial_matches
+            match_type = "部分匹配"
         else:
             # 未找到匹配
             all_recognized = [f"{r['text']}({r['confidence']:.2f})" for r in formatted_results]
@@ -320,13 +331,18 @@ class OCRProcessor:
                 )
             return None
 
+        # 从最佳匹配中选择置信度最高的结果
+        best_match = max(best_matches, key=lambda x: x["confidence"])
+        best_match_phys = best_match["bbox_orig_phys"]
+        match_info = f"匹配类型: {match_type} | 置信度: {best_match['confidence']:.4f}"
+
         # 10. 测试模式保存成功调试图
         if self.test_mode:
             self.debug_saver.save_ocr_debug(
                 orig_image=orig_image,
                 target_text=target_text_clean,
                 is_success=True,
-                match_score=highest_confidence,
+                match_score=best_match["confidence"],
                 min_confidence=min_confidence,
                 is_fullscreen=is_fullscreen,
                 ocr_results=formatted_results,

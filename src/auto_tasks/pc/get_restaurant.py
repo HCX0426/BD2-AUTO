@@ -2,9 +2,10 @@ import time
 
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.pc.public import back_to_main, click_back
+from src.auto_tasks.utils.roi_config import roi_config
 
 
-def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
+def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> bool:
     """餐厅领取奖励
     Args:
         auto: Auto控制对象
@@ -28,15 +29,15 @@ def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
 
             if state == "first":
                 if back_to_main(auto):
-                    if auto.template_click("get_restaurant/餐馆标识"):
-                        logger.info("点击餐馆标识")
-                        auto.sleep(1)
+                    if auto.click((163, 257), coord_type="BASIC"):
+                        logger.info("点击经营管理, next: second")
+                        auto.sleep(2)
                         state = "second"
                         continue
 
             elif state == "second":
-                if auto.text_click("结算"):
-                    logger.info("点击结算")
+                if auto.text_click("获得", roi=roi_config.get_roi("obtain_restaurant_reward", "get_restaurant")):
+                    logger.info("点击获得, next: third")
                     auto.sleep(3)
                     if click_back(auto):
                         logger.info("领取成功")
@@ -45,49 +46,53 @@ def get_restaurant(auto: Auto, timeout: int = 600) -> bool:
                     state = "third"
                     continue
                 else:
-                    logger.info("未检测到结算按钮")
+                    logger.info("未检测到一键获得按钮, next: first")
                     state = "first"  # 回到初始状态
                     continue
 
             elif state == "third":
-                if pos := auto.check_element_exist("get_restaurant/进入餐厅"):
-                    logger.info("点击进入餐厅")
-                    auto.click(pos, click_time=2)
+                if auto.text_click("立刻前往", roi=roi_config.get_roi("immediate_go", "get_restaurant")):
+                    logger.info("点击立刻前往, next: fourth")
                     auto.sleep(3)
                     state = "fourth"
                     continue
-                if pos := auto.check_element_exist("get_restaurant/餐馆标识"):
-                    logger.info("点击餐馆标识")
-                    auto.click(pos)
-                    auto.sleep(1)
 
             elif state == "fourth":
-                if pos := auto.text_click("点击画面关闭", click=False):
-                    logger.info("点击画面关闭")
-                    auto.click(pos, click_time=2)
-                    continue
+                if pos_1 := auto.text_click(
+                    "常客", click=False, roi=roi_config.get_roi("frequent_visitor", "get_restaurant")
+                ):
+                    if is_upgrade:
+                        if pos := auto.check_element_exist("get_restaurant/下一阶段"):
+                            logger.info("点击下一阶段")
+                            auto.click(pos, click_time=2)
+                            auto.sleep(1)
+                            continue
 
-                if click_back(auto):
-                    logger.info("点击返回")
+                        if pos := auto.check_element_exist("get_restaurant/升级"):
+                            logger.info("点击升级")
+                            auto.click(pos, click_time=2)
+                            auto.sleep(1)
+                            continue
+
+                    logger.info("点击常客, next: fifth")
+                    auto.click(pos_1, click_time=2, coord_type="LOGICAL")
                     auto.sleep(1)
-                    continue
-
-                if pos_1 := auto.text_click("常客", click=False):
-                    if pos := auto.check_element_exist("get_restaurant/下一阶段"):
-                        logger.info("点击下一阶段")
-                        auto.click(pos, click_time=2)
-                        auto.sleep(1)
-                        continue
-
-                    if pos := auto.check_element_exist("get_restaurant/升级"):
-                        logger.info("点击升级")
-                        auto.click(pos, click_time=2)
-                        auto.sleep(1)
-                        continue
-
-                    logger.info("点击常客")
-                    auto.click(pos_1, click_time=2)
+                    auto.key_press("h")
                     return back_to_main(auto)
+
+            if pos := auto.text_click("点击画面关闭", click=False):
+                logger.info("点击画面关闭")
+                auto.click(pos, click_time=2)
+                continue
+
+            if click_back(auto):
+                logger.info("点击返回")
+                auto.sleep(1)
+                continue
+
+            if auto.text_click("立刻前往", roi=roi_config.get_roi("immediate_go", "get_restaurant")):
+                logger.info("点击立刻前往")
+                auto.sleep(3)
 
             auto.sleep(0.5)
 
