@@ -77,7 +77,7 @@ def get_email(auto: Auto, timeout: int = 300) -> bool:
                     return True
 
                 logger.warning("返回主界面失败，next: completed")
-                state = "completed"  # 如果返回失败，重新开始流程
+                state = "completed"
                 continue
 
             auto.sleep(0.5)

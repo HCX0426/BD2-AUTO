@@ -121,22 +121,26 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
             # 返回主界面
             if state == "battle_completed":
                 # 处理可能未点击到离开战斗的情况
-                if pos := auto.text_click("离开", click=False, roi=roi_config.get_roi("leave_battle", "get_pvp")):
+                if auto.text_click("离开", click=False, roi=roi_config.get_roi("leave_battle", "get_pvp")):
                     logger.info("未离开战斗界面, next: battle_prepared")
                     state = "battle_prepared"
                     continue
-                # 处理可能的确认弹窗
-                if pos := auto.text_click("确认", click=False, roi=roi_config.get_roi("confirm_button_pvp")):
-                    logger.info("点击确认弹窗（战斗结束）")
-                    auto.click(pos)
+                else:
+                    # 处理可能的确认弹窗
+                    if pos := auto.text_click("确认", click=False, roi=roi_config.get_roi("confirm_button_pvp")):
+                        logger.info("点击确认弹窗（战斗结束）")
+                        auto.click(pos)
+                        auto.sleep(2)
+
+                    auto.key_press("h")
                     auto.sleep(2)
 
-                if back_to_main(auto):
-                    logger.info("成功返回主界面")
-                    return True
+                    if back_to_main(auto):
+                        logger.info("成功返回主界面")
+                        return True
 
                 logger.warning("返回主界面失败，next: battle_completed")
-                state = "battle_completed"  # 如果返回失败，重新开始流程
+                state = "battle_completed"
                 continue
 
             auto.sleep(0.5)

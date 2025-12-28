@@ -30,11 +30,10 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
                 logger.debug("已在主界面")
                 return True
 
-            # 尝试通过多种方式返回
-            if _handle_return_identifiers(auto):
+            if _handle_confirmation_dialogs(auto):
                 continue
 
-            if _handle_confirmation_dialogs(auto):
+            if _handle_return_identifiers(auto):
                 continue
 
             # 检查返回是否成功
@@ -43,6 +42,9 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
 
             # 备用返回方式
             auto.template_click(["public/返回键1", "public/返回键2"], roi=roi_config.get_roi("back_button"))
+
+            if auto.check_element_exist("public/主界面", roi=roi_config.get_roi("main_menu")):
+                return True
 
             end_game_pos = auto.text_click("结束游戏", click=False, roi=roi_config.get_roi("end_game_text"))
             if end_game_pos:
@@ -172,7 +174,7 @@ def enter_map_select(auto: Auto, swipe_duration: int = 6, is_swipe: bool = True)
             return False
 
         auto.sleep(2)
-    
+
         if auto.text_click("游戏卡珍藏集", click=False, roi=roi_config.get_roi("game_collection_text")):
             if is_swipe:
                 logger.debug("执行滑动操作")

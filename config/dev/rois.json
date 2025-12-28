@@ -10,7 +10,7 @@
     "confirm_button_pvp": [795, 613, 340, 70],
     "end_game_text": [806, 429, 313, 137],
     "login_confirm_button": [],
-    "back_image_text": [810, 972, 352, 142],
+    "back_image_text": [811, 935, 327, 95],
     "game_collection_text": [209, 19, 307, 69]
     },
   "tasks": {
@@ -54,7 +54,7 @@
       "email_box": [1564, 28, 95, 61],
       "regular_email": [214, 121, 333, 165],
       "empty_email": [1000, 420, 389, 207],
-      "claim_all": [1590, 917, 209, 59]
+      "claim_all": [1573, 969, 252, 61]
     },
     "get_pvp": {
       "pvp_map": [52, 517, 364, 370],
