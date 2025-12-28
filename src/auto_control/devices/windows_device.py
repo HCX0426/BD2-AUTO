@@ -1117,10 +1117,7 @@ class WindowsDevice(BaseDevice):
                 if match_result is not None:
                     # 解析匹配结果
                     match_rect = self.coord_transformer._convert_numpy_to_tuple(match_result)
-                    is_valid, err_msg = self.coord_transformer.validate_roi_format(match_rect)
-                    if not is_valid:
-                        self.logger.warning(f"模板匹配结果无效: {err_msg} | 模板: {template}")
-                        continue
+                    
                     # 计算中心点
                     center_pos = self.coord_transformer.get_rect_center(match_rect)
                     center_pos = tuple(map(int, center_pos))

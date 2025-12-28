@@ -1,9 +1,10 @@
-from typing import Tuple, Optional, Union, List
-import win32gui
-import win32con
-import win32api
-import numpy as np
 import time
+from typing import List, Optional, Tuple, Union
+
+import numpy as np
+import win32api
+import win32con
+import win32gui
 
 from src.auto_control.utils.display_context import RuntimeDisplayContext
 
@@ -17,6 +18,7 @@ class CoordinateTransformer:
     3. 辅助工具：矩形中心计算、模板缩放比计算、子图坐标偏移修正
     依赖：强依赖RuntimeDisplayContext的实时显示参数，感知窗口/屏幕状态变化
     """
+
     # 常量定义（核心参数，标注用途与取值依据）
     FULLSCREEN_ERROR_TOLERANCE: int = 5
     """全屏判定误差容忍度（像素）：兼容系统边框误差，差值小于该值判定为全屏"""
@@ -28,7 +30,7 @@ class CoordinateTransformer:
     def __init__(self, display_context: RuntimeDisplayContext, logger):
         """
         初始化坐标转换器
-        
+
         Args:
             display_context: 显示上下文容器（存储窗口/屏幕参数，实时更新）
             logger: 日志实例（输出转换过程、错误信息）
@@ -38,7 +40,7 @@ class CoordinateTransformer:
         # 全屏状态缓存初始化
         self._fullscreen_cache: Optional[bool] = None
         self._fullscreen_cache_time: float = 0.0
-        
+
         self.logger.info(
             f"坐标转换器初始化完成 | 原始基准分辨率: {display_context.original_base_res} | "
             f"全屏缓存时长: {self.FULLSCREEN_CACHE_DURATION * 1000}ms"
@@ -53,7 +55,9 @@ class CoordinateTransformer:
         """限制坐标在指定边界内 [0, boundary-1]"""
         return max(0, min(x, boundary_w - 1)), max(0, min(y, boundary_h - 1))
 
-    def _ensure_rect_in_boundary(self, rect: Tuple[int, int, int, int], boundary_w: int, boundary_h: int) -> Tuple[int, int, int, int]:
+    def _ensure_rect_in_boundary(
+        self, rect: Tuple[int, int, int, int], boundary_w: int, boundary_h: int
+    ) -> Tuple[int, int, int, int]:
         """限制矩形完全在指定边界内，保证尺寸≥1"""
         x, y, w, h = rect
         x, y = self._ensure_coords_in_boundary(x, y, boundary_w, boundary_h)
@@ -82,17 +86,17 @@ class CoordinateTransformer:
     def _check_fullscreen(self) -> bool:
         """
         精确判定窗口全屏状态，500ms内复用缓存结果
-        
+
         Returns:
             bool: True=全屏，False=窗口/判定失败
         """
         # 缓存有效性检查
         current_time = time.time()
         cache_valid = (
-            self._fullscreen_cache is not None 
+            self._fullscreen_cache is not None
             and (current_time - self._fullscreen_cache_time) < self.FULLSCREEN_CACHE_DURATION
         )
-        
+
         if cache_valid:
             self.logger.debug(
                 f"全屏判定：使用缓存 | 缓存时长: {(current_time - self._fullscreen_cache_time)*1000:.1f}ms | "
@@ -115,7 +119,7 @@ class CoordinateTransformer:
             win_height = win_bottom - win_top
             screen_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
             screen_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
-            
+
             # 区分最大化与真全屏
             window_style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
             is_maximized = (window_style & win32con.WS_MAXIMIZE) != 0
@@ -126,8 +130,7 @@ class CoordinateTransformer:
                 and abs(win_height - screen_height) < self.FULLSCREEN_ERROR_TOLERANCE
             )
             position_match = (
-                abs(win_left) < self.FULLSCREEN_ERROR_TOLERANCE
-                and abs(win_top) < self.FULLSCREEN_ERROR_TOLERANCE
+                abs(win_left) < self.FULLSCREEN_ERROR_TOLERANCE and abs(win_top) < self.FULLSCREEN_ERROR_TOLERANCE
             )
             fullscreen = size_match and position_match
 
@@ -150,7 +153,7 @@ class CoordinateTransformer:
     def refresh_fullscreen_cache(self) -> bool:
         """
         手动刷新全屏状态缓存（立即执行实际判定）
-        
+
         Args:
             无
         Returns:
@@ -171,7 +174,7 @@ class CoordinateTransformer:
                 win_height = win_bottom - win_top
                 screen_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
                 screen_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
-                
+
                 window_style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
                 is_maximized = (window_style & win32con.WS_MAXIMIZE) != 0
 
@@ -180,8 +183,7 @@ class CoordinateTransformer:
                     and abs(win_height - screen_height) < self.FULLSCREEN_ERROR_TOLERANCE
                 )
                 position_match = (
-                    abs(win_left) < self.FULLSCREEN_ERROR_TOLERANCE
-                    and abs(win_top) < self.FULLSCREEN_ERROR_TOLERANCE
+                    abs(win_left) < self.FULLSCREEN_ERROR_TOLERANCE and abs(win_top) < self.FULLSCREEN_ERROR_TOLERANCE
                 )
                 fullscreen = size_match and position_match
             except Exception as e:
@@ -197,7 +199,7 @@ class CoordinateTransformer:
     def convert_original_to_current_client(self, x: int, y: int) -> Tuple[int, int]:
         """
         原始基准坐标 → 客户区逻辑坐标（按轴对齐缩放，适配窗口大小）
-        
+
         Args:
             x: 原始基准X坐标（基于original_base_res）
             y: 原始基准Y坐标（基于original_base_res）
@@ -206,6 +208,17 @@ class CoordinateTransformer:
         """
         ctx = self._display_context
         orig_w, orig_h = ctx.original_base_res
+
+        # 全屏模式：直接使用原始基准坐标作为逻辑坐标（因为全屏时逻辑=物理=屏幕分辨率）
+        if self.is_fullscreen:
+            screen_w, screen_h = ctx.screen_physical_res
+            # 仅进行边界限制，不进行缩放
+            final_x, final_y = self._ensure_coords_in_boundary(x, y, screen_w, screen_h)
+            self.logger.debug(
+                f"坐标转换：原始→逻辑（全屏模式） | 输入: ({x},{y}) → 输出: ({final_x},{final_y}) | 直接映射"
+            )
+            return (final_x, final_y)
+
         curr_logical_w, curr_logical_h = ctx.client_logical_res
 
         # 无效参数保护
@@ -232,7 +245,7 @@ class CoordinateTransformer:
     def convert_client_logical_to_physical(self, x: int, y: int) -> Tuple[int, int]:
         """
         客户区逻辑坐标 → 客户区物理坐标（适配DPI缩放，全屏模式跳过缩放）
-        
+
         Args:
             x: 客户区逻辑X坐标
             y: 客户区逻辑Y坐标
@@ -244,11 +257,9 @@ class CoordinateTransformer:
             ctx = self._display_context
             phys_w, phys_h = ctx.screen_physical_res  # 全屏用屏幕物理尺寸
             x, y = self._ensure_coords_in_boundary(x, y, phys_w, phys_h)
-            self.logger.debug(
-                f"坐标转换：逻辑→物理（全屏模式） | 输入: ({x},{y}) → 输出: ({x},{y}) | 转换比: 1.00"
-            )
+            self.logger.debug(f"坐标转换：逻辑→物理（全屏模式） | 输入: ({x},{y}) → 输出: ({x},{y}) | 转换比: 1.00")
             return (x, y)
-        
+
         # 窗口模式：正常执行DPI缩放
         ctx = self._display_context
         ratio = ctx.logical_to_physical_ratio
@@ -259,15 +270,13 @@ class CoordinateTransformer:
         phys_y = int(round(y * ratio))
         phys_x, phys_y = self._ensure_coords_in_boundary(phys_x, phys_y, phys_w, phys_h)
 
-        self.logger.debug(
-            f"坐标转换：逻辑→物理 | 输入: ({x},{y}) → 输出: ({phys_x},{phys_y}) | 转换比: {ratio:.2f}"
-        )
+        self.logger.debug(f"坐标转换：逻辑→物理 | 输入: ({x},{y}) → 输出: ({phys_x},{phys_y}) | 转换比: {ratio:.2f}")
         return (phys_x, phys_y)
 
     def convert_client_physical_to_logical(self, x: int, y: int) -> Tuple[int, int]:
         """
         客户区物理坐标 → 客户区逻辑坐标（逆DPI缩放）
-        
+
         Args:
             x: 客户区物理X坐标
             y: 客户区物理Y坐标
@@ -297,7 +306,7 @@ class CoordinateTransformer:
     def convert_client_logical_to_screen_physical(self, x: int, y: int) -> Tuple[int, int]:
         """
         客户区逻辑坐标 → 屏幕全局物理坐标（窗口内→全局映射，全屏模式直接返回）
-        
+
         Args:
             x: 客户区逻辑X坐标
             y: 客户区逻辑Y坐标
@@ -312,14 +321,12 @@ class CoordinateTransformer:
 
         # 逻辑→客户区物理（全屏模式已跳过DPI缩放）
         phys_x, phys_y = self.convert_client_logical_to_physical(x, y)
-        
+
         # 全屏模式：客户区物理坐标 = 屏幕全局坐标，无需ClientToScreen转换
         if self.is_fullscreen:
-            self.logger.debug(
-                f"坐标转换：逻辑→屏幕物理（全屏模式） | 逻辑: ({x},{y}) → 全局: ({phys_x},{phys_y})"
-            )
+            self.logger.debug(f"坐标转换：逻辑→屏幕物理（全屏模式） | 逻辑: ({x},{y}) → 全局: ({phys_x},{phys_y})")
             return (phys_x, phys_y)
-        
+
         # 窗口模式：执行客户区→屏幕全局映射
         try:
             screen_x, screen_y = win32gui.ClientToScreen(hwnd, (phys_x, phys_y))
@@ -334,7 +341,7 @@ class CoordinateTransformer:
     def convert_client_physical_to_screen_physical(self, x: int, y: int) -> Tuple[int, int]:
         """
         客户区物理坐标 → 屏幕全局物理坐标（直接映射）
-        
+
         Args:
             x: 客户区物理X坐标
             y: 客户区物理Y坐标
@@ -346,12 +353,10 @@ class CoordinateTransformer:
         if not hwnd:
             self.logger.error("坐标转换失败：未设置窗口句柄")
             return (x, y)
-        
+
         try:
             screen_x, screen_y = win32gui.ClientToScreen(hwnd, (x, y))
-            self.logger.debug(
-                f"坐标转换：物理→屏幕物理 | 输入: ({x},{y}) → 输出: ({screen_x},{screen_y})"
-            )
+            self.logger.debug(f"坐标转换：物理→屏幕物理 | 输入: ({x},{y}) → 输出: ({screen_x},{screen_y})")
             return (screen_x, screen_y)
         except Exception as e:
             self.logger.error(f"坐标转换异常：客户区→屏幕映射失败 {str(e)}")
@@ -361,7 +366,7 @@ class CoordinateTransformer:
     def convert_original_rect_to_current_client(self, rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """
         原始基准矩形 → 客户区逻辑矩形（轴对齐缩放，避免变形）
-        
+
         Args:
             rect: 原始基准矩形 (x, y, w, h)（基于original_base_res）
         Returns:
@@ -407,7 +412,7 @@ class CoordinateTransformer:
     def convert_client_physical_rect_to_logical(self, rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """
         客户区物理矩形 → 客户区逻辑矩形（逆DPI缩放）
-        
+
         Args:
             rect: 客户区物理矩形 (x, y, w, h)
         Returns:
@@ -434,13 +439,11 @@ class CoordinateTransformer:
         return (new_x, new_y, new_w, new_h)
 
     def convert_client_logical_rect_to_screen_physical(
-        self,
-        rect: Union[Tuple[int, int, int, int], List[int]],
-        is_base_coord: bool = False
+        self, rect: Union[Tuple[int, int, int, int], List[int]], is_base_coord: bool = False
     ) -> Union[Tuple[int, int, int, int], Tuple[()]]:
         """
         客户区逻辑矩形（或基准矩形）→ 屏幕全局物理矩形
-        
+
         Args:
             rect: 输入矩形 (x, y, w, h)
             is_base_coord: 是否为原始基准坐标（默认False）
@@ -484,12 +487,11 @@ class CoordinateTransformer:
         return screen_rect
 
     def convert_client_physical_rect_to_screen_physical(
-        self,
-        rect: Union[Tuple[int, int, int, int], List[int]]
+        self, rect: Union[Tuple[int, int, int, int], List[int]]
     ) -> Union[Tuple[int, int, int, int], Tuple[()]]:
         """
         客户区物理矩形 → 屏幕全局物理矩形（坐标映射，宽高不变）
-        
+
         Args:
             rect: 客户区物理矩形 (x, y, w, h)
         Returns:
@@ -500,67 +502,72 @@ class CoordinateTransformer:
         if not is_valid:
             self.logger.error(f"矩形转换失败：{err_msg}")
             return ()
-        
+
         x, y, w, h = rect
         # 坐标转换
         screen_x, screen_y = self.convert_client_physical_to_screen_physical(x, y)
         screen_rect = (screen_x, screen_y, w, h)
 
-        self.logger.debug(
-            f"矩形转换：物理→屏幕物理 | 输入: {rect} → 输出: {screen_rect}"
-        )
+        self.logger.debug(f"矩形转换：物理→屏幕物理 | 输入: {rect} → 输出: {screen_rect}")
         return screen_rect
 
     # ------------------------------ ROI专项处理（通用逻辑）------------------------------
-    def validate_roi_format(self, roi: Union[Tuple[int, int, int, int], List[int], np.ndarray]) -> Tuple[bool, Optional[str]]:
+    def validate_roi_format(
+        self, roi: Union[Tuple[int, int, int, int], List[int], np.ndarray]
+    ) -> Tuple[bool, Optional[str]]:
         """
         通用ROI格式校验
-        
+
         Args:
             roi: 待校验ROI (x, y, w, h)
         Returns:
             Tuple[bool, Optional[str]]: (校验结果, 错误信息/None)
         """
         roi = self._convert_numpy_to_tuple(roi)
-        
+
         # 格式长度校验
         if not isinstance(roi, (tuple, list)) or len(roi) != 4:
             return False, f"格式错误（需4元组/列表）→ 类型: {type(roi)}, 内容: {roi}"
-        
+
         # 数值有效性校验
         x, y, w, h = roi
         if x < 0 or y < 0 or w <= 0 or h <= 0:
             return False, f"参数错误（x/y≥0，w/h>0）→ {roi}"
-        
+
         return True, None
 
     def process_roi(
         self,
-        roi: Union[Tuple[int, int, int, int], List[int], np.ndarray],
+        roi: Optional[Union[Tuple[int, int, int, int], List[int], np.ndarray]],
         boundary_width: int,
         boundary_height: int,
         enable_expand: bool = False,
-        expand_pixel: Optional[int] = None
+        expand_pixel: Optional[int] = None,
     ) -> Tuple[Optional[Tuple[int, int, int, int]], Tuple[int, int]]:
         """
         通用ROI全流程处理（格式校验→模式适配→边界限制→安全扩展）
-        
+
         Args:
-            roi: 输入ROI (x, y, w, h)（基于原始基准分辨率）
+            roi: 输入ROI (x, y, w, h)（基于原始基准分辨率），None表示全图
             boundary_width: ROI边界宽度（物理像素）
             boundary_height: ROI边界高度（物理像素）
             enable_expand: 是否启用安全扩展（OCR专用）
             expand_pixel: 扩展像素数（默认使用DEFAULT_ROI_EXPAND_PIXEL）
         Returns:
-            Tuple[Optional[Tuple[int, int, int, int]], Tuple[int, int]]: 
+            Tuple[Optional[Tuple[int, int, int, int]], Tuple[int, int]]:
                 (处理后的物理ROI/None, ROI在边界内的物理偏移量)
         """
+        # 检查ROI是否为None
+        if roi is None:
+            self.logger.debug("ROI为None，使用全图处理")
+            return None, (0, 0)
+
         # 格式校验
         is_valid, err_msg = self.validate_roi_format(roi)
         if not is_valid:
             self.logger.warning(f"ROI处理失败：{err_msg}")
             return None, (0, 0)
-        
+
         x, y, w, h = roi
         is_fullscreen = self.is_fullscreen
         ctx = self._display_context
@@ -596,7 +603,7 @@ class CoordinateTransformer:
             ry_phys = max(0, ry_phys)
             rw_phys = min(rw_phys, boundary_width - rx_phys)
             rh_phys = min(rh_phys, boundary_height - ry_phys)
-            
+
             if rw_phys <= 0 or rh_phys <= 0:
                 raise ValueError(f"物理ROI尺寸无效 → ({rx_phys},{ry_phys},{rw_phys},{rh_phys})")
 
@@ -607,7 +614,7 @@ class CoordinateTransformer:
                 new_ry = max(0, ry_phys - expand_pixel)
                 new_rw = min(boundary_width - new_rx, rw_phys + 2 * expand_pixel)
                 new_rh = min(boundary_height - new_ry, rh_phys + 2 * expand_pixel)
-                
+
                 # 极端情况回退
                 if new_rw <= 0 or new_rh <= 0:
                     new_rx, new_ry, new_rw, new_rh = rx_phys, ry_phys, rw_phys, rh_phys
@@ -617,7 +624,7 @@ class CoordinateTransformer:
                         f"ROI扩展：原始: ({rx_phys},{ry_phys},{rw_phys},{rh_phys}) → "
                         f"扩展后: ({new_rx},{new_ry},{new_rw},{new_rh}) | 扩展像素: {expand_pixel}"
                     )
-                
+
                 processed_roi_phys = (new_rx, new_ry, new_rw, new_rh)
                 roi_offset_phys = (new_rx, new_ry)
             else:
@@ -634,7 +641,7 @@ class CoordinateTransformer:
     def get_rect_center(self, rect: Union[Tuple[int, int, int, int], List[int], np.ndarray]) -> Tuple[int, int]:
         """
         计算矩形中心坐标（支持多格式输入）
-        
+
         Args:
             rect: 输入矩形 (x, y, w, h)
         Returns:
@@ -646,7 +653,7 @@ class CoordinateTransformer:
         if not is_valid:
             self.logger.warning(f"矩形中心计算失败：{err_msg}")
             return (0, 0)
-        
+
         try:
             x, y, w, h = map(int, rect)
             center_x = x + w // 2
@@ -658,14 +665,11 @@ class CoordinateTransformer:
             return (0, 0)
 
     def limit_rect_to_boundary(
-        self,
-        rect: Tuple[int, int, int, int],
-        boundary_width: int,
-        boundary_height: int
+        self, rect: Tuple[int, int, int, int], boundary_width: int, boundary_height: int
     ) -> Tuple[int, int, int, int]:
         """
         限制矩形在指定边界内
-        
+
         Args:
             rect: 输入矩形 (x, y, w, h)
             boundary_width: 边界宽度
@@ -676,12 +680,11 @@ class CoordinateTransformer:
         return self._ensure_rect_in_boundary(rect, boundary_width, boundary_height)
 
     def get_unified_logical_rect(
-        self,
-        phys_rect: Union[Tuple[int, int, int, int], List[int]]
+        self, phys_rect: Union[Tuple[int, int, int, int], List[int]]
     ) -> Union[Tuple[int, int, int, int], Tuple[()]]:
         """
         统一将物理矩形转为逻辑矩形（自动适配全屏/窗口模式）
-        
+
         Args:
             phys_rect: 输入物理矩形 (x, y, w, h)
         Returns:
@@ -692,7 +695,7 @@ class CoordinateTransformer:
         if not is_valid:
             self.logger.error(f"逻辑矩形转换失败：{err_msg}")
             return ()
-        
+
         if not self.is_fullscreen:
             # 窗口：物理→逻辑
             return self.convert_client_physical_rect_to_logical(phys_rect)
@@ -700,20 +703,18 @@ class CoordinateTransformer:
             # 全屏：物理=逻辑，仅限制边界
             screen_w, screen_h = self._display_context.screen_physical_res
             limited_rect = self._ensure_rect_in_boundary(phys_rect, screen_w, screen_h)
-            self.logger.debug(
-                f"逻辑矩形转换：全屏模式 → 物理矩形: {phys_rect} → 限制后: {limited_rect}"
-            )
+            self.logger.debug(f"逻辑矩形转换：全屏模式 → 物理矩形: {phys_rect} → 限制后: {limited_rect}")
             return limited_rect
 
     # ------------------------------ 专用工具（OCR/图像匹配）------------------------------
     def apply_roi_offset_to_subcoord(
         self,
         sub_coord: Union[Tuple[int, int], Tuple[int, int, int, int], List[int], np.ndarray],
-        roi_offset_phys: Tuple[int, int]
+        roi_offset_phys: Tuple[int, int],
     ) -> Union[Tuple[int, int], Tuple[int, int, int, int]]:
         """
         子图内坐标 → 原图物理坐标（应用ROI偏移量）
-        
+
         Args:
             sub_coord: 子图内坐标（(x,y) 或 (x,y,w,h)）
             roi_offset_phys: ROI在原图的物理偏移量 (offset_x, offset_y)
@@ -721,12 +722,12 @@ class CoordinateTransformer:
             Union[Tuple[int, int], Tuple[int, int, int, int]]: 原图物理坐标，无效输入返回原坐标
         """
         sub_coord = self._convert_numpy_to_tuple(sub_coord)
-        
+
         # 格式校验
         if not sub_coord or len(sub_coord) not in (2, 4):
             self.logger.error(f"子图坐标修正失败：无效输入 {sub_coord}")
             return sub_coord
-        
+
         offset_x, offset_y = roi_offset_phys
         if len(sub_coord) == 2:
             # 单个坐标
@@ -734,21 +735,19 @@ class CoordinateTransformer:
         else:
             # 矩形坐标
             result = (sub_coord[0] + offset_x, sub_coord[1] + offset_y, sub_coord[2], sub_coord[3])
-        
-        self.logger.debug(
-            f"子图坐标→原图 | 子图: {sub_coord} | 偏移: {roi_offset_phys} → 原图: {result}"
-        )
+
+        self.logger.debug(f"子图坐标→原图 | 子图: {sub_coord} | 偏移: {roi_offset_phys} → 原图: {result}")
         return result
 
     def calculate_template_scale_ratio(
         self,
         target_phys_size: Tuple[int, int],
         has_roi: bool = False,
-        roi_logical_size: Optional[Tuple[int, int]] = None
+        roi_logical_size: Optional[Tuple[int, int]] = None,
     ) -> float:
         """
         计算模板图像缩放比例（避免拉伸变形）
-        
+
         Args:
             target_phys_size: 目标物理尺寸 (w, h)
             has_roi: 是否基于ROI逻辑尺寸计算
@@ -760,17 +759,17 @@ class CoordinateTransformer:
         if target_w <= 0 or target_h <= 0:
             self.logger.error(f"模板缩放比计算失败：无效目标尺寸 {target_phys_size}")
             return 1.0
-        
+
         ctx = self._display_context
         orig_base_w, orig_base_h = ctx.original_base_res
-        
+
         # ROI参数校验
         if has_roi and roi_logical_size:
             roi_log_w, roi_log_h = roi_logical_size
             if roi_log_w <= 0 or roi_log_h <= 0:
                 self.logger.warning(f"无效ROI逻辑尺寸 {roi_logical_size}，fallback到基准分辨率")
                 has_roi = False
-        
+
         # 计算缩放比
         if has_roi and roi_logical_size:
             scale_ratio_w = target_w / roi_log_w
@@ -786,16 +785,18 @@ class CoordinateTransformer:
                 f"模板缩放比：基于基准 | 目标: {target_phys_size} | 基准: {orig_base_w}x{orig_base_h} | "
                 f"宽比: {scale_ratio_w:.4f} | 高比: {scale_ratio_h:.4f}"
             )
-        
+
         # 取最小值避免拉伸，保证比例≥0.001
         scale_ratio = max(0.001, min(scale_ratio_w, scale_ratio_h))
         self.logger.debug(f"模板缩放比计算完成：{scale_ratio:.4f}")
         return scale_ratio
 
-    def calculate_scaled_template_size(self, template_size: Tuple[int, int], min_size: Tuple[int, int], crop_size: Tuple[int, int]) -> Tuple[int, int]:
+    def calculate_scaled_template_size(
+        self, template_size: Tuple[int, int], min_size: Tuple[int, int], crop_size: Tuple[int, int]
+    ) -> Tuple[int, int]:
         """
         计算模板缩放后的尺寸（确保≥最小尺寸，≤裁剪尺寸）
-        
+
         Args:
             template_size: 模板原始尺寸 (w, h)
             min_size: 最小尺寸限制 (w, h)
@@ -806,13 +807,12 @@ class CoordinateTransformer:
         template_w, template_h = template_size
         min_w, min_h = min_size
         crop_w, crop_h = crop_size
-        
+
         # 计算缩放比
         scale_ratio = self.calculate_template_scale_ratio(
-            target_phys_size=self.display_context.effective_physical_res,
-            has_roi=False
+            target_phys_size=self.display_context.effective_physical_res, has_roi=False
         )
-        
+
         # 缩放+边界限制
         scaled_w = int(round(template_w * scale_ratio))
         scaled_h = int(round(template_h * scale_ratio))
@@ -821,5 +821,5 @@ class CoordinateTransformer:
         scaled_h = max(scaled_h, min_h)
         scaled_w = min(scaled_w, crop_w - 2)
         scaled_h = min(scaled_h, crop_h - 2)
-        
+
         return scaled_w, scaled_h

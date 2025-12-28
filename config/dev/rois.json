@@ -1,14 +1,18 @@
 {
-  "global": {
+  "public": {
     "main_menu": [1720, 20, 120, 70],
-    "back_button_1": [120, 20, 100, 66],
+    "back_button": [120, 20, 100, 66],
     "dodge_indicator": [1600, 833, 170, 140],
     "map_indicator": [1740, 20, 175, 88],
     "cancel_button": [850, 600, 60, 40],
     "confirm_dialog": [655, 344, 600, 700],
     "backpack": [330, 1000, 57, 43],
-    "confirm_button": [795, 613, 340, 70]
-  },
+    "confirm_button_pvp": [795, 613, 340, 70],
+    "end_game_text": [806, 429, 313, 137],
+    "login_confirm_button": [],
+    "back_image_text": [810, 972, 352, 142],
+    "game_collection_text": [209, 19, 307, 69]
+    },
   "tasks": {
     "get_guild": {
       "guild_icon": [310, 111, 130, 100],
@@ -26,7 +30,8 @@
       "task_button": [600, 900, 170, 150]
     },
     "login": {
-      "confirm_button": [795, 613, 340, 70]
+      "confirm_button": [795, 613, 340, 70],
+      "login_start_button": [1110, 612, 579, 189]
     },
     "pass_rewards": {
       "basic_rewards": [1235, 300, 69, 37],
@@ -44,6 +49,23 @@
     },
     "lucky_draw": {
       "lucky_area": [350, 200, 120, 250]
+    },
+    "get_email": {
+      "email_box": [1564, 28, 95, 61],
+      "regular_email": [214, 121, 333, 165],
+      "empty_email": [1000, 420, 389, 207],
+      "claim_all": [1590, 917, 209, 59]
+    },
+    "get_pvp": {
+      "pvp_map": [52, 517, 364, 370],
+      "enter_arena": [533, 500, 540, 314],
+      "auto_battle": [1457, 947, 138, 83],
+      "arena_identifier": [744, 465, 97, 70],
+      "max_battle_count": [1170, 602, 138, 83],
+      "option_completed": [888, 775, 328, 80],
+      "repeat_battle_result": [838, 306, 264, 74],
+      "close_battle_result": [1155, 278, 69, 60],
+      "leave_battle": [1652, 992, 152, 38]
     }
   }
 }

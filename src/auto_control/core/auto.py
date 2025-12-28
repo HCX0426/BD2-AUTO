@@ -543,7 +543,7 @@ class Auto:
 
         screen = device.capture_screen()
         if screen is None:
-            self.last_error = "文本点击失败: 截图失败"
+            self.last_error = "文本点击: 截图失败"
             self.logger.error(self.last_error)
             self.last_result = None
             return None
@@ -554,7 +554,7 @@ class Auto:
         ocr_result = self.ocr_processor.find_text_position(image=screen, target_text=target_text, lang=lang, region=roi)
 
         if not ocr_result:
-            self.last_error = f"文本点击失败: 未识别到文本 '{target_text}'"
+            self.last_error = f"文本点击: 未识别到文本 '{target_text}'"
             self.logger.warning(self.last_error)
             self.last_result = None
             return None
@@ -664,9 +664,9 @@ class Auto:
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
         device_uri: Optional[str] = None,
         roi: Optional[Tuple[int, int, int, int]] = None,
-    ) -> bool:
+    ) -> Optional[Tuple[int, int]]:
         """
-        检查模板元素是否存在（支持多模板、ROI筛选）
+        检查模板元素是否存在并返回坐标（支持多模板、ROI筛选）
 
         Args:
             template_name: 模板名称（单个或多个模板列表）
@@ -675,20 +675,20 @@ class Auto:
             roi: 检查区域（基准ROI，格式 (x, y, width, height)，None则全屏检查）
 
         Returns:
-            bool: 元素存在返回True，不存在或失败返回False
+            找到返回元素中心点坐标（客户区逻辑坐标），未找到或失败返回None
         """
         if self.check_should_stop():
             self.logger.info("检查元素任务被中断")
-            self.last_result = False
-            return False
+            self.last_result = None
+            return None
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
         if not device or not device.is_connected:
             self.last_error = "检查元素失败: 设备未连接"
             self.logger.error(self.last_error)
-            self.last_result = False
-            return False
+            self.last_result = None
+            return None
 
         templates = [template_name] if isinstance(template_name, str) else template_name
 
@@ -704,19 +704,22 @@ class Auto:
 
         try:
             result = device.exists(templates, roi=roi)
-            self.last_result = bool(result)
+            self.last_result = result
 
             if device.last_error:
                 self.last_error = f"检查元素异常: {device.last_error}"
                 self.logger.warning(self.last_error)
 
-            self.logger.info(f"元素 {templates}{param_log} 存在: {self.last_result}")
-            return self.last_result
+            if result:
+                self.logger.info(f"找到元素 {templates}{param_log}，中心点: {result}")
+            else:
+                self.logger.info(f"未找到元素 {templates}{param_log}")
+            return result
         except Exception as e:
             self.last_error = f"检查元素异常: {str(e)}"
             self.logger.error(self.last_error, exc_info=True)
-            self.last_result = False
-            return False
+            self.last_result = None
+            return None
 
     def screenshot(
         self, save_path: str = None, delay: float = DEFAULT_SCREENSHOT_DELAY, device_uri: str = None
@@ -899,7 +902,6 @@ class Auto:
                 self.logger.warning(f"结束坐标超出客户区范围: {end_pos} | 客户区: {client_w}x{client_h}")
 
         # 转换字符串到CoordType枚举
-        from auto_control.devices.windows_device import CoordType
 
         coord_type_enum = getattr(CoordType, coord_type.upper())
 

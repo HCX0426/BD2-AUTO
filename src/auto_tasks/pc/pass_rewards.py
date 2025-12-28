@@ -1,43 +1,44 @@
 import time
+
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.pc.public import back_to_main, click_back
-from src.auto_tasks.utils.roi_config import rois
+from src.auto_tasks.utils.roi_config import roi_config
 
 
 def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
     """通行证奖励领取
-    
+
     Args:
         auto: Auto控制对象
         timeout: 超时时间(秒)
-        
+
     Returns:
         bool: 是否成功完成通行证奖励领取
     """
     logger = auto.get_task_logger("pass_rewards")
     logger.info("开始通行证奖励领取流程")
-    
+
     start_time = time.time()
     state = "init"  # 状态机: init -> entered -> collecting -> completing
-    
+
     # 奖励位置配置
-    # 从rois字典获取奖励位置
+    # 从roi_config获取奖励位置
     reward_positions = [
-        rois["pass_rewards_reward_pos_1"][:2],  # 只取(x, y)
-        rois["pass_rewards_reward_pos_2"][:2],
-        rois["pass_rewards_reward_pos_3"][:2],
-        rois["pass_rewards_reward_pos_4"][:2],
-        rois["pass_rewards_reward_pos_5"][:2],
-        rois["pass_rewards_reward_pos_6"][:2]
+        roi_config.get_roi("pass_rewards_reward_pos_1", "pass_rewards")[:2],  # 只取(x, y)
+        roi_config.get_roi("pass_rewards_reward_pos_2", "pass_rewards")[:2],
+        roi_config.get_roi("pass_rewards_reward_pos_3", "pass_rewards")[:2],
+        roi_config.get_roi("pass_rewards_reward_pos_4", "pass_rewards")[:2],
+        roi_config.get_roi("pass_rewards_reward_pos_5", "pass_rewards")[:2],
+        roi_config.get_roi("pass_rewards_reward_pos_6", "pass_rewards")[:2],
     ]
     current_reward = 0
-    
+
     try:
         while time.time() - start_time < timeout:
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
-            
+
             # 初始状态：进入通行证界面
             if state == "init":
                 if back_to_main(auto):
@@ -47,27 +48,27 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                             auto.sleep(2)
 
                             # 检测是否进入成功
-                            if auto.text_click("基础",click=False,roi=(1235,300,69,37)):
+                            if auto.text_click("基础", click=False, roi=(1235, 300, 69, 37)):
                                 logger.info("已进入通行证界面")
                                 state = "entered"
                             else:
                                 logger.error("未成功进入通行证界面")
                 continue
-                
+
             # 领取奖励状态
             if state == "entered":
                 if current_reward < len(reward_positions):
                     x, y = reward_positions[current_reward]
-                    
+
                     # 点击奖励位置
                     if auto.click((x, y), click_time=2, coord_type="BASE"):
                         auto.sleep(1.5)
                         # 点击领取按钮位置
-                        if auto.click((1590, 680),click_time=2,coord_type="BASE"):
-                            if auto.text_click("全部获得",roi=(1390,750,100,30)):
+                        if auto.click((1590, 680), click_time=2, coord_type="BASE"):
+                            if auto.text_click("全部获得", roi=(1390, 750, 100, 30)):
                                 logger.info(f"领取第{current_reward+1}个奖励")
                                 auto.sleep(3)
-                                
+
                                 if click_back(auto):
                                     logger.info("返回通行证界面")
                                     current_reward += 1
@@ -78,22 +79,22 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                 else:
                     state = "completing"
                 continue
-                
+
             # 完成状态：返回主界面
             if state == "completing":
                 if back_to_main(auto):
                     logger.info("成功返回主界面")
                     return True
-                
+
                 logger.warning("返回主界面失败，重试中...")
                 state = "init"  # 返回失败则重新开始流程
                 continue
-                
+
             auto.sleep(0.5)
 
         logger.error("通行证奖励领取超时")
         return False
-        
+
     except Exception as e:
         logger.error(f"通行证奖励领取过程中出错: {e}")
         return False

@@ -16,7 +16,7 @@ LANGUAGE_CODE_MAP = {
 }
 
 # 各引擎的默认语言组合（使用标准化代码）
-ENGINE_DEFAULT_LANGUAGES = {"easyocr": ["ch_sim"]}
+ENGINE_DEFAULT_LANGUAGES = {"easyocr": ["ch_sim+en"]}
 
 # 语言强制组合规则（针对特定引擎）
 LANGUAGE_COMBINATION_RULES = {"easyocr": {"ch_tra": ["ch_tra", "en"]}}

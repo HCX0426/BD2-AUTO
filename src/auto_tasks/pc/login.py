@@ -2,7 +2,7 @@ import time
 
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.pc.public import back_to_main, back_to_map
-from src.auto_tasks.utils.roi_config import rois
+from src.auto_tasks.utils.roi_config import roi_config
 
 
 def login(auto: Auto, timeout: int = 300) -> bool:
@@ -27,16 +27,15 @@ def login(auto: Auto, timeout: int = 300) -> bool:
                 logger.info("检测到停止信号，退出任务")
                 return True
 
-            if auto.text_click("确认", roi=rois["login_confirm_button"]):
-                logger.info("检测到确认按钮，点击")
-                auto.sleep(2)
-                continue
+            # if auto.text_click("确认", roi=roi_config.get_roi("login_confirm_button", "login")):
+            #     logger.info("检测到确认按钮，点击")
+            #     auto.sleep(2)
+            #     continue
 
             # 处理开始游戏界面
             if state == "start_screen":
-                if pos := auto.check_element_exist("login/开始游戏"):
+                if auto.template_click("login/开始游戏", roi=roi_config.get_roi("login_start_button", "login")):
                     logger.info("检测到开始游戏按钮，点击进入")
-                    auto.click(pos, click_time=3)
                     auto.sleep(3)
 
                 if back_to_main(auto):

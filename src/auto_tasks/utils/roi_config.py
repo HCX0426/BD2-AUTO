@@ -25,42 +25,44 @@ class ROIConfig:
         self.roi_settings = self._load_roi_config()
 
         # 分离全局ROI和任务特定ROI
-        self.global_rois = self.roi_settings.get("global", {})
+        self.public_rois = self.roi_settings.get("public", {})
         self.task_rois = self.roi_settings.get("tasks", {})
 
         # 构建所有ROI的字典，供任务类直接使用
         self.all_rois = self._build_all_rois_dict()
 
-    def _build_all_rois_dict(self) -> Dict[str, Tuple[int, int, int, int]]:
+    def _build_all_rois_dict(self) -> Dict[str, Any]:
         """
         构建所有ROI的字典，方便直接访问
 
-        将所有任务的ROI和全局ROI整合到一个字典中
-        格式：{roi_name: roi_tuple, task_name_roi_name: roi_tuple}
+        将所有任务的ROI和全局ROI整合到一个嵌套字典中
+        格式：{public: {roi_name: roi_tuple}, task_name: {roi_name: roi_tuple}}
 
         Returns:
-            所有ROI的字典
+            所有ROI的嵌套字典
         """
         all_rois = {}
 
         # 添加全局ROI
-        for roi_name, roi_value in self.global_rois.items():
-            all_rois[roi_name] = tuple(roi_value)
+        all_rois["public"] = {}
+        for roi_name, roi_value in self.public_rois.items():
+            all_rois["public"][roi_name] = tuple(roi_value)
 
-        # 添加任务ROI，格式为 task_name_roi_name
+        # 添加任务ROI，保持嵌套结构
         for task_name, task_rois in self.task_rois.items():
+            all_rois[task_name] = {}
             for roi_name, roi_value in task_rois.items():
-                full_roi_name = f"{task_name}_{roi_name}"
-                all_rois[full_roi_name] = tuple(roi_value)
+                all_rois[task_name][roi_name] = tuple(roi_value)
 
         return all_rois
 
-    def get_rois(self) -> Dict[str, Tuple[int, int, int, int]]:
+    def get_rois(self) -> Dict[str, Any]:
         """
         获取所有ROI配置
 
         Returns:
-            所有ROI配置的字典
+            所有ROI配置的嵌套字典
+            格式：{public: {roi_name: roi_tuple}, task_name: {roi_name: roi_tuple}}
         """
         return self.all_rois
 
@@ -75,17 +77,17 @@ class ROIConfig:
 
         if not os.path.exists(roi_config_path):
             print(f"[ROIConfig] 警告：ROI配置文件不存在 {roi_config_path}，使用默认配置")
-            return {"global": {}, "tasks": {}}
+            return {"public": {}, "tasks": {}}
 
         try:
             with open(roi_config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError:
             print(f"[ROIConfig] 错误：ROI配置文件 {roi_config_path} 格式错误，使用默认配置")
-            return {"global": {}, "tasks": {}}
+            return {"public": {}, "tasks": {}}
         except Exception as e:
             print(f"[ROIConfig] 错误：加载ROI配置文件失败 {e}，使用默认配置")
-            return {"global": {}, "tasks": {}}
+            return {"public": {}, "tasks": {}}
 
     def get_roi(
         self, roi_name: str, task_name: Optional[str] = None, default: Optional[Tuple[int, int, int, int]] = None
@@ -107,8 +109,8 @@ class ROIConfig:
                 return tuple(self.task_rois[task_name][roi_name])
 
         # 再查找全局ROI
-        if roi_name in self.global_rois:
-            return tuple[Any, ...][Any, ...](self.global_rois[roi_name])
+        if roi_name in self.public_rois:
+            return tuple(self.public_rois[roi_name])
 
         # 返回默认值
         return default
@@ -127,14 +129,14 @@ class ROIConfig:
             return {name: tuple(roi) for name, roi in self.task_rois[task_name].items()}
         return {}
 
-    def get_global_rois(self) -> Dict[str, Tuple[int, int, int, int]]:
+    def get_public_rois(self) -> Dict[str, Tuple[int, int, int, int]]:
         """
         获取所有全局ROI配置
 
         Returns:
             全局所有ROI配置的字典
         """
-        return {name: tuple(roi) for name, roi in self.global_rois.items()}
+        return {name: tuple(roi) for name, roi in self.public_rois.items()}
 
     def get_all_task_rois(self) -> Dict[str, Dict[str, Tuple[int, int, int, int]]]:
         """
@@ -151,6 +153,3 @@ class ROIConfig:
 
 # 创建全局ROI配置实例
 roi_config = ROIConfig()
-
-# 创建全局ROI字典，方便任务类直接导入使用
-rois = roi_config.get_rois()
