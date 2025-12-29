@@ -5,7 +5,7 @@ from src.auto_tasks.pc.public import back_to_main, calculate_remaining_timeout
 from src.auto_tasks.utils.roi_config import roi_config
 
 
-def get_guild(auto: Auto, timeout: int = 60) -> bool:
+def get_guild(auto: Auto, timeout: int = 300) -> bool:
     """公会奖励领取
 
     Args:

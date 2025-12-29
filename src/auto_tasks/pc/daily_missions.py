@@ -6,7 +6,7 @@ from src.auto_tasks.pc.public import (back_to_main,
 from src.auto_tasks.utils.roi_config import roi_config
 
 
-def daily_missions(auto: Auto, timeout: int = 60) -> bool:
+def daily_missions(auto: Auto, timeout: int = 300) -> bool:
     """每日任务领取
 
     Args:

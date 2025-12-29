@@ -333,6 +333,7 @@ class MainWindow(QMainWindow):
         self.task_list.itemClicked.connect(self.on_task_item_clicked)
         self.task_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.task_list.itemChanged.connect(self.on_task_state_changed)
+        self.task_list.model().rowsMoved.connect(self.on_task_order_changed)
         self.populate_task_list()
 
         # 全选/取消全选按钮
@@ -577,6 +578,11 @@ class MainWindow(QMainWindow):
 
     def on_task_state_changed(self, item):
         """当任务勾选状态变化时，自动保存状态"""
+        task_ids, task_states = self.get_current_task_order_and_states()
+        self.config_manager.save_task_order_and_states(task_ids, task_states)
+
+    def on_task_order_changed(self, parent, start, end, destination, row):
+        """当任务顺序发生变化时（拖动排序），自动保存新顺序"""
         task_ids, task_states = self.get_current_task_order_and_states()
         self.config_manager.save_task_order_and_states(task_ids, task_states)
 
