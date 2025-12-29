@@ -9,7 +9,6 @@
     "backpack": [330, 1000, 57, 43],
     "confirm_button_pvp": [795, 906, 399, 137],
     "end_game_text": [806, 429, 313, 137],
-    "login_confirm_button": [],
     "back_image_text": [811, 935, 327, 95],
     "game_collection_text": [209, 19, 307, 69]
     },
@@ -33,7 +32,8 @@
     },
     "login": {
       "confirm_button": [795, 613, 340, 70],
-      "login_start_button": [1110, 612, 579, 189]
+      "login_start_button": [1110, 612, 579, 189],
+      "login_confirm_button": [924, 589, 80, 45]
     },
     "pass_rewards": {
       "basic_rewards": [1235, 300, 69, 37],

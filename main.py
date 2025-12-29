@@ -23,17 +23,34 @@ def main():
     config_manager = TaskConfigManager()  # 任务配置管理器
     task_mapping = load_task_modules()  # 加载任务模块映射
 
-    # 3. 启动GUI，传递核心实例
-    app = QApplication(sys.argv)
-    # 将核心实例通过构造函数传递给主窗口
-    window = MainWindow(
-        auto_instance=auto_instance,
-        settings_manager=settings_manager,
-        config_manager=config_manager,
-        task_mapping=task_mapping
-    )
-    window.show()
-    sys.exit(app.exec())
+    # 3. 启动GUI，传递核心实例 - 添加异常捕获和详细调试信息
+    try:
+        print("[DEBUG] 创建QApplication实例...")
+        app = QApplication(sys.argv)
+        print("[DEBUG] QApplication实例创建成功")
+        
+        print("[DEBUG] 创建MainWindow实例...")
+        window = MainWindow(
+            auto_instance=auto_instance,
+            settings_manager=settings_manager,
+            config_manager=config_manager,
+            task_mapping=task_mapping
+        )
+        print("[DEBUG] MainWindow实例创建成功")
+        
+        print("[DEBUG] 调用window.show()...")
+        window.show()
+        print("[DEBUG] window.show()调用成功")
+        
+        print("[DEBUG] 启动事件循环...")
+        result = app.exec()
+        print(f"[DEBUG] 事件循环退出，退出码: {result}")
+        sys.exit(result)
+    except Exception as e:
+        print(f"[ERROR] GUI启动过程中发生异常: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

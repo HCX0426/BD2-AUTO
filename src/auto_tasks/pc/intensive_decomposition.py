@@ -1,7 +1,8 @@
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc.public import back_to_main, click_back
+from src.auto_tasks.pc.public import (back_to_main,
+                                      calculate_remaining_timeout, click_back)
 from src.auto_tasks.utils.roi_config import roi_config
 
 
@@ -23,7 +24,10 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
     state = "init"  # 状态机: init -> bag_opened -> filter_set -> confirm -> execute -> complete
 
     try:
-        while time.time() - start_time < timeout:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.error("任务执行超时")
+                return False
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
@@ -31,7 +35,8 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
             # 分解阶段
             if phase == "decomposition":
                 if state == "init":
-                    if back_to_main(auto):
+                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                    if back_to_main(auto, remaining_timeout):
                         if auto.text_click(
                             "背包", click_time=2, roi=roi_config.get_roi("backpack_button", "intensive_decomposition")
                         ):
@@ -88,10 +93,12 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
 
                 if state == "complete":
-                    if click_back(auto):
+                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                    if click_back(auto, remaining_timeout):
                         logger.info("返回装备界面")
                         auto.sleep(2)
-                        if back_to_main(auto):
+                        remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                        if back_to_main(auto, remaining_timeout):
                             logger.info("成功返回主界面，进入强化阶段")
                             phase = "enhancement"
                             state = "init"
@@ -100,7 +107,8 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
             # 强化阶段
             elif phase == "enhancement":
                 if state == "init":
-                    if back_to_main(auto):
+                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                    if back_to_main(auto, remaining_timeout):
                         if auto.text_click(
                             "背包", click_time=2, roi=roi_config.get_roi("backpack_button", "intensive_decomposition")
                         ):
@@ -177,15 +185,16 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     continue
 
                 if state == "complete":
-                    if back_to_main(auto):
-                        logger.info("强化完成，返回主界面")
+                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                    if back_to_main(auto, remaining_timeout):
+                        total_time = round(time.time() - start_time, 2)
+                        minutes = int(total_time // 60)
+                        seconds = round(total_time % 60, 2)
+                        logger.info(f"强化分解完成，用时：{minutes}分{seconds}秒")
                         return True
                     continue
 
             auto.sleep(0.5)
-
-        logger.error("强化分解流程超时")
-        return False
 
     except Exception as e:
         logger.error(f"强化分解过程中出错: {e}")

@@ -1,7 +1,8 @@
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc.public import back_to_main, click_back
+from src.auto_tasks.pc.public import (back_to_main,
+                                      calculate_remaining_timeout, click_back)
 
 
 def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torch: str = "火之洞穴"):
@@ -28,14 +29,18 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
     }
 
     try:
-        while time.time() - start_time < timeout:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.error("任务执行超时")
+                return False
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
 
             # 检查主界面
             if not state["main_checked"]:
-                if back_to_main(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
                     logger.info("成功返回主界面")
                     state["main_checked"] = True
                 continue
@@ -73,7 +78,8 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
                         logger.info("点击狩猎按钮")
                         auto.click(pos)
                         auto.sleep(3)
-                        if not click_back(auto):
+                        remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                        if not click_back(auto, remaining_timeout):
                             auto.text_click("取消")
                             logger.info("米饭已用完")
                         state["onigiri_completed"] = True
@@ -102,12 +108,17 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
                     logger.info("点击狩猎按钮")
                     auto.click(pos)
                     auto.sleep(3)
-                    if not click_back(auto):
+                    remaining_timeout = max(0, timeout - int(time.time() - start_time)) if timeout > 0 else 0
+                    if not click_back(auto, remaining_timeout):
                         auto.text_click("取消")
                         logger.info("火把已用完")
 
-                    if back_to_main(auto):
-                        logger.info("返回主界面")
+                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                    if back_to_main(auto, remaining_timeout):
+                        total_time = round(time.time() - start_time, 2)
+                        minutes = int(total_time // 60)
+                        seconds = round(total_time % 60, 2)
+                        logger.info(f"每日扫荡完成，用时：{minutes}分{seconds}秒")
                         return True
                     logger.info("未返回主界面")
                     return False
@@ -115,9 +126,6 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
                 state["torch_selected"] = False
 
             auto.sleep(0.5)
-
-        logger.info("扫荡完成")
-        return True
 
     except Exception as e:
         logger.error(f"扫荡过程中出错: {e}")

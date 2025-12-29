@@ -63,6 +63,16 @@ class TaskWorker(QThread):
         total_tasks = len(self.task_ids)
 
         try:
+            # 设备添加和启动操作移到后台线程执行
+            self.log_signal.emit("开始添加设备...")
+            if not self.auto_instance.add_device():
+                error_msg = f"设备添加失败: {getattr(self.auto_instance, 'last_error', '未知错误')}"
+                self.log_signal.emit(error_msg)
+                raise Exception(error_msg)
+            self.log_signal.emit("设备添加成功，正在连接设备...")
+            self.auto_instance.start()
+            self.log_signal.emit("设备连接成功，准备执行任务")
+
             for i, task_id in enumerate(self.task_ids):
                 # 检查是否需要停止（使用正确的check_should_stop方法）
                 if self.should_stop or self.auto_instance.check_should_stop():
@@ -744,12 +754,6 @@ class MainWindow(QMainWindow):
             self.set_task_running_state(True)
             self.log(f"开始执行任务，共 {len(selected_tasks)} 个任务")
 
-            if not self.auto_instance.add_device():
-                raise Exception(f"设备添加失败: {getattr(self.auto_instance, 'last_error', '未知错误')}")
-
-            self.auto_instance.start()
-            self.log("设备连接成功，准备执行任务")
-
             # 创建并启动任务线程
             self.task_worker = TaskWorker(self.auto_instance, selected_tasks, self.config_manager, self.task_mapping)
 
@@ -921,6 +925,7 @@ class MainWindow(QMainWindow):
         """设置任务运行状态"""
         self.task_running = running
         self.start_stop_btn.setText("停止任务" if running else "开始任务")
+        self.start_stop_btn.setEnabled(True)  # 确保按钮始终可用，除非在stop_task中暂时禁用
         self.task_list.setEnabled(not running)
         self.select_all_btn.setEnabled(not running)
         self.deselect_all_btn.setEnabled(not running)
@@ -982,6 +987,32 @@ class MainWindow(QMainWindow):
         """添加日志信息"""
         self.log_display.append(message)
         self.log_display.moveCursor(QTextCursor.MoveOperation.End)
+
+        # 保存到日志文件
+        try:
+            import datetime
+            import os
+
+            from src.core.path_manager import path_manager
+
+            # 使用path_manager获取gui_log路径
+            log_dir = path_manager.get("gui_log")
+            today = datetime.datetime.now().strftime("%Y-%m-%d")
+            log_file_path = os.path.join(log_dir, f"{today}.log")
+
+            # 确保目录存在
+            os.makedirs(log_dir, exist_ok=True)
+
+            # 写入日志
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_file_path, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {message}\n")
+        except Exception as e:
+            # 记录日志保存失败的信息，但不影响程序运行
+            import traceback
+
+            print(f"保存日志失败: {str(e)}")
+            traceback.print_exc()
 
     def update_log(self, message):
         """通过信号槽更新日志"""

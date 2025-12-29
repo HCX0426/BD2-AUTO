@@ -1,7 +1,8 @@
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc.public import back_to_main, click_back
+from src.auto_tasks.pc.public import (back_to_main,
+                                      calculate_remaining_timeout, click_back)
 
 
 def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") -> bool:
@@ -21,14 +22,18 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
     state = "init"  # 状态机: init -> entered -> challenge_selected -> quick_battle -> battle_confirmed -> returning
 
     try:
-        while time.time() - start_time < timeout:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.error("任务执行超时")
+                return False
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
 
             # 初始状态：进入活动界面
             if state == "init":
-                if back_to_main(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
                     if auto.click((1700, 480), click_time=2, coord_type="BASE"):
                         logger.info("进入活动关卡")
                     auto.sleep(2)
@@ -88,7 +93,8 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
 
             # 战斗确认后返回
             if state == "battle_confirmed":
-                if click_back(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if click_back(auto, remaining_timeout):
                     logger.info("从战斗界面返回")
                 auto.key_press("esc")
 
@@ -127,7 +133,8 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                     #             auto.sleep(10)
                     #             state = "back"
 
-                if click_back(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if click_back(auto, remaining_timeout):
                     logger.info("领取奖励")
                     state = "returning"
                 continue
@@ -139,8 +146,12 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
 
             # 返回主界面
             if state == "returning":
-                if back_to_main(auto):
-                    logger.info("成功返回主界面")
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
+                    total_time = round(time.time() - start_time, 2)
+                    minutes = int(total_time // 60)
+                    seconds = round(total_time % 60, 2)
+                    logger.info(f"活动关卡扫荡完成，用时：{minutes}分{seconds}秒")
                     return True
 
                 logger.warning("返回主界面失败，重试中...")
@@ -148,9 +159,6 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                 continue
 
             auto.sleep(0.5)
-
-        logger.error("活动关卡扫荡超时")
-        return False
 
     except Exception as e:
         logger.error(f"活动关卡扫荡过程中出错: {e}")

@@ -1,7 +1,9 @@
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc.public import back_to_main, click_back, enter_map_select
+from src.auto_tasks.pc.public import (back_to_main,
+                                      calculate_remaining_timeout, click_back,
+                                      enter_map_select)
 from src.auto_tasks.utils.roi_config import roi_config
 
 
@@ -22,14 +24,18 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
     state = "init"  # 状态机: init -> arena_entered -> battle_prepared -> battle_completed -> returning
 
     try:
-        while time.time() - start_time < timeout:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.error("任务执行超时")
+                return False
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
 
             # 初始状态：进入PVP地图
             if state == "init":
-                if back_to_main(auto) and enter_map_select(auto, is_swipe=False):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout) and enter_map_select(auto, remaining_timeout, is_swipe=False):
                     if auto.template_click(
                         ["get_pvp/pvp地图", "get_pvp/pvp地图2"], roi=roi_config.get_roi("pvp_map", "get_pvp")
                     ):
@@ -48,7 +54,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     logger.debug("未进入PVP地图, next: init")
                     state = "init"
                     continue
-                if click_back(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if click_back(auto, remaining_timeout):
                     logger.info("领取赛季奖励")
                     auto.sleep(2)
 
@@ -135,8 +142,12 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     auto.key_press("h")
                     auto.sleep(2)
 
-                    if back_to_main(auto):
-                        logger.info("成功返回主界面")
+                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                    if back_to_main(auto, remaining_timeout):
+                        total_time = round(time.time() - start_time, 2)
+                        minutes = int(total_time // 60)
+                        seconds = round(total_time % 60, 2)
+                        logger.info(f"PVP奖励领取完成，用时：{minutes}分{seconds}秒")
                         return True
 
                 logger.warning("返回主界面失败，next: battle_completed")
@@ -144,9 +155,6 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                 continue
 
             auto.sleep(0.5)
-
-        logger.error("PVP奖励领取超时")
-        return False
 
     except Exception as e:
         logger.error(f"PVP奖励领取过程中出错: {e}")

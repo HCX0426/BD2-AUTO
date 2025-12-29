@@ -1,7 +1,8 @@
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc.public import back_to_main, click_back
+from src.auto_tasks.pc.public import (back_to_main,
+                                      calculate_remaining_timeout, click_back)
 from src.auto_tasks.utils.roi_config import roi_config
 
 
@@ -34,14 +35,18 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
     current_reward = 0
 
     try:
-        while time.time() - start_time < timeout:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.error("任务执行超时")
+                return False
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
 
             # 初始状态：进入通行证界面
             if state == "init":
-                if back_to_main(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
                     if pos := auto.check_element_exist("pass_rewards/通行证标识"):
                         if auto.click(pos):
                             logger.info("进入通行证界面")
@@ -69,7 +74,8 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                                 logger.info(f"领取第{current_reward+1}个奖励")
                                 auto.sleep(3)
 
-                                if click_back(auto):
+                                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                                if click_back(auto, remaining_timeout):
                                     logger.info("返回通行证界面")
                                     current_reward += 1
                                 else:
@@ -82,8 +88,12 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
 
             # 完成状态：返回主界面
             if state == "completing":
-                if back_to_main(auto):
-                    logger.info("成功返回主界面")
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
+                    total_time = round(time.time() - start_time, 2)
+                    minutes = int(total_time // 60)
+                    seconds = round(total_time % 60, 2)
+                    logger.info(f"通行证奖励领取完成，用时：{minutes}分{seconds}秒")
                     return True
 
                 logger.warning("返回主界面失败，重试中...")
@@ -91,9 +101,6 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                 continue
 
             auto.sleep(0.5)
-
-        logger.error("通行证奖励领取超时")
-        return False
 
     except Exception as e:
         logger.error(f"通行证奖励领取过程中出错: {e}")

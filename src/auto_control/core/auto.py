@@ -7,17 +7,11 @@ import cv2
 import numpy as np
 
 from ...core.path_manager import config, path_manager
-from ..config import (
-    DEFAULT_BASE_RESOLUTION,
-    DEFAULT_CHECK_ELEMENT_DELAY,
-    DEFAULT_CLICK_DELAY,
-    DEFAULT_DEVICE_URI,
-    DEFAULT_KEY_DURATION,
-    DEFAULT_OCR_ENGINE,
-    DEFAULT_SCREENSHOT_DELAY,
-    DEFAULT_TASK_TIMEOUT,
-    DEFAULT_WINDOW_OPERATION_DELAY,
-)
+from ..config import (DEFAULT_BASE_RESOLUTION, DEFAULT_CHECK_ELEMENT_DELAY,
+                      DEFAULT_CLICK_DELAY, DEFAULT_DEVICE_URI,
+                      DEFAULT_KEY_DURATION, DEFAULT_OCR_ENGINE,
+                      DEFAULT_SCREENSHOT_DELAY, DEFAULT_TASK_TIMEOUT,
+                      DEFAULT_WINDOW_OPERATION_DELAY)
 from ..devices.base_device import BaseDevice
 from ..devices.device_manager import DeviceManager
 from ..devices.windows_device import CoordType
@@ -56,11 +50,17 @@ class Auto:
             device_uri: 默认设备标识URI，默认使用DEFAULT_DEVICE_URI
             original_base_res: 基准分辨率（宽, 高），默认使用DEFAULT_BASE_RESOLUTION
         """
+        # 记录总初始化开始时间
+        total_init_start = time.time()
+        
         self.test_mode = config.get("debug", False)
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
         self.running = False
+        self.start_time = None
 
+        # 初始化Logger模块
+        logger_start = time.time()
         self.logger = Logger(
             name="System",
             base_log_dir=path_manager.get("log"),
@@ -70,20 +70,30 @@ class Auto:
             is_system_logger=True,
             test_mode=self.test_mode,
         )
+        logger_time = round(time.time() - logger_start, 3)
 
+        # 初始化DisplayContext模块
+        display_start = time.time()
         self.display_context: RuntimeDisplayContext = RuntimeDisplayContext(
             original_base_width=original_base_res[0], original_base_height=original_base_res[1]
         )
+        display_time = round(time.time() - display_start, 3)
 
+        # 创建各组件日志器
         self.coord_transformer_logger = self.logger.create_component_logger("CoordinateTransformer")
         self.image_processor_logger = self.logger.create_component_logger("ImageProcessor")
         self.device_manager_logger = self.logger.create_component_logger("DeviceManager")
         self.ocr_processor_logger = self.logger.create_component_logger("OCRProcessor")
 
+        # 初始化CoordinateTransformer模块
+        coord_start = time.time()
         self.coord_transformer: CoordinateTransformer = CoordinateTransformer(
             logger=self.coord_transformer_logger, display_context=self.display_context
         )
+        coord_time = round(time.time() - coord_start, 3)
 
+        # 初始化ImageProcessor模块
+        image_start = time.time()
         self.image_processor: ImageProcessor = ImageProcessor(
             original_base_res=original_base_res,
             logger=self.image_processor_logger,
@@ -91,7 +101,10 @@ class Auto:
             display_context=self.display_context,
             test_mode=self.test_mode,
         )
+        image_time = round(time.time() - image_start, 3)
 
+        # 初始化DeviceManager模块
+        device_start = time.time()
         self.device_manager: DeviceManager = DeviceManager(
             logger=self.device_manager_logger,
             image_processor=self.image_processor,
@@ -99,7 +112,10 @@ class Auto:
             display_context=self.display_context,
             stop_event=self.stop_event,
         )
+        device_time = round(time.time() - device_start, 3)
 
+        # 初始化OCRProcessor模块
+        ocr_start = time.time()
         self.ocr_processor: OCRProcessor = OCRProcessor(
             engine=ocr_engine,
             logger=self.ocr_processor_logger,
@@ -108,12 +124,28 @@ class Auto:
             test_mode=self.test_mode,
             stop_event=self.stop_event,
         )
+        ocr_time = round(time.time() - ocr_start, 3)
 
         self.default_device_uri = device_uri
 
         self.last_result = None
         self.last_error = None
 
+        # 计算总初始化时间
+        total_init_time = round(time.time() - total_init_start, 3)
+        total_minutes = int(total_init_time // 60)
+        total_seconds = round(total_init_time % 60, 3)
+        
+        # 记录各模块初始化用时和总用时
+        self.logger.info(f"=== Auto初始化时间统计 ===")
+        self.logger.info(f"Logger模块初始化用时: {logger_time}秒")
+        self.logger.info(f"DisplayContext模块初始化用时: {display_time}秒")
+        self.logger.info(f"CoordinateTransformer模块初始化用时: {coord_time}秒")
+        self.logger.info(f"ImageProcessor模块初始化用时: {image_time}秒")
+        self.logger.info(f"DeviceManager模块初始化用时: {device_time}秒")
+        self.logger.info(f"OCRProcessor模块初始化用时: {ocr_time}秒")
+        self.logger.info(f"Auto总初始化用时: {total_minutes}分{total_seconds}秒")
+        self.logger.info("========================")
         self.logger.info("自动化系统初始化完成")
 
     def check_should_stop(self) -> bool:
@@ -285,6 +317,7 @@ class Auto:
                 return
             self.running = True
             self.should_stop = False
+            self.start_time = time.time()
 
         self.logger.info("自动化系统开始启动")
 
@@ -299,6 +332,14 @@ class Auto:
 
         success, fail = self.device_manager.disconnect_all()
         self.logger.info(f"设备断开统计: 成功{success}个, 失败{fail}个")
+
+        # 计算系统运行时长
+        if self.start_time:
+            total_time = round(time.time() - self.start_time, 2)
+            minutes = int(total_time // 60)
+            seconds = round(total_time % 60, 2)
+            self.logger.info(f"系统运行时长: {minutes}分{seconds}秒")
+            self.start_time = None
 
         self.logger.shutdown()
         self.logger.info("BD2-AUTO 自动化系统已停止")
@@ -559,14 +600,14 @@ class Auto:
             self.last_result = None
             return None
 
-        text_pos_log, text_pos_phys = ocr_result
-        x_phys, y_phys, w_phys, h_phys = text_pos_phys
-        click_center = (x_phys + w_phys // 2, y_phys + h_phys // 2)
+        text_pos_log = ocr_result
+        x_log, y_log, w_log, h_log = text_pos_log
+        click_center = (x_log + w_log // 2, y_log + h_log // 2)
 
         is_fullscreen = self.coord_transformer.is_fullscreen
         self.logger.info(
             f"识别到文本 '{target_text}' | 模式: {'全屏' if is_fullscreen else '窗口'} | "
-            f"客户区物理坐标: ({x_phys},{y_phys},{w_phys},{h_phys}) | 点击中心点: {click_center}"
+            f"客户区逻辑坐标: ({x_log},{y_log},{w_log},{h_log}) | 点击中心点: {click_center}"
         )
 
         if click:
@@ -575,7 +616,7 @@ class Auto:
                 duration=duration,
                 click_time=click_time,
                 right_click=right_click,
-                coord_type=CoordType.PHYSICAL,  # 标识点击坐标为物理坐标
+                coord_type=CoordType.LOGICAL,  # 标识点击坐标为逻辑坐标
             )
             if not click_result:
                 self.last_error = device.last_error or "文本点击执行失败"

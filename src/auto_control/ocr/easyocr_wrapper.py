@@ -41,17 +41,21 @@ class EasyOCRWrapper(BaseOCR):
         self._lang_list = self._convert_lang_param(default_langs)
         self._current_lang = "+".join(default_langs)
 
+        import datetime
+
+        start_time = datetime.datetime.now()
+
         # 创建EasyOCR Reader实例
         self.reader = easyocr.Reader(
             lang_list=self._lang_list,
-            gpu=self._use_gpu,
             model_storage_directory=self.model_storage,
-            download_enabled=True,  # 允许自动下载缺失的模型
+            gpu=self._use_gpu,
         )
 
+        init_time = (datetime.datetime.now() - start_time).total_seconds()
         self.logger.debug(
+            f"耗时: {init_time:.2f}秒 | "
             f"EasyOCR实例初始化完成 | "
-            f"默认语言: {self._current_lang} | "
             f"GPU加速: {'启用' if self._use_gpu else '禁用'} | "
             f"模型目录: {config.get('model_storage', '默认目录')}"
         )
@@ -67,19 +71,26 @@ class EasyOCRWrapper(BaseOCR):
         return converted_langs
 
     def _check_gpu_available(self) -> bool:
-        """检测GPU是否可用（依赖PyTorch）"""
+        """检测GPU是否可用（依赖PyTorch，但使用更快的检测方式）"""
+        import time
+
+        start_time = time.time()
+
         try:
             torch_spec = importlib.util.find_spec("torch")
             if torch_spec is None:
                 # 如果找不到torch模块，则没有GPU支持
+                self.logger.debug(f"GPU可用性检测 | torch模块未找到 | 耗时: {time.time()-start_time:.3f}秒")
                 return False
-
+            # 如果环境变量检查通过，再尝试导入torch
             import torch
 
             available = torch.cuda.is_available()
-            self.logger.debug(f"GPU可用性检测 | 可用: {available} | 设备数: {torch.cuda.device_count()}")
+            self.logger.debug(
+                f"GPU可用性检测 | 可用: {available} | 设备数: {torch.cuda.device_count()} | 耗时: {time.time()-start_time:.3f}秒"
+            )
             return available
-        except ImportError:
+        except Exception as e:
             self.logger.warning("未安装PyTorch，无法使用GPU加速")
             return False
 

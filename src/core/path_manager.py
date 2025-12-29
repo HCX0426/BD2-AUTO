@@ -1,23 +1,24 @@
+import json
 import os
 import sys
-import json
+
 
 class PathManager:
     def __init__(self):
         self.env = self._get_env()  # 自动判断 dev/prod
         self._init_base_paths()  # 初始化基础路径（static_base/dynamic_base）
-        self._init_all_paths()   # 初始化所有具体路径（包括 task_path）
+        self._init_all_paths()  # 初始化所有具体路径（包括 task_path）
         self._print_path_info()  # 最后打印路径信息（确保所有属性已定义）
 
     def _get_env(self) -> str:
         """自动判断环境：打包后=prod，开发环境=dev"""
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             return "prod"
         return "dev"
 
     def _init_base_paths(self):
         """初始化基础路径（static_base/dynamic_base）"""
-        self.is_packaged = getattr(sys, 'frozen', False)
+        self.is_packaged = getattr(sys, "frozen", False)
         self.meipass_path = sys._MEIPASS if self.is_packaged else None
 
         if self.is_packaged:
@@ -39,13 +40,13 @@ class PathManager:
         """统一定义所有路径（包括 task_path）"""
         # 1. 后台配置文件（settings.json）：项目核心默认配置（不暴露给UI）
         self.backend_settings_path = os.path.join(self.static_base, "config", self.env, "settings.json")
-        
+
         # 2. UI用户配置文件（app_settings.json）：用户通过UI修改的配置（持久化）
         if self.is_packaged:
             self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
         else:
             self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
-        
+
         # 3. ROI配置文件（rois.json）：自动化任务中使用的ROI区域配置
         self.rois_config_path = os.path.join(self.static_base, "config", self.env, "rois.json")
 
@@ -57,6 +58,7 @@ class PathManager:
         self.task_configs_path = os.path.join(self.dynamic_base, "task_configs.json")
         self.match_temple_debug_path = os.path.join(self.dynamic_base, "temple_debug")
         self.match_ocr_debug_path = os.path.join(self.dynamic_base, "ocr_debug")
+        self.gui_log_path = os.path.join(self.dynamic_base, "guilog")  # GUI日志目录
 
         self.ocr_model_path = os.path.join(self.dynamic_base, "ocr_models")  # OCR模型存储目录
 
@@ -68,7 +70,7 @@ class PathManager:
             self.match_temple_debug_path,
             self.match_ocr_debug_path,
             self.ocr_model_path,
-
+            self.gui_log_path,
         ]
 
         # 去重后循环创建目录
@@ -98,11 +100,14 @@ class PathManager:
             "match_temple_debug": self.match_temple_debug_path,
             "match_ocr_debug": self.match_ocr_debug_path,
             "ocr_model": self.ocr_model_path,
+            "gui_log": self.gui_log_path,
         }
         return path_map.get(path_key, "")
 
+
 # 全局路径单例
 path_manager = PathManager()
+
 
 # ------------------------------
 # 配置加载逻辑（明确优先级：UI用户配置 > 后台默认配置）
@@ -111,10 +116,10 @@ class ConfigLoader:
     def __init__(self):
         # 1. 加载后台默认配置（settings.json）：项目核心参数，不暴露给用户
         self.backend_settings = self._load_config(path_manager.get("backend_settings"), default={})
-        
+
         # 2. 加载UI用户配置（app_settings.json）：用户通过UI修改的配置
         self.ui_app_settings = self._load_config(path_manager.get("ui_app_settings"), default={})
-        
+
         # 3. 加载任务配置（task_configs.json）：任务相关配置
         self.task_configs = self._load_config(path_manager.get("task_configs"), default={})
 
@@ -189,6 +194,7 @@ class ConfigLoader:
             else:
                 return default
         return value
+
 
 # 全局配置单例（全项目统一调用）
 config = ConfigLoader()

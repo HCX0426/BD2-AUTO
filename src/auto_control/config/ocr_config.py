@@ -9,20 +9,29 @@ from typing import Any, Dict, List
 
 # 标准化的语言代码映射（主键为标准化代码）
 LANGUAGE_CODE_MAP = {
-    "chi_sim": {"name": "简体中文", "easyocr": "ch_sim"},
-    "chi_tra": {"name": "繁体中文", "easyocr": "ch_tra"},
-    "eng": {"name": "英文", "easyocr": "en"},
-    "jpn": {"name": "日文", "easyocr": "ja"},
+    "chi_sim": {"name": "简体中文", "easyocr": "ch_sim", "paddleocr": "ch"},
+    "chi_tra": {"name": "繁体中文", "easyocr": "ch_tra", "paddleocr": "ch"},
+    "eng": {"name": "英文", "easyocr": "en", "paddleocr": "en"},
+    "jpn": {"name": "日文", "easyocr": "ja", "paddleocr": "japan"},
 }
 
 # 各引擎的默认语言组合（使用标准化代码）
-ENGINE_DEFAULT_LANGUAGES = {"easyocr": ["ch_sim+en"]}
+ENGINE_DEFAULT_LANGUAGES = {
+    "easyocr": ["ch_sim+en"],
+    "paddleocr": ["ch_sim+en"]
+}
 
 # 语言强制组合规则（针对特定引擎）
-LANGUAGE_COMBINATION_RULES = {"easyocr": {"ch_tra": ["ch_tra", "en"]}}
+LANGUAGE_COMBINATION_RULES = {
+    "easyocr": {"ch_tra": ["ch_tra", "en"]},
+    "paddleocr": {}
+}
 
 # 引擎基础配置
-ENGINE_CONFIGS = {"easyocr": {"gpu": "auto", "timeout": 60, "model_storage": None}}  # 改为auto，支持True/False/auto
+ENGINE_CONFIGS = {
+    "easyocr": {"gpu": "auto", "timeout": 60, "model_storage": None},  # 改为auto，支持True/False/auto
+    "paddleocr": {"gpu": "auto", "timeout": 60, "model_dir": None, "use_lightweight": True}
+}
 
 
 def get_default_languages(engine: str) -> str:

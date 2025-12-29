@@ -1,7 +1,8 @@
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc.public import back_to_main, click_back
+from src.auto_tasks.pc.public import (back_to_main,
+                                      calculate_remaining_timeout, click_back)
 from src.auto_tasks.utils.roi_config import roi_config
 
 
@@ -22,14 +23,18 @@ def get_email(auto: Auto, timeout: int = 300) -> bool:
     state = "init"  # 状态机: init -> entered -> checking -> claiming -> completed
 
     try:
-        while time.time() - start_time < timeout:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.error("任务执行超时")
+                return False
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
 
             # 初始状态：进入邮箱界面
             if state == "init":
-                if back_to_main(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
                     if auto.template_click("get_email/邮箱", roi=roi_config.get_roi("email_box", "get_email")):
                         logger.info("entered: 尝试进入邮箱界面")
                         auto.sleep(2)
@@ -70,10 +75,15 @@ def get_email(auto: Auto, timeout: int = 300) -> bool:
 
             # 完成状态：返回主界面
             if state == "completed":
-                if click_back(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if click_back(auto, remaining_timeout):
                     logger.info("从邮箱界面返回成功")
-                if back_to_main(auto):
-                    logger.info("成功返回主界面")
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
+                    total_time = round(time.time() - start_time, 2)
+                    minutes = int(total_time // 60)
+                    seconds = round(total_time % 60, 2)
+                    logger.info(f"邮件领取完成，用时：{minutes}分{seconds}秒")
                     return True
 
                 logger.warning("返回主界面失败，next: completed")
@@ -81,9 +91,6 @@ def get_email(auto: Auto, timeout: int = 300) -> bool:
                 continue
 
             auto.sleep(0.5)
-
-        logger.error("领取邮件超时")
-        return False
 
     except Exception as e:
         logger.error(f"领取邮件过程中出错: {e}")

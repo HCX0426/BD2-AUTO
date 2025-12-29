@@ -8,6 +8,7 @@ import numpy as np
 from src.auto_control.config.ocr_config import get_default_languages
 from src.auto_control.ocr.base_ocr import BaseOCR
 from src.auto_control.ocr.easyocr_wrapper import EasyOCRWrapper
+from src.auto_control.ocr.paddleocr_wrapper import PaddleOCRWrapper
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.utils.debug_image_saver import DebugImageSaver
 from src.auto_control.utils.display_context import RuntimeDisplayContext
@@ -18,7 +19,7 @@ class OCRProcessor:
     """
     OCR处理器封装类，统一调用不同OCR引擎并集成坐标转换能力。
     核心特性：
-    1. 引擎适配：当前支持EasyOCR，可扩展其他OCR引擎
+    1. 引擎适配：当前支持EasyOCR和PaddleOCR，可扩展其他OCR引擎
     2. 坐标联动：集成CoordinateTransformer实现物理/逻辑坐标自动转换
     3. 调试能力：支持测试模式，自动保存识别过程的调试图片
     4. 参数统一：基于RuntimeDisplayContext获取全局显示状态，保证数据源唯一
@@ -38,7 +39,7 @@ class OCRProcessor:
         初始化OCR处理器
 
         Args:
-            engine: OCR引擎类型，仅支持 'easyocr'（默认）
+            engine: OCR引擎类型，支持 'easyocr'（默认）和 'paddleocr'
             logger: 日志实例（必填，用于输出识别过程和错误信息）
             coord_transformer: 坐标转换器实例（必填，处理坐标转换）
             display_context: 运行时显示上下文（必填，提供窗口/屏幕状态）
@@ -58,8 +59,8 @@ class OCRProcessor:
 
         # 引擎类型校验
         self.engine_type = engine.lower()
-        if self.engine_type != "easyocr":
-            raise ValueError(f"不支持的OCR引擎: {engine}，仅支持 'easyocr'")
+        if self.engine_type not in ["easyocr", "paddleocr"]:
+            raise ValueError(f"不支持的OCR引擎: {engine}，仅支持 'easyocr' 和 'paddleocr'")
 
         # 核心属性初始化
         self.logger = logger
@@ -91,7 +92,7 @@ class OCRProcessor:
         初始化具体OCR引擎实例
 
         Returns:
-            BaseOCR: OCR引擎基类实例（当前为EasyOCRWrapper）
+            BaseOCR: OCR引擎基类实例（EasyOCRWrapper或PaddleOCRWrapper）
         Raises:
             ValueError: 引擎类型不支持
         """
@@ -99,6 +100,8 @@ class OCRProcessor:
 
         if self.engine_type == "easyocr":
             return EasyOCRWrapper(logger=self.logger)
+        elif self.engine_type == "paddleocr":
+            return PaddleOCRWrapper(logger=self.logger)
         else:
             raise ValueError(f"不支持的OCR引擎: {self.engine_type}")
 
@@ -118,9 +121,9 @@ class OCRProcessor:
         lang: Optional[str] = None,
         min_confidence: float = 0.9,
         region: Optional[Tuple[int, int, int, int]] = None,
-    ) -> Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
+    ) -> Optional[Tuple[int, int, int, int]]:
         """
-        查找目标文本在图像中的位置，返回逻辑/物理坐标
+        查找目标文本在图像中的位置，返回逻辑坐标
 
         Args:
             image: 输入图像（numpy数组）
@@ -130,8 +133,8 @@ class OCRProcessor:
             region: 识别区域ROI (x, y, w, h)（基于原始基准分辨率）
 
         Returns:
-            Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
-                (逻辑坐标矩形, 物理坐标矩形) - 匹配成功；None - 匹配失败
+            Optional[Tuple[int, int, int, int]]:
+                逻辑坐标矩形 - 匹配成功；None - 匹配失败
         """
         # 1. 语言配置处理
         target_lang = lang or self._default_lang
@@ -185,84 +188,118 @@ class OCRProcessor:
             self.logger.info("OCR识别被中断：收到停止信号")
             return None
 
-        image_rgb = cropped_image if len(cropped_image.shape) == 3 else cv2.cvtColor(cropped_image, cv2.COLOR_GRAY2RGB)
-
-        # 使用线程执行OCR识别，支持中断
-        from threading import Event, Thread
-
-        result_event = Event()
-        raw_results = []
-
-        def ocr_worker():
-            nonlocal raw_results
-            try:
-                raw_results = self.engine.reader.readtext(
-                    image_rgb,
-                    detail=1,
-                    paragraph=False,
-                    text_threshold=0.5,
-                    low_text=0.3,
-                    link_threshold=0.7,
-                    canvas_size=2048,
-                    mag_ratio=1.8,
-                    batch_size=1,
-                    workers=0,
-                )
-                result_event.set()
-            except Exception as e:
-                self.logger.error(f"OCR识别异常: {str(e)}")
-                result_event.set()
-
-        # 启动OCR线程
-        ocr_thread = Thread(target=ocr_worker, daemon=True)
-        ocr_thread.start()
-
-        # 等待识别完成或停止信号
-        while not result_event.is_set():
-            if self.stop_event and self.stop_event.is_set():
-                self.logger.info("OCR识别过程中被中断：收到停止信号")
-                return None
-            # 短暂休眠，避免CPU占用过高
-            from time import sleep
-
-            sleep(0.1)
-
-        # OCR识别后检查是否需要停止
-        if self.stop_event and self.stop_event.is_set():
-            self.logger.info("OCR识别完成后被中断：收到停止信号")
-            return None
-
-        # 7. 识别结果格式化（子图→原图坐标转换）
+        # 7. OCR识别
         formatted_results = []
-        for result in raw_results:
+
+        # 根据引擎类型选择不同的识别方法
+        if self.engine_type == "easyocr":
+            # EasyOCR需要RGB格式图像
+            image_rgb = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
+
+            # 使用线程执行OCR识别，支持中断
+            from threading import Event, Thread
+
+            result_event = Event()
+            raw_results = []
+
+            def ocr_worker():
+                nonlocal raw_results
+                try:
+                    raw_results = self.engine.reader.readtext(
+                        image_rgb,
+                        detail=1,
+                        paragraph=False,
+                        text_threshold=0.5,
+                        low_text=0.3,
+                        link_threshold=0.7,
+                        canvas_size=2048,
+                        mag_ratio=1.8,
+                        batch_size=1,
+                        workers=0,
+                    )
+                    result_event.set()
+                except Exception as e:
+                    self.logger.error(f"OCR识别异常: {str(e)}")
+                    result_event.set()
+
+            # 启动OCR线程
+            ocr_thread = Thread(target=ocr_worker, daemon=True)
+            ocr_thread.start()
+
+            # 等待识别完成或停止信号
+            while not result_event.is_set():
+                if self.stop_event and self.stop_event.is_set():
+                    self.logger.info("OCR识别过程中被中断：收到停止信号")
+                    return None
+                # 短暂休眠，避免CPU占用过高
+                from time import sleep
+
+                sleep(0.1)
+
+            # OCR识别后检查是否需要停止
+            if self.stop_event and self.stop_event.is_set():
+                self.logger.info("OCR识别完成后被中断：收到停止信号")
+                return None
+
+            # 识别结果格式化（子图→原图坐标转换）
+            for result in raw_results:
+                # 检查是否需要停止
+                if self.stop_event and self.stop_event.is_set():
+                    self.logger.info("OCR结果处理被中断：收到停止信号")
+                    return None
+
+                bbox, text, confidence = result[:3]
+                # 子图内物理坐标计算
+                x_coords = [int(point[0]) for point in bbox]
+                y_coords = [int(point[1]) for point in bbox]
+                x_phys_sub = min(x_coords)
+                y_phys_sub = min(y_coords)
+                w_phys_sub = max(x_coords) - x_phys_sub
+                h_phys_sub = max(y_coords) - y_phys_sub
+
+                # 子图坐标→原图物理坐标
+                bbox_sub = (x_phys_sub, y_phys_sub, w_phys_sub, h_phys_sub)
+                bbox_orig_phys = self.coord_transformer.apply_roi_offset_to_subcoord(
+                    sub_coord=bbox_sub, roi_offset_phys=region_offset_phys
+                )
+
+                formatted_results.append(
+                    {
+                        "text": text.strip(),
+                        "bbox": bbox_sub,
+                        "bbox_orig_phys": bbox_orig_phys,
+                        "confidence": float(confidence),
+                    }
+                )
+        elif self.engine_type == "paddleocr":
+            # 直接使用PaddleOCRWrapper的detect_text方法
+            # 注意：这里已经在detect_text方法中处理了语言切换和异常捕获
+            raw_results = self.engine.detect_text(cropped_image, target_lang)
+
             # 检查是否需要停止
             if self.stop_event and self.stop_event.is_set():
-                self.logger.info("OCR结果处理被中断：收到停止信号")
+                self.logger.info("OCR识别完成后被中断：收到停止信号")
                 return None
 
-            bbox, text, confidence = result[:3]
-            # 子图内物理坐标计算
-            x_coords = [int(point[0]) for point in bbox]
-            y_coords = [int(point[1]) for point in bbox]
-            x_phys_sub = min(x_coords)
-            y_phys_sub = min(y_coords)
-            w_phys_sub = max(x_coords) - x_phys_sub
-            h_phys_sub = max(y_coords) - y_phys_sub
+            # 格式化结果，添加原图物理坐标
+            for result in raw_results:
+                text = result["text"]
+                bbox_sub = result["bbox"]
+                confidence = result["confidence"]
 
-            # 子图坐标→原图物理坐标
-            bbox_sub = (x_phys_sub, y_phys_sub, w_phys_sub, h_phys_sub)
-            bbox_orig_phys = self.coord_transformer.apply_roi_offset_to_subcoord(
-                sub_coord=bbox_sub, roi_offset_phys=region_offset_phys
-            )
+                # 子图坐标→原图物理坐标
+                bbox_orig_phys = self.coord_transformer.apply_roi_offset_to_subcoord(
+                    sub_coord=bbox_sub, roi_offset_phys=region_offset_phys
+                )
 
-            formatted_results.append(
-                {
-                    "text": text.strip(),
-                    "bbox": bbox_sub,
-                    "bbox_orig_phys": bbox_orig_phys,
-                    "confidence": float(confidence),
-                }
-            )
+                formatted_results.append(
+                    {
+                        "text": text.strip(),
+                        "bbox": bbox_sub,
+                        "bbox_orig_phys": bbox_orig_phys,
+                        "confidence": float(confidence),
+                    }
+                )
 
         # 8. 匹配逻辑：精确匹配 + 部分匹配
         best_match_phys = None
@@ -355,22 +392,26 @@ class OCRProcessor:
         if best_match_phys:
             # 物理坐标→统一逻辑坐标
             final_bbox_log = self.coord_transformer.get_unified_logical_rect(best_match_phys)
-            # 逻辑坐标边界限制
+            # 逻辑坐标边界限制 - 根据全屏状态使用不同的边界值
+            if is_fullscreen:
+                # 全屏模式：使用屏幕物理分辨率作为边界
+                boundary_width, boundary_height = self.display_context.screen_physical_res
+            else:
+                # 窗口模式：使用客户区逻辑分辨率作为边界
+                boundary_width = self.display_context.client_logical_width
+                boundary_height = self.display_context.client_logical_height
+
             final_bbox_log = self.coord_transformer.limit_rect_to_boundary(
                 rect=final_bbox_log,
-                boundary_width=self.display_context.client_logical_width,
-                boundary_height=self.display_context.client_logical_height,
-            )
-            # 物理坐标边界限制
-            final_bbox_phys = self.coord_transformer.limit_rect_to_boundary(
-                rect=best_match_phys, boundary_width=img_w, boundary_height=img_h
+                boundary_width=boundary_width,
+                boundary_height=boundary_height,
             )
 
             self.logger.info(
                 f"找到目标文本 | 文本: '{target_text_clean}' | {match_info} | "
-                f"逻辑坐标: {final_bbox_log} | 物理坐标: {final_bbox_phys} | "
+                f"逻辑坐标: {final_bbox_log} | "
                 f"匹配数: {len(exact_matches)} | 显示模式: {'全屏' if is_fullscreen else '窗口'}"
             )
-            return (final_bbox_log, final_bbox_phys)
+            return final_bbox_log
         else:
             return None

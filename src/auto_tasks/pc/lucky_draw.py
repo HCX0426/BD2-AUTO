@@ -1,7 +1,7 @@
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc.public import back_to_main
+from src.auto_tasks.pc.public import back_to_main, calculate_remaining_timeout
 
 
 def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
@@ -21,13 +21,17 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
         first = True
         last_count = target_count
 
-        while time.time() - start_time < timeout:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.error("任务执行超时")
+                return False
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
             # 检测是否在主界面
             if first:
-                if back_to_main(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
                     auto.text_click("抽抽乐")
                     auto.sleep(3)
                     first = False
@@ -73,16 +77,19 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
                 first = True
             if target_count <= 0:
                 logger.info("抽抽乐次数已达上限")
-                if back_to_main(auto):
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if back_to_main(auto, remaining_timeout):
                     logger.info("返回主界面成功")
                 else:
                     logger.info("返回主界面失败")
+                total_time = round(time.time() - start_time, 2)
+                minutes = int(total_time // 60)
+                seconds = round(total_time % 60, 2)
+                logger.info(f"抽抽乐完成，用时：{minutes}分{seconds}秒")
                 return True
 
             auto.sleep(0.5)  # 每次循环添加短暂延迟
 
-        logger.info("领取公会奖励超时")
-        return False
     except Exception as e:
-        logger.error(f"领取公会奖励过程中出错: {e}")
+        logger.error(f"抽抽乐过程中出错: {e}")
         return False

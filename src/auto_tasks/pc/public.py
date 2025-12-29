@@ -4,22 +4,40 @@ from src.auto_control.core.auto import Auto
 from src.auto_tasks.utils.roi_config import roi_config
 
 
-def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
+def calculate_remaining_timeout(timeout: int, start_time: float) -> int:
+    """
+    计算剩余超时时间
+    
+    Args:
+        timeout: 原始超时时间(秒)
+        start_time: 任务开始时间戳
+        
+    Returns:
+        int: 剩余超时时间(秒)，最小值为0
+    """
+    return max(0, timeout - int(time.time() - start_time)) if timeout > 0 else 0
+
+
+def back_to_main(auto: Auto, timeout: int = 30) -> bool:
     """
     返回主界面
 
     Args:
         auto: Auto控制实例
-        max_attempts: 最大尝试次数
+        timeout: 剩余超时时间(秒)
 
     Returns:
         bool: 是否成功返回主界面
     """
     logger = auto.get_task_logger("back_to_main")
-    attempt = 0
+    start_time = time.time()
 
     try:
-        while attempt < max_attempts:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.warning(f"返回主界面失败，已达超时时间 {timeout} 秒")
+                return False
+
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
@@ -56,11 +74,7 @@ def back_to_main(auto: Auto, max_attempts: int = 5) -> bool:
                 if auto.check_element_exist("public/主界面", roi=roi_config.get_roi("main_menu")):
                     return True
 
-            attempt += 1
             auto.sleep(1)
-
-        logger.warning(f"返回主界面失败，已达最大尝试次数 {max_attempts}")
-        return False
 
     except Exception as e:
         logger.error(f"返回主界面时发生错误: {e}")
@@ -97,14 +111,18 @@ def back_to_map(auto: Auto, timeout: int = 30) -> bool:
 
     Args:
         auto: Auto控制实例
-        timeout: 超时时间(秒)
+        timeout: 剩余超时时间(秒)
     Returns:
         bool: 是否成功返回地图
     """
     logger = auto.get_task_logger("back_to_map")
     start_time = time.time()
     try:
-        while time.time() - start_time < timeout:
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.warning(f"返回地图失败，已达超时时间 {timeout} 秒")
+                return False
+
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
@@ -117,76 +135,97 @@ def back_to_map(auto: Auto, timeout: int = 30) -> bool:
                 return True
             else:
                 auto.key_press("esc")
+                auto.sleep(1)
 
-            logger.debug("未检测到地图标识或地图按钮")
-            return False
+            logger.debug("未检测到地图标识或地图按钮，重试")
     except Exception as e:
         logger.error(f"返回地图时发生错误: {e}")
         return False
 
 
-def click_back(auto: Auto) -> bool:
+def click_back(auto: Auto, timeout: int = 30) -> bool:
     """
     点击返回
 
     Args:
         auto: Auto控制实例
+        timeout: 剩余超时时间(秒)
 
     Returns:
         bool: 是否成功点击返回
     """
     logger = auto.get_task_logger("click_back")
+    start_time = time.time()
 
     try:
-        state = None
-        if auto.text_click("点击画面即可返回", roi=roi_config.get_roi("back_image_text")):
-            logger.debug("点击画面返回成功")
-            auto.sleep(1)
-            state = "OK"
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.warning(f"点击返回超时，已达超时时间 {timeout} 秒")
+                return False
 
-        if state == "OK":
-            if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
                 return True
 
-        logger.debug("未检测到点击画面返回提示")
-        return False
+            state = None
+            if auto.text_click("点击画面即可返回", roi=roi_config.get_roi("back_image_text")):
+                logger.debug("点击画面返回成功")
+                auto.sleep(1)
+                state = "OK"
+
+            if state == "OK":
+                if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
+                    return True
+
+            logger.debug("未检测到点击画面返回提示，重试")
+            auto.sleep(1)
     except Exception as e:
         logger.error(f"点击返回时发生错误: {e}")
         return False
 
 
-def enter_map_select(auto: Auto, swipe_duration: int = 6, is_swipe: bool = True) -> bool:
+def enter_map_select(auto: Auto, timeout: int = 30, swipe_duration: int = 6, is_swipe: bool = True) -> bool:
     """
     进入地图选择
 
     Args:
         auto: Auto控制实例
+        timeout: 剩余超时时间(秒)
         swipe_duration: 滑动持续时间
 
     Returns:
         bool: 是否成功进入地图选择
     """
     logger = auto.get_task_logger("enter_map_select")
+    start_time = time.time()
 
     try:
-        if not auto.click((1720, 990), click_time=2, coord_type="BASE"):
-            logger.warning("点击地图选择按钮失败")
-            return False
+        while True:
+            if timeout > 0 and time.time() - start_time >= timeout:
+                logger.warning(f"进入地图选择超时，已达超时时间 {timeout} 秒")
+                return False
 
-        auto.sleep(2)
+            if auto.check_should_stop():
+                logger.info("检测到停止信号，退出任务")
+                return True
 
-        if auto.text_click("游戏卡珍藏集", click=False, roi=roi_config.get_roi("game_collection_text")):
-            if is_swipe:
-                logger.debug("执行滑动操作")
-                if auto.swipe((1800, 700), (1800, 900), duration=swipe_duration, steps=3, coord_type="BASE"):
-                    auto.sleep(2)
-            logger.debug("检测到游戏卡珍藏集")
-            return True
-        else:
-            logger.warning("未检测到游戏卡珍藏集")
-            return False
+            if not auto.click((1720, 990), click_time=2, coord_type="BASE"):
+                logger.warning("点击地图选择按钮失败，重试")
+                auto.sleep(1)
+                continue
 
-        return True
+            auto.sleep(2)
+
+            if auto.text_click("游戏卡珍藏集", click=False, roi=roi_config.get_roi("game_collection_text")):
+                if is_swipe:
+                    logger.debug("执行滑动操作")
+                    if auto.swipe((1800, 700), (1800, 900), duration=swipe_duration, steps=3, coord_type="BASE"):
+                        auto.sleep(2)
+                logger.debug("检测到游戏卡珍藏集")
+                return True
+            else:
+                logger.warning("未检测到游戏卡珍藏集，重试")
+                auto.sleep(1)
 
     except Exception as e:
         logger.error(f"进入地图选择时发生错误: {e}")
