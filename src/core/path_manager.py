@@ -58,7 +58,7 @@ class PathManager:
         self.task_configs_path = os.path.join(self.dynamic_base, "task_configs.json")
         self.match_temple_debug_path = os.path.join(self.dynamic_base, "temple_debug")
         self.match_ocr_debug_path = os.path.join(self.dynamic_base, "ocr_debug")
-        self.gui_log_path = os.path.join(self.dynamic_base, "guilog")  # GUI日志目录
+        self.gui_log_path = os.path.join(self.dynamic_base, "gui_log")  # GUI日志目录
 
         self.ocr_model_path = os.path.join(self.dynamic_base, "ocr_models")  # OCR模型存储目录
 
