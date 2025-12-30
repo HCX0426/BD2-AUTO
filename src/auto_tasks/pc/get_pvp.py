@@ -40,17 +40,15 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                         ["get_pvp/pvp地图", "get_pvp/pvp地图2"], roi=roi_config.get_roi("pvp_map", "get_pvp")
                     ):
                         logger.info("进入PVP地图, next: arena_entered")
+                        auto.sleep(2)
+                        state = "arena_entered"
                     else:
                         logger.warning("未找到PVP地图")
-                        continue
-
-                    auto.sleep(5)
-                    state = "arena_entered"
                 continue
 
             # 进入竞技场
             if state == "arena_entered":
-                if auto.text_click("游戏卡珍藏集", click=False, roi=roi_config.get_roi("game_collection_text")):
+                if  auto.text_click("游戏卡珍藏集", click=False, roi=roi_config.get_roi("game_collection_text")):
                     logger.debug("未进入PVP地图, next: init")
                     state = "init"
                     continue

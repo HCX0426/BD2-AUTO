@@ -17,13 +17,12 @@ def main():
         sys.path.insert(0, project_root)
         print(f"项目根目录已添加到sys.path: {project_root}")
 
-    # 2. 初始化核心实例（这些实例将传递给GUI）
-    auto_instance = Auto()  # 自动化控制核心
+    # 2. 初始化非阻塞组件
     settings_manager = AppSettingsManager()  # 应用设置管理器
     config_manager = TaskConfigManager()  # 任务配置管理器
     task_mapping = load_task_modules()  # 加载任务模块映射
 
-    # 3. 启动GUI，传递核心实例 - 添加异常捕获和详细调试信息
+    # 3. 启动GUI，Auto实例将在后台线程中初始化
     try:
         print("[DEBUG] 创建QApplication实例...")
         app = QApplication(sys.argv)
@@ -31,7 +30,7 @@ def main():
         
         print("[DEBUG] 创建MainWindow实例...")
         window = MainWindow(
-            auto_instance=auto_instance,
+            auto_instance=None,  # Auto实例将在后台初始化
             settings_manager=settings_manager,
             config_manager=config_manager,
             task_mapping=task_mapping

@@ -92,21 +92,22 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                         logger.info(f"餐厅奖励领取完成，用时：{minutes}分{seconds}秒")
                         return True
                     return False
+                else:
+                    if pos := auto.text_click("点击画面关闭", click=False):
+                        logger.info("点击画面关闭")
+                        auto.click(pos, click_time=2)
+                        continue
 
-            if pos := auto.text_click("点击画面关闭", click=False):
-                logger.info("点击画面关闭")
-                auto.click(pos, click_time=2)
-                continue
+                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                    if click_back(auto, remaining_timeout):
+                        logger.info("点击返回")
+                        auto.sleep(1)
+                        continue
 
-            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-            if click_back(auto, remaining_timeout):
-                logger.info("点击返回")
-                auto.sleep(1)
-                continue
-
-            if auto.text_click("立刻前往", roi=roi_config.get_roi("immediate_go", "get_restaurant")):
-                logger.info("点击立刻前往")
-                auto.sleep(3)
+                    if auto.text_click("立刻前往", roi=roi_config.get_roi("immediate_go", "get_restaurant")):
+                        logger.info("点击立刻前往")
+                        auto.sleep(3)
+                        continue
 
             auto.sleep(0.5)
 

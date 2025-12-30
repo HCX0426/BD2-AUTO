@@ -7,11 +7,11 @@ from src.auto_tasks.utils.roi_config import roi_config
 def calculate_remaining_timeout(timeout: int, start_time: float) -> int:
     """
     计算剩余超时时间
-    
+
     Args:
         timeout: 原始超时时间(秒)
         start_time: 任务开始时间戳
-        
+
     Returns:
         int: 剩余超时时间(秒)，最小值为0
     """
@@ -167,18 +167,23 @@ def click_back(auto: Auto, timeout: int = 30) -> bool:
                 logger.info("检测到停止信号，退出任务")
                 return True
 
-            state = None
-            if auto.text_click("点击画面即可返回", roi=roi_config.get_roi("back_image_text")):
-                logger.debug("点击画面返回成功")
+            # 检查是否存在返回提示文本
+            if auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
+                # 文本存在，尝试点击
+                if auto.text_click("点击画面即可返回", roi=roi_config.get_roi("back_image_text")):
+                    logger.debug("点击画面返回成功")
+                    auto.sleep(2)
+                    # 再次检查文本是否消失
+                    if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
+                        return True
+                    logger.debug("点击后文本仍存在，继续重试")
+                else:
+                    logger.debug("点击返回失败，重试")
                 auto.sleep(1)
-                state = "OK"
-
-            if state == "OK":
-                if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
-                    return True
-
-            logger.debug("未检测到点击画面返回提示，重试")
-            auto.sleep(1)
+            else:
+                # 文本不存在，说明已经不在需要点击返回的界面了
+                logger.debug("未检测到点击画面返回提示，任务已完成")
+                return True
     except Exception as e:
         logger.error(f"点击返回时发生错误: {e}")
         return False

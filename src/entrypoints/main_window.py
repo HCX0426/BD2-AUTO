@@ -1,3 +1,4 @@
+import inspect
 import time
 
 from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
@@ -96,8 +97,10 @@ class TaskWorker(QThread):
                 task_func = task_info.get("function")
                 if task_func:
                     try:
-                        # 只传递函数定义中声明的参数（auto和task_params）
-                        task_func(self.auto_instance, **task_params)
+                        # 只传递函数定义中声明的参数（auto和有效参数）
+                        sig = inspect.signature(task_func)
+                        valid_params = {k: v for k, v in task_params.items() if k in sig.parameters}
+                        task_func(self.auto_instance, **valid_params)
                         self.log_signal.emit(f"任务 {task_info['name']} 执行完成")
                     except Exception as e:
                         self.log_signal.emit(f"任务 {task_info['name']} 执行出错: {str(e)}")
@@ -131,6 +134,32 @@ class TaskWorker(QThread):
         self.log_signal.emit("已发送任务停止请求")
 
 
+class AutoInitThread(QThread):
+    """
+    Auto实例后台初始化线程，避免阻塞UI启动
+    """
+
+    init_completed = pyqtSignal(object)  # 初始化完成信号，传递Auto实例
+    init_failed = pyqtSignal(str)  # 初始化失败信号，传递错误信息
+    log_updated = pyqtSignal(str)  # 日志更新信号
+
+    def run(self):
+        """
+        执行Auto实例初始化
+        """
+        try:
+            self.log_updated.emit("正在后台初始化自动化核心...")
+            from src.auto_control.core.auto import Auto
+
+            auto_instance = Auto()
+            self.log_updated.emit("自动化核心初始化完成")
+            self.init_completed.emit(auto_instance)
+        except Exception as e:
+            error_msg = f"自动化核心初始化失败: {str(e)}"
+            self.log_updated.emit(error_msg)
+            self.init_failed.emit(error_msg)
+
+
 class MainWindow(QMainWindow):
     # 构造函数接收外部传递的实例
     def __init__(self, auto_instance, settings_manager, config_manager, task_mapping, parent=None):
@@ -139,6 +168,10 @@ class MainWindow(QMainWindow):
         self.settings_manager = settings_manager
         self.task_mapping = task_mapping
         self.auto_instance: Auto = auto_instance  # 核心控制实例
+
+        # 初始化状态变量
+        self.auto_initialized = auto_instance is not None
+        self.auto_init_thread = None
 
         # UI状态变量
         self.task_thread = None
@@ -160,6 +193,10 @@ class MainWindow(QMainWindow):
         # 日志信号
         self.log_signal = LogSignal()
         self.log_signal.log_updated.connect(self.update_log)
+
+        # 如果没有提供auto_instance，启动后台初始化
+        if auto_instance is None:
+            self.start_auto_initialization()
 
     def init_ui(self):
         """初始化主窗口UI"""
@@ -728,7 +765,22 @@ class MainWindow(QMainWindow):
 
     def start_task(self):
         """开始执行选中的任务，添加前置状态校验"""
-        # 前置校验：确保任务未在运行、线程已释放
+        # 前置校验1：确保Auto实例已初始化
+        if not self.auto_initialized:
+            if self.auto_init_thread and self.auto_init_thread.isRunning():
+                self.log("无法启动任务：自动化核心正在后台初始化，请稍候...")
+                QMessageBox.information(self, "提示", "自动化核心正在后台初始化，请稍候再尝试启动任务")
+            else:
+                self.log("无法启动任务：自动化核心未初始化，请等待初始化完成或重新启动程序")
+                QMessageBox.information(self, "提示", "自动化核心未初始化，请等待初始化完成或重新启动程序")
+            return
+
+        if not self.auto_instance:
+            self.log("无法启动任务：自动化核心实例不存在")
+            QMessageBox.information(self, "提示", "自动化核心实例不存在，请重新启动程序")
+            return
+
+        # 前置校验2：确保任务未在运行、线程已释放
         if self.task_running:
             self.log("无法启动任务：已有任务正在运行")
             QMessageBox.information(self, "提示", '已有任务正在运行，请等待其终止或点击"停止任务"')
@@ -983,6 +1035,58 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(dark_style)
         else:
             self.setStyleSheet("")
+
+    def start_auto_initialization(self):
+        """
+        启动Auto实例的后台初始化
+        """
+        # 禁用开始任务按钮，避免在初始化完成前执行任务
+        self.start_stop_btn.setEnabled(False)
+
+        # 创建并启动初始化线程
+        self.auto_init_thread = AutoInitThread()
+        self.auto_init_thread.init_completed.connect(self.on_auto_initialization_completed)
+        self.auto_init_thread.init_failed.connect(self.on_auto_initialization_failed)
+        self.auto_init_thread.log_updated.connect(self.update_log)
+        self.auto_init_thread.start()
+
+    @pyqtSlot(object)
+    def on_auto_initialization_completed(self, auto_instance):
+        """
+        Auto实例初始化完成后的处理
+
+        Args:
+            auto_instance: 初始化完成的Auto实例
+        """
+        self.auto_instance = auto_instance
+        self.auto_initialized = True
+
+        # 启用开始任务按钮
+        self.start_stop_btn.setEnabled(True)
+
+        # 清理初始化线程
+        self.auto_init_thread = None
+
+    @pyqtSlot(str)
+    def on_auto_initialization_failed(self, error_msg):
+        """
+        Auto实例初始化失败后的处理
+
+        Args:
+            error_msg: 错误信息
+        """
+        self.log(f"自动化核心初始化失败: {error_msg}")
+
+        # 显示错误对话框给用户
+        QMessageBox.critical(self, "初始化失败", f"自动化核心初始化失败: {error_msg}")
+
+        # 初始化失败后，设置auto_initialized为False，但保持开始任务按钮可用
+        # 允许用户手动重试或检查配置
+        self.auto_initialized = False
+        self.start_stop_btn.setEnabled(True)
+
+        # 清理初始化线程
+        self.auto_init_thread = None
 
     def load_settings(self):
         """加载设置并应用"""
