@@ -1,202 +1,87 @@
-import inspect
-import time
+# 首先初始化路径，确保所有模块可以被正确导入
+import os
+import sys
 
-from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QCloseEvent, QFont, QIcon, QTextCursor
+# 获取项目根目录（src的父目录）
+current_file = os.path.abspath(__file__)
+project_root = os.path.abspath(os.path.join(current_file, "..", "..", ".."))
+
+# 添加项目根目录到sys.path
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+    print(f"项目根目录已添加到sys.path: {project_root}")
+
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot
+from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
     QApplication,
-    QButtonGroup,
-    QCheckBox,
-    QDoubleSpinBox,
-    QFileDialog,
-    QFormLayout,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QRadioButton,
-    QSlider,
-    QSpinBox,
-    QSplitter,
     QStackedWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from src.auto_control.core.auto import Auto
-
-
-class LogSignal(QWidget):
-    log_updated = pyqtSignal(str)
-
-    def __init__(self):
-        super().__init__()
-
-
-class TaskWorker(QThread):
-    """任务工作线程，实现优雅退出机制"""
-
-    log_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int)
-    finished = pyqtSignal()
-
-    def __init__(self, auto_instance, task_ids, config_manager, task_mapping):
-        super().__init__()
-        self.auto_instance = auto_instance
-        self.task_ids = task_ids
-        self.config_manager = config_manager
-        self.task_mapping = task_mapping
-        self.is_running = False
-        self.should_stop = False
-
-    def run(self):
-        """执行任务主逻辑，包含可中断点"""
-        self.is_running = True
-        # 不重置 should_stop 标志，保留之前可能设置的停止信号
-        total_tasks = len(self.task_ids)
-
-        try:
-            # 设备添加和启动操作移到后台线程执行
-            self.log_signal.emit("开始添加设备...")
-            if not self.auto_instance.add_device():
-                error_msg = f"设备添加失败: {getattr(self.auto_instance, 'last_error', '未知错误')}"
-                self.log_signal.emit(error_msg)
-                raise Exception(error_msg)
-            self.log_signal.emit("设备添加成功，正在连接设备...")
-            self.auto_instance.start()
-            self.log_signal.emit("设备连接成功，准备执行任务")
-
-            for i, task_id in enumerate(self.task_ids):
-                # 检查是否需要停止（使用正确的check_should_stop方法）
-                if self.should_stop or self.auto_instance.check_should_stop():
-                    self.log_signal.emit(f"任务执行已被中断，已完成 {i}/{total_tasks} 个任务")
-                    break
-
-                task_info = self.task_mapping.get(task_id)
-                if not task_info:
-                    self.log_signal.emit(f"警告：任务 {task_id} 不存在，已跳过")
-                    continue
-
-                # 更新进度
-                progress = int((i / total_tasks) * 100)
-                self.progress_signal.emit(progress)
-                self.log_signal.emit(f"开始执行任务：{task_info['name']}")
-
-                # 获取任务参数
-                task_params = self.config_manager.get_task_config(task_id) or {}
-
-                # 执行任务（移除多余的stop_checker参数）
-                task_func = task_info.get("function")
-                if task_func:
-                    try:
-                        # 只传递函数定义中声明的参数（auto和有效参数）
-                        sig = inspect.signature(task_func)
-                        valid_params = {k: v for k, v in task_params.items() if k in sig.parameters}
-                        task_func(self.auto_instance, **valid_params)
-                        self.log_signal.emit(f"任务 {task_info['name']} 执行完成")
-                    except Exception as e:
-                        self.log_signal.emit(f"任务 {task_info['name']} 执行出错: {str(e)}")
-                        if self.check_stop():  # 如果是因为停止指令导致的错误，直接退出
-                            break
-                else:
-                    self.log_signal.emit(f"警告：任务 {task_info['name']} 没有执行函数，已跳过")
-
-                # 再次检查是否需要停止
-                if self.check_stop():
-                    self.log_signal.emit(f"任务执行已被中断，已完成 {i+1}/{total_tasks} 个任务")
-                    break
-
-            # 全部完成或中途停止，更新进度为100%
-            self.progress_signal.emit(100)
-
-        except Exception as e:
-            self.log_signal.emit(f"任务线程发生未捕获异常: {str(e)}")
-        finally:
-            self.is_running = False
-            self.finished.emit()
-
-    def check_stop(self):
-        """检查是否需要停止任务"""
-        return self.should_stop or self.auto_instance.check_should_stop()
-
-    def stop(self):
-        """请求任务停止"""
-        self.should_stop = True
-        # 移除阻塞的 wait 调用，改为非阻塞方式
-        self.log_signal.emit("已发送任务停止请求")
-
-
-class AutoInitThread(QThread):
-    """
-    Auto实例后台初始化线程，避免阻塞UI启动
-    """
-
-    init_completed = pyqtSignal(object)  # 初始化完成信号，传递Auto实例
-    init_failed = pyqtSignal(str)  # 初始化失败信号，传递错误信息
-    log_updated = pyqtSignal(str)  # 日志更新信号
-
-    def run(self):
-        """
-        执行Auto实例初始化
-        """
-        try:
-            self.log_updated.emit("正在后台初始化自动化核心...")
-            from src.auto_control.core.auto import Auto
-
-            auto_instance = Auto()
-            self.log_updated.emit("自动化核心初始化完成")
-            self.init_completed.emit(auto_instance)
-        except Exception as e:
-            error_msg = f"自动化核心初始化失败: {str(e)}"
-            self.log_updated.emit(error_msg)
-            self.init_failed.emit(error_msg)
+# 现在可以导入src模块了
+from src.core.path_manager import path_manager
+from src.core.task_manager import AppSettingsManager, TaskConfigManager, load_task_modules
+from src.ui.controls.main_interface import MainInterface
+from src.ui.controls.settings_interface import SettingsInterface
+from src.ui.controls.sidebar import Sidebar
 
 
 class MainWindow(QMainWindow):
-    # 构造函数接收外部传递的实例
-    def __init__(self, auto_instance, settings_manager, config_manager, task_mapping, parent=None):
-        super().__init__(parent)
-        self.config_manager = config_manager
+    """
+    主窗口类，负责组装所有UI组件和后台线程
+    使用信号总线实现组件之间的解耦通信
+    """
+
+    def __init__(self, settings_manager, config_manager, task_mapping):
+        """
+        初始化主窗口
+
+        Args:
+            settings_manager: 应用设置管理器
+            config_manager: 任务配置管理器
+            task_mapping: 任务映射字典
+        """
+        super().__init__()
+
+        # 初始化管理器
         self.settings_manager = settings_manager
+        self.config_manager = config_manager
+
+        # 任务映射和工作线程
         self.task_mapping = task_mapping
-        self.auto_instance: Auto = auto_instance  # 核心控制实例
-
-        # 初始化状态变量
-        self.auto_initialized = auto_instance is not None
-        self.auto_init_thread = None
-
-        # UI状态变量
-        self.task_thread = None
+        self.auto_instance = None
         self.task_worker = None
+        self.auto_init_thread = None
         self.task_running = False
-        self.current_task_id = None
-        self.param_widgets = {}
+
+        # 任务线程管理
+        self.task_worker = None
+
+        # 任务停止相关变量
+        self.stop_timer = None
+        self.stop_attempts = 0
+        self.max_stop_attempts = 20  # 最大停止尝试次数(约10秒)
+
+        # 侧边栏状态
         self.sidebar_hidden = False
         self.sidebar_dragging = False
         self.sidebar_hovered = False
-        self.stop_timer = None
-        self.stop_attempts = 0  # 记录停止尝试次数
-        self.max_stop_attempts = 20  # 最大停止尝试次数(约10秒)
 
         # 初始化UI
         self.init_ui()
-        self.load_settings()
 
-        # 日志信号
-        self.log_signal = LogSignal()
-        self.log_signal.log_updated.connect(self.update_log)
+        # 连接信号
+        self.connect_signals()
+        # 注意：自动初始化线程不在__init__中启动，而是在QApplication创建完成后启动
 
-        # 如果没有提供auto_instance，启动后台初始化
-        if auto_instance is None:
-            self.start_auto_initialization()
+        # 初始化时设置开始按钮为"初始化中..."
+        self.main_interface.enable_task_controls(start_enabled=True, stop_enabled=False, start_text="初始化中...")
 
     def init_ui(self):
         """初始化主窗口UI"""
@@ -212,630 +97,158 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # 侧边栏
-        self.init_sidebar()
+        self.stacked_widget = QStackedWidget()
+        self.sidebar = Sidebar(self.settings_manager, self.stacked_widget)
         main_layout.addWidget(self.sidebar)
 
         # 主内容区域
-        self.stacked_widget = QStackedWidget()
         self.init_main_interface()
         self.init_settings_interface()
         main_layout.addWidget(self.stacked_widget, 1)
 
-        # 根据设置初始化侧边栏状态
-        sidebar_visible = self.settings_manager.get_setting("sidebar_visible", True)
-        if not sidebar_visible:
-            self.collapse_sidebar()
-        else:
-            self.sidebar_hidden = False
-
-    def init_sidebar(self):
-        """初始化侧边栏"""
-        self.sidebar = QFrame()
-        self.sidebar.setFrameShape(QFrame.Shape.StyledPanel)
-        self.sidebar.setMinimumWidth(50)
-        self.sidebar.setMaximumWidth(300)
-        self.sidebar.setFixedWidth(self.settings_manager.get_setting("sidebar_width", 200))
-
-        # 启用鼠标跟踪
-        self.sidebar.setMouseTracking(True)
-        self.sidebar.installEventFilter(self)
-
-        # 侧边栏布局 - 使用垂直布局
-        sidebar_layout = QVBoxLayout(self.sidebar)
-        sidebar_layout.setContentsMargins(5, 5, 5, 5)
-        sidebar_layout.setSpacing(5)
-
-        # 1. 主界面按钮 (放在顶部)
-        self.main_btn = QPushButton()
-        self.main_btn.setCheckable(True)
-        self.main_btn.setChecked(True)
-        self.main_btn.setIcon(QIcon.fromTheme("go-home"))
-        self.main_btn.setToolTip("主界面")
-        self.main_btn.setStyleSheet("padding: 8px;")
-
-        # 2. 添加弹性空间 (将设置按钮推到最下面)
-        sidebar_layout.addWidget(self.main_btn)
-        sidebar_layout.addStretch(1)
-
-        # 3. 设置按钮 (放在最底部)
-        self.settings_btn = QPushButton()
-        self.settings_btn.setCheckable(True)
-
-        # 使用齿轮符号作为备选
-        if QIcon.hasThemeIcon("preferences-system"):
-            self.settings_btn.setIcon(QIcon.fromTheme("preferences-system"))
-        else:
-            self.settings_btn.setText("⚙")
-
-        self.settings_btn.setToolTip("设置")
-        self.settings_btn.setStyleSheet("padding: 8px;")
-
-        # 按钮组
-        self.button_group = QButtonGroup()
-        self.button_group.addButton(self.main_btn, 0)
-        self.button_group.addButton(self.settings_btn, 1)
-        self.button_group.buttonClicked.connect(self.on_sidebar_button_clicked)
-
-        sidebar_layout.addWidget(self.settings_btn)
-
-    def eventFilter(self, obj, event):
-        """处理侧边栏的事件"""
-        if obj == self.sidebar:
-            if event.type() == QEvent.Type.Enter:
-                self.sidebar_hovered = True
-                if self.sidebar.width() <= 50:
-                    self.expand_sidebar()
-                return True
-            elif event.type() == QEvent.Type.Leave:
-                self.sidebar_hovered = False
-                if not self.sidebar_dragging and self.stacked_widget.currentIndex() == 0:
-                    self.collapse_sidebar()
-                return True
-            elif event.type() == QEvent.Type.MouseButtonPress:
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self.sidebar_dragging = True
-                return True
-            elif event.type() == QEvent.Type.MouseButtonRelease:
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self.sidebar_dragging = False
-                    if not self.sidebar_hovered and self.stacked_widget.currentIndex() == 0:
-                        self.collapse_sidebar()
-                return True
-            elif event.type() == QEvent.Type.MouseMove and self.sidebar_dragging:
-                # 处理拖动调整宽度
-                pos = event.pos()
-                new_width = pos.x()
-                if new_width >= 50 and new_width <= 300:
-                    self.sidebar.setFixedWidth(new_width)
-                    self.settings_manager.set_setting("sidebar_width", new_width)
-                return True
-        return super().eventFilter(obj, event)
-
-    def expand_sidebar(self):
-        """展开侧边栏"""
-        width = self.settings_manager.get_setting("sidebar_width", 200)
-        self.sidebar.setFixedWidth(width)
-        self.main_btn.setText("主界面")
-        self.settings_btn.setText("设置")
-        self.sidebar_hidden = False
-
-    def collapse_sidebar(self):
-        """收缩侧边栏"""
-        if self.sidebar.width() > 50:
-            self.settings_manager.set_setting("sidebar_width", self.sidebar.width())
-        self.sidebar.setFixedWidth(50)
-        self.main_btn.setText("")
-        self.settings_btn.setText("")
-        self.sidebar_hidden = True
-
-    def on_sidebar_button_clicked(self, button):
-        """侧边栏按钮点击事件"""
-        if button == self.main_btn:
-            self.stacked_widget.setCurrentIndex(0)
-            if not self.sidebar_hovered:
-                self.collapse_sidebar()
-        elif button == self.settings_btn:
-            self.stacked_widget.setCurrentIndex(1)
-            self.expand_sidebar()
-
     def init_main_interface(self):
-        """初始化主界面"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-
-        # 顶部信息栏
-        top_info = QLabel("任务控制系统 - 就绪状态")
-        top_info.setStyleSheet(
-            """
-            background-color: #f0f0f0; 
-            padding: 4px 8px; 
-            font-weight: bold;
-            border: 1px solid #ddd;
-        """
-        )
-        top_info.setMaximumHeight(28)
-        layout.addWidget(top_info)
-
-        # 主内容区域 (任务列表、参数配置、日志)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # 左侧 - 任务列表
-        task_group = QGroupBox("可选任务 (勾选要执行的任务，可拖动排序)")
-        task_layout = QVBoxLayout()
-
-        self.task_list = QListWidget()
-        self.task_list.setAlternatingRowColors(True)
-        self.task_list.itemClicked.connect(self.on_task_item_clicked)
-        self.task_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
-        self.task_list.itemChanged.connect(self.on_task_state_changed)
-        self.task_list.model().rowsMoved.connect(self.on_task_order_changed)
-        self.populate_task_list()
-
-        # 全选/取消全选按钮
-        select_layout = QHBoxLayout()
-        self.select_all_btn = QPushButton("全选")
-        self.deselect_all_btn = QPushButton("取消全选")
-        self.select_all_btn.clicked.connect(self.select_all_tasks)
-        self.deselect_all_btn.clicked.connect(self.deselect_all_tasks)
-
-        select_layout.addWidget(self.select_all_btn)
-        select_layout.addWidget(self.deselect_all_btn)
-
-        task_layout.addLayout(select_layout)
-        task_layout.addWidget(self.task_list)
-        task_group.setLayout(task_layout)
-
-        # 中间 - 参数配置
-        self.param_group = QGroupBox("任务参数配置")
-        self.param_layout = QVBoxLayout()
-
-        self.param_form = QFormLayout()
-        self.param_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
-        self.param_form.setSpacing(10)
-
-        self.param_desc = QLabel("请选择一个任务查看参数配置")
-        self.param_desc.setWordWrap(True)
-        self.param_desc.setStyleSheet("color: #666; font-style: italic; padding: 5px 0;")
-
-        self.save_param_btn = QPushButton("保存参数")
-        self.save_param_btn.clicked.connect(self.save_task_parameters)
-        self.save_param_btn.setEnabled(False)
-
-        self.param_layout.addWidget(self.param_desc)
-        self.param_layout.addLayout(self.param_form)
-        self.param_layout.addSpacing(10)
-        self.param_layout.addWidget(self.save_param_btn)
-        self.param_layout.addStretch(1)
-        self.param_group.setLayout(self.param_layout)
-
-        # 右侧 - 日志区域
-        log_group = QGroupBox("执行日志")
-        log_layout = QVBoxLayout()
-
-        self.log_display = QTextEdit()
-        self.log_display.setReadOnly(True)
-        self.log_display.setFont(QFont("SimHei", 9))
-        log_layout.addWidget(self.log_display)
-        log_group.setLayout(log_layout)
-
-        # 添加三栏到分割器
-        splitter.addWidget(task_group)
-        splitter.addWidget(self.param_group)
-        splitter.addWidget(log_group)
-        splitter.setSizes([417, 417, 417])
-
-        layout.addWidget(splitter, 1)
-
-        # 进度条
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setMinimumHeight(25)
-        layout.addWidget(self.progress_bar)
-
-        # 底部控制按钮
-        control_layout = QHBoxLayout()
-        control_layout.setSpacing(10)
-
-        self.start_stop_btn = QPushButton("开始任务")
-        self.clear_log_btn = QPushButton("清空日志")
-        self.launch_game_btn = QPushButton("启动游戏")
-
-        # 设置按钮大小
-        for btn in [self.start_stop_btn, self.clear_log_btn, self.launch_game_btn]:
-            btn.setMinimumHeight(30)
-            btn.setMinimumWidth(90)
-
-        # 连接信号
-        self.start_stop_btn.clicked.connect(self.toggle_task)
-        self.clear_log_btn.clicked.connect(self.clear_log)
-        self.launch_game_btn.clicked.connect(self.launch_game)
-
-        control_layout.addWidget(self.start_stop_btn)
-        control_layout.addWidget(self.clear_log_btn)
-        control_layout.addWidget(self.launch_game_btn)
-        layout.addLayout(control_layout)
-
-        # 添加到堆叠窗口
-        self.stacked_widget.addWidget(widget)
-
-    def launch_game(self):
-        """启动游戏"""
-        pc_game_path = self.settings_manager.get_setting("pc_game_path", "")
-        if not pc_game_path:
-            QMessageBox.warning(self, "警告", "请先在设置中配置PC游戏路径")
-            return
-
-        try:
-            import os
-            import subprocess
-
-            # 检查路径是否存在
-            if not os.path.exists(pc_game_path):
-                QMessageBox.critical(self, "错误", f"游戏路径不存在: {pc_game_path}")
-                return
-
-            # 启动游戏
-            subprocess.Popen(pc_game_path)
-            self.log(f"已启动游戏: {pc_game_path}")
-
-        except Exception as e:
-            self.log(f"启动游戏失败: {str(e)}")
-            QMessageBox.critical(self, "错误", f"启动游戏失败: {str(e)}")
+        """初始化主界面组件"""
+        self.main_interface = MainInterface(self.config_manager, self.task_mapping)
+        self.stacked_widget.addWidget(self.main_interface)
 
     def init_settings_interface(self):
-        """初始化设置界面 实时生效"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        """初始化设置界面组件"""
+        self.settings_interface = SettingsInterface(self.settings_manager)
+        self.stacked_widget.addWidget(self.settings_interface)
 
-        # 设置标题
-        title = QLabel("应用设置")
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        layout.addWidget(title)
+    def connect_signals(self):
+        """连接所有信号"""
+        # 确保信号总线已经初始化
+        from src.ui.core.signals import get_signal_bus_instance
 
-        # 主题设置
-        theme_group = QGroupBox("主题设置")
-        theme_layout = QVBoxLayout()
+        signal_bus = get_signal_bus_instance()
 
-        self.theme_light = QRadioButton("浅色主题")
-        self.theme_dark = QRadioButton("深色主题")
+        # 信号总线连接
+        signal_bus.init_completed.connect(self.on_auto_init_completed)
+        signal_bus.init_failed.connect(self.on_auto_init_failed)
+        signal_bus.task_status_updated.connect(self.on_task_status_updated)
+        signal_bus.device_status_updated.connect(self.on_device_status_updated)
+        signal_bus.task_finished.connect(self.on_task_finished)
 
-        theme = self.settings_manager.get_setting("theme", "light")
-        if theme == "dark":
-            self.theme_dark.setChecked(True)
-        else:
-            self.theme_light.setChecked(True)
+    def start_auto_init_thread(self):
+        """
+        启动自动初始化线程
+        """
+        from src.ui.background.auto_init_thread import AutoInitThread
 
-        # 连接信号，实时生效
-        self.theme_light.toggled.connect(self.on_theme_changed)
-        self.theme_dark.toggled.connect(self.on_theme_changed)
+        self.auto_init_thread = AutoInitThread()
+        self.auto_init_thread.finished.connect(self.auto_init_thread.deleteLater)
+        self.auto_init_thread.start()
 
-        theme_layout.addWidget(self.theme_light)
-        theme_layout.addWidget(self.theme_dark)
-        theme_group.setLayout(theme_layout)
+    @pyqtSlot(object)
+    def on_auto_init_completed(self, auto_instance):
+        """自动初始化完成槽函数"""
+        self.auto_instance = auto_instance
+        from src.ui.core.signals import get_signal_bus_instance
 
-        # 侧边栏设置
-        sidebar_group = QGroupBox("侧边栏设置")
-        sidebar_layout = QFormLayout()
+        signal_bus = get_signal_bus_instance()
 
-        self.sidebar_width_slider = QSlider(Qt.Orientation.Horizontal)
-        self.sidebar_width_slider.setMinimum(100)
-        self.sidebar_width_slider.setMaximum(300)
-        self.sidebar_width_slider.setValue(self.settings_manager.get_setting("sidebar_width", 200))
-        self.sidebar_width_slider.valueChanged.connect(self.on_sidebar_width_changed)
+        signal_bus.emit_log("自动化核心初始化完成，系统就绪")
+        self.main_interface.enable_task_controls(start_enabled=True, stop_enabled=False)
 
-        sidebar_layout.addRow("侧边栏宽度:", self.sidebar_width_slider)
-        sidebar_group.setLayout(sidebar_layout)
+    @pyqtSlot(str)
+    def on_auto_init_failed(self, error_msg):
+        """自动初始化失败槽函数"""
+        from src.ui.core.signals import get_signal_bus_instance
 
-        # 游戏启动配置
-        game_group = QGroupBox("游戏启动配置")
-        game_layout = QFormLayout()
+        signal_bus = get_signal_bus_instance()
 
-        # PC游戏路径设置
-        self.pc_game_path_edit = QLineEdit()
-        self.pc_game_path_edit.setText(self.settings_manager.get_setting("pc_game_path", ""))
-        self.pc_game_path_edit.textChanged.connect(
-            lambda: self.settings_manager.set_setting("pc_game_path", self.pc_game_path_edit.text())
-        )
+        signal_bus.emit_log(f"自动化核心初始化失败: {error_msg}")
+        QMessageBox.warning(self, "初始化失败", f"自动化核心初始化失败:\n{error_msg}")
+        self.main_interface.enable_task_controls(start_enabled=True, stop_enabled=False)
 
-        pc_game_path_btn = QPushButton("浏览...")
-        pc_game_path_btn.clicked.connect(self.browse_pc_game_path)
-
-        pc_path_layout = QHBoxLayout()
-        pc_path_layout.addWidget(self.pc_game_path_edit)
-        pc_path_layout.addWidget(pc_game_path_btn)
-        game_layout.addRow("PC游戏路径:", pc_path_layout)
-
-        # 模拟器路径设置
-        self.emulator_path_edit = QLineEdit()
-        self.emulator_path_edit.setText(self.settings_manager.get_setting("emulator_path", ""))
-        self.emulator_path_edit.textChanged.connect(
-            lambda: self.settings_manager.set_setting("emulator_path", self.emulator_path_edit.text())
-        )
-
-        emulator_path_btn = QPushButton("浏览...")
-        emulator_path_btn.clicked.connect(self.browse_emulator_path)
-
-        emulator_path_layout = QHBoxLayout()
-        emulator_path_layout.addWidget(self.emulator_path_edit)
-        emulator_path_layout.addWidget(emulator_path_btn)
-        game_layout.addRow("模拟器路径:", emulator_path_layout)
-
-        game_group.setLayout(game_layout)
-
-        # 添加到主布局
-        layout.addWidget(theme_group)
-        layout.addWidget(sidebar_group)
-        layout.addWidget(game_group)
-        layout.addStretch(1)
-
-        # 添加到堆叠窗口
-        self.stacked_widget.addWidget(widget)
-
-    def browse_pc_game_path(self):
-        """浏览选择PC游戏路径"""
-        path, _ = QFileDialog.getOpenFileName(self, "选择PC游戏可执行文件", "", "可执行文件 (*.exe);;所有文件 (*)")
-        if path:
-            self.pc_game_path_edit.setText(path)
-
-    def browse_emulator_path(self):
-        """浏览选择模拟器路径"""
-        path, _ = QFileDialog.getOpenFileName(self, "选择模拟器可执行文件", "", "可执行文件 (*.exe);;所有文件 (*)")
-        if path:
-            self.emulator_path_edit.setText(path)
-
-    def on_theme_changed(self):
-        """主题变更实时处理"""
-        theme = "dark" if self.theme_dark.isChecked() else "light"
-        self.settings_manager.set_setting("theme", theme)
-        self.apply_theme(theme)
-
-    def on_sidebar_width_changed(self, width):
-        """侧边栏宽度变更实时处理"""
-        if not self.sidebar_hidden:
-            self.sidebar.setFixedWidth(width)
-        self.settings_manager.set_setting("sidebar_width", width)
-
-    def update_sidebar_width(self, width):
-        """更新侧边栏宽度"""
-        if not self.sidebar_hidden:
-            self.sidebar.setFixedWidth(width)
-        self.settings_manager.set_setting("sidebar_width", width)
-
-    def on_task_item_clicked(self, item):
-        """处理任务项点击事件"""
-        task_id = item.data(Qt.ItemDataRole.UserRole)
-        self.current_task_id = task_id
-        self.load_task_parameters(task_id)
-
-    def on_task_state_changed(self, item):
-        """当任务勾选状态变化时，自动保存状态"""
-        task_ids, task_states = self.get_current_task_order_and_states()
-        self.config_manager.save_task_order_and_states(task_ids, task_states)
-
-    def on_task_order_changed(self, parent, start, end, destination, row):
-        """当任务顺序发生变化时（拖动排序），自动保存新顺序"""
-        task_ids, task_states = self.get_current_task_order_and_states()
-        self.config_manager.save_task_order_and_states(task_ids, task_states)
-
-    def populate_task_list(self):
-        """填充任务列表"""
-        task_order = self.config_manager.get_task_order() or list(self.task_mapping.keys())
-        task_states = self.config_manager.get_task_states() or {task_id: False for task_id in self.task_mapping}
-
-        all_task_ids = set(self.task_mapping.keys())
-        ordered_tasks = [tid for tid in task_order if tid in all_task_ids]
-        ordered_tasks += [tid for tid in all_task_ids - set(ordered_tasks)]
-
-        self.task_list.clear()
-        for task_id in ordered_tasks:
-            task_info = self.task_mapping.get(task_id)
-            if task_info:
-                item = QListWidgetItem(task_info["name"])
-                item.setFlags(
-                    item.flags()
-                    | Qt.ItemFlag.ItemIsUserCheckable
-                    | Qt.ItemFlag.ItemIsSelectable
-                    | Qt.ItemFlag.ItemIsEnabled
-                    | Qt.ItemFlag.ItemIsDragEnabled
-                )
-                checked_state = Qt.CheckState.Checked if task_states.get(task_id, False) else Qt.CheckState.Unchecked
-                item.setCheckState(checked_state)
-                item.setData(Qt.ItemDataRole.UserRole, task_id)
-                self.task_list.addItem(item)
-
-    def load_task_parameters(self, task_id):
-        """加载任务参数到表单"""
-        self.clear_param_form()
-        task_info = self.task_mapping.get(task_id)
-        if not task_info or not task_info.get("parameters"):
-            self.param_desc.setText("该任务没有可配置的参数")
-            self.save_param_btn.setEnabled(False)
-            return
-
-        self.param_desc.setText(f"任务描述: {task_info.get('description', '无描述')}")
-        saved_params = self.config_manager.get_task_config(task_id)
-        self.param_widgets = {}
-
-        for param in task_info["parameters"]:
-            param_name = param["name"]
-            param_type = param["type"]
-            param_default = param["default"]
-
-            label = QLabel(f"{param_name}:")
-            label.setToolTip(param["annotation"])
-
-            if param_type == "int":
-                widget = QSpinBox()
-                widget.setMinimum(-1000000)
-                widget.setMaximum(1000000)
-                widget.setValue(saved_params.get(param_name, param_default) if param_default is not None else 0)
-            elif param_type == "float":
-                widget = QDoubleSpinBox()
-                widget.setMinimum(-1000000.0)
-                widget.setMaximum(1000000.0)
-                widget.setDecimals(2)
-                widget.setValue(saved_params.get(param_name, param_default) if param_default is not None else 0.0)
-            elif param_type == "bool":
-                widget = QCheckBox()
-                widget.setChecked(saved_params.get(param_name, param_default) if param_default is not None else False)
+    @pyqtSlot(str, bool)
+    def on_task_status_updated(self, task_type, is_running):
+        """任务状态更新槽函数"""
+        if task_type == "main":
+            if is_running:
+                self.start_task()
             else:
-                widget = QLineEdit()
-                widget.setText(str(saved_params.get(param_name, param_default)) if param_default is not None else "")
+                self.stop_task()
 
-            widget.setEnabled(not self.task_running)
-            self.param_form.addRow(label, widget)
-            self.param_widgets[param_name] = widget
-
-        self.save_param_btn.setEnabled(True)
-
-    def clear_param_form(self):
-        """清空参数表单"""
-        while self.param_form.rowCount() > 0:
-            self.param_form.removeRow(0)
-        self.param_widgets = {}
-
-    def save_task_parameters(self):
-        """保存任务参数配置"""
-        if not self.current_task_id or not self.param_widgets:
-            return
-
-        task_info = self.task_mapping.get(self.current_task_id)
-        if not task_info:
-            return
-
-        params = {}
-        for param in task_info["parameters"]:
-            param_name = param["name"]
-            widget = self.param_widgets.get(param_name)
-
-            if widget is None:
-                continue
-
-            if isinstance(widget, QSpinBox):
-                params[param_name] = widget.value()
-            elif isinstance(widget, QDoubleSpinBox):
-                params[param_name] = widget.value()
-            elif isinstance(widget, QCheckBox):
-                params[param_name] = widget.isChecked()
-            elif isinstance(widget, QLineEdit):
-                params[param_name] = widget.text()
-
-        if self.config_manager.save_task_config(self.current_task_id, params):
-            self.log(f"任务 '{task_info['name']}' 的参数已保存")
-        else:
-            self.log(f"任务 '{task_info['name']}' 的参数保存失败")
-
-    def get_current_task_order_and_states(self):
-        """获取当前任务顺序和勾选状态"""
-        task_ids = []
-        task_states = {}
-
-        for i in range(self.task_list.count()):
-            item = self.task_list.item(i)
-            task_id = item.data(Qt.ItemDataRole.UserRole)
-            task_ids.append(task_id)
-            task_states[task_id] = item.checkState() == Qt.CheckState.Checked
-
-        return task_ids, task_states
-
-    def select_all_tasks(self):
-        """全选任务"""
-        for i in range(self.task_list.count()):
-            item = self.task_list.item(i)
-            item.setCheckState(Qt.CheckState.Checked)
-
-    def deselect_all_tasks(self):
-        """取消全选任务"""
-        for i in range(self.task_list.count()):
-            item = self.task_list.item(i)
-            item.setCheckState(Qt.CheckState.Unchecked)
-
-    def toggle_task(self):
-        """切换开始/停止任务状态"""
-        if self.task_running:
-            self.stop_task()
-        else:
-            self.start_task()
+    @pyqtSlot(str, bool)
+    def on_device_status_updated(self, action, is_running):
+        """设备状态更新槽函数"""
+        if action == "launch_game" and is_running:
+            self.launch_game()
 
     def start_task(self):
-        """开始执行选中的任务，添加前置状态校验"""
-        # 前置校验1：确保Auto实例已初始化
-        if not self.auto_initialized:
-            if self.auto_init_thread and self.auto_init_thread.isRunning():
-                self.log("无法启动任务：自动化核心正在后台初始化，请稍候...")
-                QMessageBox.information(self, "提示", "自动化核心正在后台初始化，请稍候再尝试启动任务")
-            else:
-                self.log("无法启动任务：自动化核心未初始化，请等待初始化完成或重新启动程序")
-                QMessageBox.information(self, "提示", "自动化核心未初始化，请等待初始化完成或重新启动程序")
-            return
+        """
+        开始执行任务
+        """
+        from src.ui.core.signals import get_signal_bus_instance
+
+        signal_bus = get_signal_bus_instance()
 
         if not self.auto_instance:
-            self.log("无法启动任务：自动化核心实例不存在")
-            QMessageBox.information(self, "提示", "自动化核心实例不存在，请重新启动程序")
-            return
-
-        # 前置校验2：确保任务未在运行、线程已释放
-        if self.task_running:
-            self.log("无法启动任务：已有任务正在运行")
-            QMessageBox.information(self, "提示", '已有任务正在运行，请等待其终止或点击"停止任务"')
-            return
-
-        if self.task_worker and self.task_worker.isRunning():
-            self.log("检测到未释放的任务线程，正在强制清理...")
-            self.reset_task_state(force=True)
-            QMessageBox.information(self, "提示", "检测到未释放的任务资源，已自动清理，请重试")
-            return
-
-        try:
-            selected_tasks = []
-            for i in range(self.task_list.count()):
-                item = self.task_list.item(i)
-                if item.checkState() == Qt.CheckState.Checked:
-                    selected_tasks.append(item.data(Qt.ItemDataRole.UserRole))
-
-            if not selected_tasks:
-                QMessageBox.warning(self, "警告", "请至少选择一个任务")
+            if self.auto_init_thread and self.auto_init_thread.isRunning():
+                signal_bus.emit_log("自动化核心正在后台初始化，请稍候...")
+                self.main_interface.enable_task_controls(
+                    start_enabled=True, stop_enabled=False, start_text="初始化中..."
+                )
+                return
+            else:
+                # 启动初始化线程
+                signal_bus.emit_log("正在初始化自动化核心...")
+                self.start_auto_init_thread()
+                self.main_interface.enable_task_controls(
+                    start_enabled=True, stop_enabled=False, start_text="初始化中..."
+                )
                 return
 
-            # 启动任务前，强制重置所有停止标志
-            self.auto_instance.set_should_stop(False)  # 重置Auto实例的停止标志
-            if self.task_worker:
-                self.task_worker.should_stop = False  # 重置worker的停止标志
-                self.auto_instance.device_manager.remove_device(self.auto_instance.default_device_uri)
+        # 检查任务是否已经在运行
+        if self.task_running:
+            signal_bus.emit_log("警告：任务已经在运行中")
+            return
 
-            self.set_task_running_state(True)
-            self.log(f"开始执行任务，共 {len(selected_tasks)} 个任务")
+        # 获取选中的任务
+        selected_tasks = self.main_interface.get_selected_tasks()
+        if not selected_tasks:
+            signal_bus.emit_log("错误：未选择任何任务")
+            self.main_interface.enable_task_controls(start_enabled=True, stop_enabled=False)
+            return
 
-            # 创建并启动任务线程
-            self.task_worker = TaskWorker(self.auto_instance, selected_tasks, self.config_manager, self.task_mapping)
+        # 启动任务前，强制重置所有停止标志
+        self.auto_instance.set_should_stop(False)  # 重置Auto实例的停止标志
 
-            # 连接信号槽
-            self.task_worker.log_signal.connect(self.log)
-            self.task_worker.progress_signal.connect(self.update_progress)
-            self.task_worker.finished.connect(self.on_task_finished)
+        # 设置任务运行状态
+        self.task_running = True
+        signal_bus.emit_log(f"开始执行 {len(selected_tasks)} 个任务")
 
-            # 启动线程
-            self.task_worker.start()
+        # 导入TaskWorker
+        from src.ui.background.task_worker import TaskWorker
 
-        except Exception as e:
-            self.log(f"启动任务时发生错误: {str(e)}")
-            self.reset_task_state(force=True)
-            QMessageBox.critical(self, "错误", f"启动任务时发生错误: {str(e)}")
+        # 创建任务工作器
+        self.task_worker = TaskWorker(self.auto_instance, selected_tasks, self.config_manager, self.task_mapping)
+
+        # 连接信号
+        self.task_worker.task_finished.connect(self.on_task_finished)
+
+        # 启动任务线程
+        self.task_worker.start()
+
+        signal_bus.emit_log("任务已开始执行")
 
     def stop_task(self):
-        """停止当前任务，优化终止流程"""
+        """
+        停止执行任务
+        """
+        from src.ui.core.signals import get_signal_bus_instance
+
+        signal_bus = get_signal_bus_instance()
+
         if not self.task_running:
             return
 
         # 使用QTimer确保在主线程中执行UI操作
-        QTimer.singleShot(0, lambda: self.log("收到停止指令，正在终止任务..."))
-        QTimer.singleShot(0, lambda: self.start_stop_btn.setEnabled(False))
+        QTimer.singleShot(0, lambda: signal_bus.emit_log("收到停止指令，正在终止任务..."))
+        # 立即发送任务终止开始的日志
+        QTimer.singleShot(0, lambda: signal_bus.emit_log("任务终止开始"))
 
         self.stop_attempts = 0  # 重置尝试次数
 
@@ -844,7 +257,7 @@ class MainWindow(QMainWindow):
             self.auto_instance.set_should_stop(True)
 
         # 通知worker停止
-        if self.task_worker and self.task_worker.isRunning():
+        if self.task_worker:
             self.task_worker.stop()
 
         # 启动定时器，轮询检查任务是否已终止
@@ -861,289 +274,134 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, start_check_timer)
 
     def check_task_stopped(self):
-        """轮询检查任务是否已停止，避免重复清理"""
+        """
+        轮询检查任务是否已停止
+        """
+        from src.ui.core.signals import get_signal_bus_instance
+
+        signal_bus = get_signal_bus_instance()
+
         self.stop_attempts += 1
 
-        # 检查条件：worker已停止
+        # 检查任务线程是否已停止
         worker_stopped = not (self.task_worker and self.task_worker.isRunning())
 
         if worker_stopped:
-            self.stop_timer.stop()
+            if self.stop_timer:
+                self.stop_timer.stop()
+                self.stop_timer = None
             # 只有在任务仍在运行状态时才进行清理，避免重复
             if self.task_running:
+                signal_bus.emit_log("任务已完全终止")
                 self.reset_task_state()
-                # 使用QTimer确保在主线程中执行UI操作
-                QTimer.singleShot(0, lambda: self.log("任务已完全终止"))
-            QTimer.singleShot(0, lambda: self.start_stop_btn.setEnabled(True))
         else:
-            # 显示剩余等待时间，让用户了解进度
+            # 显示任务终止进度
             remaining_seconds = (self.max_stop_attempts - self.stop_attempts) * 0.5
-            QTimer.singleShot(0, lambda: self.log(f"等待任务终止中... (剩余约 {remaining_seconds:.1f} 秒)"))
+            signal_bus.emit_log(f"任务终止进行中... (剩余约 {remaining_seconds:.1f} 秒)")
 
             # 达到最大尝试次数，强制终止
             if self.stop_attempts >= self.max_stop_attempts:
-                QTimer.singleShot(0, lambda: self.log(f"超过最大等待次数 ({self.max_stop_attempts}次)，将强制终止任务"))
-                self.stop_timer.stop()
+                signal_bus.emit_log(f"超过最大等待次数 ({self.max_stop_attempts}次)，将强制终止任务")
+                if self.stop_timer:
+                    self.stop_timer.stop()
+                    self.stop_timer = None
 
-                # 显示确认对话框必须在主线程中执行
-                def show_confirm_dialog():
-                    reply = QMessageBox.warning(
-                        self,
-                        "任务终止超时",
-                        "任务无法正常终止，是否强制结束？这可能导致数据不一致。",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No,
-                    )
-
-                    if reply == QMessageBox.StandardButton.Yes:
-                        self.reset_task_state(force=True)
-                        QTimer.singleShot(0, lambda: self.log("已强制终止任务"))
-                    else:
-                        QTimer.singleShot(0, lambda: self.log("用户取消强制终止，任务可能仍在运行"))
-                        self.set_task_running_state(False)  # 至少更新UI状态
-
-                    self.start_stop_btn.setEnabled(True)
-
-                QTimer.singleShot(0, show_confirm_dialog)
-
-    @pyqtSlot()
-    def on_task_finished(self):
-        """任务完成后的处理，避免与定时器重复清理"""
-        # 只有在任务仍在运行状态时才进行清理
-        if self.task_running:
-            # 使用QTimer.singleShot确保在主线程中执行reset_task_state
-            QTimer.singleShot(0, lambda: self.reset_task_state())
-            QTimer.singleShot(0, lambda: self.log("所有任务执行完毕"))
+                # 强制终止任务
+                self.auto_instance.set_should_stop(True)
+                if self.task_worker and self.task_worker.isRunning():
+                    self.task_worker.terminate()
+                    self.task_worker.wait(1000)  # 等待1秒
+                signal_bus.emit_log("任务已强制终止")
+                self.reset_task_state(force=True)
 
     def reset_task_state(self, force=False):
-        """重置任务状态和UI，增加状态检查避免重复清理"""
-        # 如果已经不在运行状态，直接返回避免重复清理
-        if not self.task_running and not force:
-            return
+        """
+        重置任务状态
+        """
+        from src.ui.core.signals import get_signal_bus_instance
 
-        # 确保在主线程中更新UI
-        if not self.thread().isRunning() or self.thread() != QThread.currentThread():
-            # 如果不在主线程，使用QTimer.singleShot在主线程中执行
-            QTimer.singleShot(0, lambda: self.reset_task_state(force))
-            return
+        signal_bus = get_signal_bus_instance()
 
-        # 首先更新状态标志
-        QTimer.singleShot(0, lambda: self.set_task_running_state(False))
-        QTimer.singleShot(0, lambda: self.progress_bar.setValue(0))
+        self.task_running = False
+        self.main_interface.enable_task_controls(start_enabled=True, stop_enabled=False)
 
-        # 清理worker并断开信号连接
+        # 清理任务工作器
         if self.task_worker:
             try:
-                # 断开所有信号连接
-                try:
-                    self.task_worker.log_signal.disconnect(self.log)
-                    self.task_worker.progress_signal.disconnect(self.update_progress)
-                    self.task_worker.finished.disconnect(self.on_task_finished)
-                except:
-                    pass  # 忽略已经断开的连接
-
-                # 如果仍在运行，尝试停止
-                if self.task_worker.isRunning():
-                    QTimer.singleShot(0, lambda: self.log("任务worker仍在运行，尝试停止..."))
-                    self.task_worker.stop()
-                    if force and self.task_worker.isRunning():
-                        QTimer.singleShot(0, lambda: self.log("强制终止worker线程"))
-                        self.task_worker.terminate()
-
-                        # 避免使用阻塞的 wait 调用，改为异步等待
-                        def check_terminated():
-                            if not self.task_worker.isRunning():
-                                QTimer.singleShot(0, lambda: self.log("worker线程已强制终止"))
-                            else:
-                                QTimer.singleShot(0, lambda: self.log("警告：worker线程未能在预期时间内终止"))
-
-                        QTimer.singleShot(1000, check_terminated)
-            except Exception as e:
-                self.log(f"清理worker时出错: {str(e)}")
-            finally:
-                self.task_worker = None
-
-        # 清理auto实例（只在force模式下或正常模式下第一次清理）
-        if self.auto_instance:
-            try:
-                # 只有在force模式下才真正停止auto实例
-                # 正常模式下保持auto实例运行以便后续使用
+                # 断开信号连接
+                self.task_worker.task_finished.disconnect(self.on_task_finished)
+            except:
+                pass  # 忽略已经断开的连接
+            
+            # 如果线程仍在运行，尝试停止
+            if self.task_worker.isRunning():
                 if force:
-                    self.auto_instance.stop()
-                    self.auto_instance.set_should_stop(False)
-            except Exception as e:
-                # 忽略已经关闭的错误
-                if "shutdown" not in str(e).lower():
-                    self.log(f"清理auto实例时出错: {str(e)}")
+                    signal_bus.emit_log("正在强制终止任务线程...")
+                    self.task_worker.terminate()
+                    self.task_worker.wait(1000)  # 等待1秒
+                else:
+                    self.task_worker.stop()
+            
+            # 清理任务工作器引用
+            self.task_worker = None
 
-        QTimer.singleShot(0, lambda: self.start_stop_btn.setEnabled(True))
-        QTimer.singleShot(0, lambda: self.log("任务状态已重置"))
+        signal_bus.emit_log("任务状态已重置")
 
-    def set_task_running_state(self, running):
-        """设置任务运行状态"""
-        self.task_running = running
-        self.start_stop_btn.setText("停止任务" if running else "开始任务")
-        self.start_stop_btn.setEnabled(True)  # 确保按钮始终可用，除非在stop_task中暂时禁用
-        self.task_list.setEnabled(not running)
-        self.select_all_btn.setEnabled(not running)
-        self.deselect_all_btn.setEnabled(not running)
-        self.save_param_btn.setEnabled(not running and self.current_task_id is not None)
-        self.launch_game_btn.setEnabled(not running)
-
-        for widget in self.param_widgets.values():
-            widget.setEnabled(not running)
-
-    def apply_theme(self, theme):
-        """应用主题"""
-        if theme == "dark":
-            dark_style = """
-                QWidget {
-                    background-color: #333;
-                    color: #EEE;
-                }
-                QGroupBox {
-                    border: 1px solid #555;
-                    border-radius: 5px;
-                    margin-top: 10px;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 0 3px;
-                }
-                QPushButton {
-                    background-color: #555;
-                    border: 1px solid #666;
-                    padding: 5px;
-                    border-radius: 3px;
-                }
-                QPushButton:hover {
-                    background-color: #666;
-                }
-                QPushButton:pressed {
-                    background-color: #777;
-                }
-                QListWidget {
-                    background-color: #444;
-                    border: 1px solid #555;
-                }
-                QTextEdit {
-                    background-color: #444;
-                    border: 1px solid #555;
-                }
-            """
-            self.setStyleSheet(dark_style)
-        else:
-            self.setStyleSheet("")
-
-    def start_auto_initialization(self):
+    def on_task_finished(self):
         """
-        启动Auto实例的后台初始化
+        任务完成槽函数
         """
-        # 禁用开始任务按钮，避免在初始化完成前执行任务
-        self.start_stop_btn.setEnabled(False)
+        from src.ui.core.signals import get_signal_bus_instance
 
-        # 创建并启动初始化线程
-        self.auto_init_thread = AutoInitThread()
-        self.auto_init_thread.init_completed.connect(self.on_auto_initialization_completed)
-        self.auto_init_thread.init_failed.connect(self.on_auto_initialization_failed)
-        self.auto_init_thread.log_updated.connect(self.update_log)
-        self.auto_init_thread.start()
+        signal_bus = get_signal_bus_instance()
 
-    @pyqtSlot(object)
-    def on_auto_initialization_completed(self, auto_instance):
-        """
-        Auto实例初始化完成后的处理
+        signal_bus.emit_log("所有任务执行完成")
+        self.reset_task_state()
 
-        Args:
-            auto_instance: 初始化完成的Auto实例
-        """
-        self.auto_instance = auto_instance
-        self.auto_initialized = True
+    def launch_game(self):
+        """启动游戏"""
+        from src.ui.core.signals import get_signal_bus_instance
 
-        # 启用开始任务按钮
-        self.start_stop_btn.setEnabled(True)
+        signal_bus = get_signal_bus_instance()
 
-        # 清理初始化线程
-        self.auto_init_thread = None
+        pc_game_path = self.settings_manager.get_setting("pc_game_path", "")
+        if not pc_game_path:
+            QMessageBox.warning(self, "警告", "请先在设置中配置PC游戏路径")
+            signal_bus.emit_log("警告：未配置PC游戏路径")
+            return
 
-    @pyqtSlot(str)
-    def on_auto_initialization_failed(self, error_msg):
-        """
-        Auto实例初始化失败后的处理
-
-        Args:
-            error_msg: 错误信息
-        """
-        self.log(f"自动化核心初始化失败: {error_msg}")
-
-        # 显示错误对话框给用户
-        QMessageBox.critical(self, "初始化失败", f"自动化核心初始化失败: {error_msg}")
-
-        # 初始化失败后，设置auto_initialized为False，但保持开始任务按钮可用
-        # 允许用户手动重试或检查配置
-        self.auto_initialized = False
-        self.start_stop_btn.setEnabled(True)
-
-        # 清理初始化线程
-        self.auto_init_thread = None
-
-    def load_settings(self):
-        """加载设置并应用"""
-        theme = self.settings_manager.get_setting("theme", "light")
-        self.apply_theme(theme)
-
-    def log(self, message):
-        """添加日志信息"""
-        self.log_display.append(message)
-        self.log_display.moveCursor(QTextCursor.MoveOperation.End)
-
-        # 保存到日志文件
         try:
-            import datetime
             import os
+            import subprocess
 
-            from src.core.path_manager import path_manager
+            # 检查路径是否存在
+            if not os.path.exists(pc_game_path):
+                QMessageBox.critical(self, "错误", f"游戏路径不存在: {pc_game_path}")
+                signal_bus.emit_log(f"错误：游戏路径不存在: {pc_game_path}")
+                return
 
-            # 使用path_manager获取gui_log路径
-            log_dir = path_manager.get("gui_log")
-            today = datetime.datetime.now().strftime("%Y-%m-%d")
-            log_file_path = os.path.join(log_dir, f"{today}.log")
+            # 启动游戏
+            subprocess.Popen(pc_game_path)
+            signal_bus.emit_log(f"已启动游戏: {pc_game_path}")
 
-            # 确保目录存在
-            os.makedirs(log_dir, exist_ok=True)
-
-            # 写入日志
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            with open(log_file_path, "a", encoding="utf-8") as f:
-                f.write(f"[{timestamp}] {message}\n")
         except Exception as e:
-            # 记录日志保存失败的信息，但不影响程序运行
-            import traceback
+            signal_bus.emit_log(f"启动游戏失败: {str(e)}")
+            QMessageBox.critical(self, "错误", f"启动游戏失败: {str(e)}")
 
-            print(f"保存日志失败: {str(e)}")
-            traceback.print_exc()
-
-    def update_log(self, message):
-        """通过信号槽更新日志"""
-        self.log(message)
-
-    def clear_log(self):
-        """清空日志显示"""
-        self.log_display.clear()
-
-    def update_progress(self, value):
-        """更新进度条"""
-        self.progress_bar.setValue(value)
-
-    def closeEvent(self, event):
-        """窗口关闭事件，确保任务完全终止后再关闭，优化避免主线程阻塞"""
+    def closeEvent(self, event: QCloseEvent):
+        """
+        关闭窗口事件处理，确保任务完全终止后再关闭窗口
+        """
         # 保存窗口大小
         self.settings_manager.set_setting("window_size", [self.width(), self.height()])
+        self.settings_manager.save_settings()
+        from src.ui.core.signals import get_signal_bus_instance
+
+        signal_bus = get_signal_bus_instance()
 
         # 停止正在运行的任务
         if self.task_running:
-            self.log("检测到正在运行的任务，尝试终止后再关闭窗口...")
+            signal_bus.emit_log("检测到正在运行的任务，尝试终止后再关闭窗口...")
             self.stop_task()
 
             # 不阻塞主线程，改为使用定时器检查任务是否已终止
@@ -1156,77 +414,126 @@ class MainWindow(QMainWindow):
             event.ignore()  # 先忽略关闭事件，等待任务终止
             return
 
+        # 停止自动化核心
+        if self.auto_instance:
+            signal_bus.emit_log("正在停止自动化核心...")
+            self.auto_instance.set_should_stop(True)
+            # 只设置标志，不调用stop()方法，避免重复清理和logger问题
+            # self.auto_instance.stop()  # 会在perform_close中调用
+
         # 任务未运行，直接关闭
-        self.perform_close()
+        self.perform_close(event)
 
     def check_task_stopped_before_close(self):
-        """检查任务是否已停止，用于窗口关闭前的异步等待"""
+        """
+        检查任务是否已停止，用于窗口关闭前的异步等待
+        """
+        from src.ui.core.signals import get_signal_bus_instance
+
+        signal_bus = get_signal_bus_instance()
+
         self.close_wait_time += 1
 
         if not self.task_running:
             # 任务已终止，执行关闭
             self.close_timer.stop()
-            self.perform_close()
-        elif self.close_wait_time > 25:  # 5秒超时 (25 * 200ms)
-            # 超时，询问用户是否强制关闭
+            self.perform_close(self.close_event)
+        elif self.close_wait_time > 25:  # 5秒超时
+            # 超时，直接强制关闭
             self.close_timer.stop()
+            signal_bus.emit_log("等待任务终止超时，强制关闭窗口")
+            self.reset_task_state(force=True)
+            self.perform_close(self.close_event)
 
-            # 确保在主线程中显示对话框
-            def show_close_confirm():
-                reply = QMessageBox.warning(
-                    self,
-                    "任务仍在运行",
-                    "任务仍在运行中，强制关闭可能导致问题，是否继续？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
+    def perform_close(self, event):
+        """
+        执行窗口关闭操作
+        """
+        from src.ui.core.signals import get_signal_bus_instance
 
-                if reply == QMessageBox.StandardButton.Yes:
-                    # 强制清理并关闭
-                    self.reset_task_state(force=True)
-                    self.perform_close()
+        signal_bus = get_signal_bus_instance()
 
-            QTimer.singleShot(0, show_close_confirm)
+        signal_bus.emit_log("窗口正在关闭...")
 
-    def perform_close(self):
-        """执行实际的关闭操作"""
-        # 确保在主线程中执行关闭操作
-        if self.thread() != QThread.currentThread():
-            QTimer.singleShot(0, self.perform_close)
-            return
+        # 异步清理资源，避免阻塞主线程
+        def cleanup_resources():
+            # 清理自动化核心
+            if self.auto_instance:
+                try:
+                    signal_bus.emit_log("正在停止自动化核心...")
+                    self.auto_instance.set_should_stop(True)
+                    # 不调用stop()方法，避免阻塞，直接断开设备
+                    self.auto_instance.device_manager.disconnect_all()
+                    signal_bus.emit_log("自动化核心资源已清理")
+                except Exception as e:
+                    signal_bus.emit_log(f"清理自动化核心时发生异常: {str(e)}")
+                finally:
+                    self.auto_instance = None
+            
+            # 确保应用程序完全退出
+            signal_bus.emit_log("正在退出应用程序...")
+            QApplication.quit()
+        
+        # 使用QTimer在主线程中异步执行清理
+        QTimer.singleShot(0, cleanup_resources)
+        
+        # 接受关闭事件
+        event.accept()
 
-        # 确保auto_instance被正确清理
-        if self.auto_instance:
-            try:
-                # 异步清理auto_instance，避免阻塞
-                self.auto_instance.set_should_stop(True)
 
-                # 使用QTimer避免可能的阻塞操作
-                def cleanup_auto_instance():
-                    try:
-                        self.auto_instance.stop()
-                        self.auto_instance = None
-                    except Exception as e:
-                        self.log(f"关闭auto_instance时出错: {str(e)}")
-                        self.auto_instance = None
+def main():
+    """
+    主函数
+    """
 
-                QTimer.singleShot(0, cleanup_auto_instance)
-            except Exception as e:
-                self.log(f"准备关闭auto_instance时出错: {str(e)}")
-                self.auto_instance = None
+    # 2. 初始化非阻塞组件
+    settings_manager = AppSettingsManager()  # 应用设置管理器
+    config_manager = TaskConfigManager()  # 任务配置管理器
+    task_mapping = load_task_modules()  # 加载任务模块映射
 
-        # 保存其他设置
-        try:
-            self.settings_manager.save_settings()
-        except Exception as e:
-            self.log(f"保存设置时出错: {str(e)}")
+    # 3. 启动GUI，Auto实例将在后台线程中初始化
+    try:
+        print("[DEBUG] 创建QApplication实例...")
+        app = QApplication(sys.argv)
+        app.setApplicationName("BD2-AUTO")
+        print("[DEBUG] QApplication实例创建成功")
 
-        # 直接接受关闭事件，避免递归调用
-        if hasattr(self, "close_event") and self.close_event:
-            self.close_event.accept()
-        else:
-            # 如果没有保存的close_event，调用父类的close方法
-            super().close()
+        # 初始化信号总线（必须在QApplication创建后）
+        print("[DEBUG] 初始化信号总线...")
+        from src.ui.core.signals import get_signal_bus_instance, init_signal_bus
 
-        # 确保应用程序完全退出
-        QApplication.quit()
+        bus_instance = init_signal_bus()
+
+        # 确保全局signal_bus变量已经初始化
+        global_signal_bus = get_signal_bus_instance()
+        print(f"[DEBUG] 信号总线初始化结果: {bus_instance}")
+        print(f"[DEBUG] 全局signal_bus变量: {global_signal_bus}")
+        print("[DEBUG] 信号总线初始化完成")
+
+        print("[DEBUG] 创建MainWindow实例...")
+        window = MainWindow(settings_manager=settings_manager, config_manager=config_manager, task_mapping=task_mapping)
+        print("[DEBUG] MainWindow实例创建成功")
+
+        print("[DEBUG] 调用window.show()...")
+        window.show()
+        print("[DEBUG] window.show()调用成功")
+
+        # 在QApplication完全初始化后启动自动初始化线程
+        print("[DEBUG] 启动自动初始化线程...")
+        window.start_auto_init_thread()
+        print("[DEBUG] 自动初始化线程启动成功")
+
+        print("[DEBUG] 启动事件循环...")
+        result = app.exec()
+        print(f"[DEBUG] 事件循环退出，退出码: {result}")
+        sys.exit(result)
+    except Exception as e:
+        print(f"[ERROR] GUI启动过程中发生异常: {type(e).__name__}: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

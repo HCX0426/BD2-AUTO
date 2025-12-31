@@ -57,7 +57,11 @@ class ImageProcessor:
         self.template_dir = template_dir or path_manager.get("task_template")
         self.test_mode = test_mode
 
+        # 模板缓存，采用LRU策略
         self.templates: Dict[str, np.ndarray] = {}
+        self.template_access_time: Dict[str, float] = {}
+        self.max_template_cache_size = 100  # 最大缓存模板数量
+
         debug_dir = path_manager.get("match_temple_debug")
         os.makedirs(debug_dir, exist_ok=True)
 
@@ -67,7 +71,9 @@ class ImageProcessor:
         self.min_template_size = (10, 10)
         self.match_algorithm = cv2.TM_CCOEFF_NORMED
 
-        self.load_all_templates()
+        # 记录所有模板路径，实现延迟加载
+        self.all_template_paths: Dict[str, str] = {}
+        self._scan_all_templates()
         self.logger.info(
             f"初始化完成 | 加载模板数: {len(self.templates)} | "
             f"原始基准分辨率: {self.original_base_res} | 模板目录: {self.template_dir} | "
@@ -104,8 +110,8 @@ class ImageProcessor:
             self.logger.error(f"加载模板异常: {str(e)}", exc_info=True)
             return False
 
-    def load_all_templates(self) -> None:
-        """遍历模板目录，加载所有符合扩展名的模板文件"""
+    def _scan_all_templates(self) -> None:
+        """扫描所有模板文件，记录路径但不立即加载"""
         if not os.path.isdir(self.template_dir):
             self.logger.warning(f"模板目录不存在: {self.template_dir}")
             return
@@ -120,7 +126,30 @@ class ImageProcessor:
                         else os.path.splitext(filename)[0]
                     )
                     template_path = os.path.join(root, filename)
-                    self.load_template(template_name, template_path)
+                    self.all_template_paths[template_name] = template_path
+        self.logger.debug(f"扫描完成，共发现{len(self.all_template_paths)}个模板文件")
+
+    def _cleanup_template_cache(self) -> None:
+        """清理模板缓存，移除最少使用的模板"""
+        if len(self.templates) <= self.max_template_cache_size:
+            return
+
+        # 按照访问时间排序，移除最久未使用的模板
+        sorted_templates = sorted(self.template_access_time.items(), key=lambda x: x[1])
+
+        # 需要清理的模板数量
+        templates_to_remove = len(self.templates) - self.max_template_cache_size
+
+        for template_name, _ in sorted_templates[:templates_to_remove]:
+            if template_name in self.templates:
+                del self.templates[template_name]
+                del self.template_access_time[template_name]
+                self.logger.debug(f"清理模板缓存: {template_name}")
+
+    def load_all_templates(self) -> None:
+        """遍历模板目录，加载所有符合扩展名的模板文件"""
+        for template_name, template_path in self.all_template_paths.items():
+            self.load_template(template_name, template_path)
 
     def get_template(self, template_name: str) -> Optional[np.ndarray]:
         """
@@ -132,11 +161,27 @@ class ImageProcessor:
         Returns:
             Optional[np.ndarray]: 模板数组（BGR格式），获取失败返回None
         """
+        import time
+        current_time = time.time()
+        
+        # 检查模板是否在缓存中
         template = self.templates.get(template_name)
         if template is None:
-            self.logger.warning(f"模板未找到，尝试重新加载: {template_name}")
-            if self.load_template(template_name):
-                template = self.templates.get(template_name)
+            self.logger.debug(f"模板未在缓存中，尝试加载: {template_name}")
+            # 检查是否有记录的模板路径
+            template_path = self.all_template_paths.get(template_name)
+            if template_path:
+                if self.load_template(template_name, template_path):
+                    template = self.templates.get(template_name)
+            else:
+                self.logger.warning(f"未找到模板路径: {template_name}")
+        
+        # 更新访问时间
+        if template is not None:
+            self.template_access_time[template_name] = current_time
+            # 清理缓存
+            self._cleanup_template_cache()
+        
         return template
 
     def match_template(

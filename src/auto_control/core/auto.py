@@ -1,17 +1,24 @@
 import logging
 import threading
 import time
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
 
-from ...core.path_manager import config, path_manager
-from ..config import (DEFAULT_BASE_RESOLUTION, DEFAULT_CHECK_ELEMENT_DELAY,
-                      DEFAULT_CLICK_DELAY, DEFAULT_DEVICE_URI,
-                      DEFAULT_KEY_DURATION, DEFAULT_OCR_ENGINE,
-                      DEFAULT_SCREENSHOT_DELAY, DEFAULT_TASK_TIMEOUT,
-                      DEFAULT_WINDOW_OPERATION_DELAY)
+from ...core.path_manager import ConfigLoader, PathManager
+from ..config import (
+    DEFAULT_BASE_RESOLUTION,
+    DEFAULT_CHECK_ELEMENT_DELAY,
+    DEFAULT_CLICK_DELAY,
+    DEFAULT_DEVICE_URI,
+    DEFAULT_KEY_DURATION,
+    DEFAULT_OCR_ENGINE,
+    DEFAULT_SCREENSHOT_CACHE_EXPIRE,
+    DEFAULT_SCREENSHOT_DELAY,
+    DEFAULT_TASK_TIMEOUT,
+    DEFAULT_WINDOW_OPERATION_DELAY,
+)
 from ..devices.base_device import BaseDevice
 from ..devices.device_manager import DeviceManager
 from ..devices.windows_device import CoordType
@@ -41,6 +48,8 @@ class Auto:
         ocr_engine: str = DEFAULT_OCR_ENGINE,
         device_uri: str = DEFAULT_DEVICE_URI,
         original_base_res: Tuple[int, int] = DEFAULT_BASE_RESOLUTION,
+        path_manager: PathManager = None,
+        config: ConfigLoader = None,
     ):
         """
         初始化自动化系统核心实例
@@ -49,11 +58,19 @@ class Auto:
             ocr_engine: OCR识别引擎类型，默认使用配置的DEFAULT_OCR_ENGINE
             device_uri: 默认设备标识URI，默认使用DEFAULT_DEVICE_URI
             original_base_res: 基准分辨率（宽, 高），默认使用DEFAULT_BASE_RESOLUTION
+            path_manager: 路径管理器实例，用于获取项目路径
+            config: 配置加载器实例，用于获取配置信息
         """
         # 记录总初始化开始时间
         total_init_start = time.time()
-        
-        self.test_mode = config.get("debug", False)
+
+        # 使用传入的依赖或创建默认实例
+        from ...core.path_manager import config as default_config
+        from ...core.path_manager import path_manager as default_path_manager
+
+        self.path_manager = path_manager or default_path_manager
+        self.config = config or default_config
+        self.test_mode = self.config.get("debug", False)
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
         self.running = False
@@ -63,7 +80,7 @@ class Auto:
         logger_start = time.time()
         self.logger = Logger(
             name="System",
-            base_log_dir=path_manager.get("log"),
+            base_log_dir=self.path_manager.get("log"),
             log_file_prefix="system",
             file_log_level=logging.DEBUG,
             console_log_level=logging.INFO,
@@ -131,11 +148,16 @@ class Auto:
         self.last_result = None
         self.last_error = None
 
+        # 图像缓存相关属性
+        self._screenshot_cache = None
+        self._screenshot_cache_time = 0
+        self._screenshot_cache_expire = DEFAULT_SCREENSHOT_CACHE_EXPIRE
+
         # 计算总初始化时间
         total_init_time = round(time.time() - total_init_start, 3)
         total_minutes = int(total_init_time // 60)
         total_seconds = round(total_init_time % 60, 3)
-        
+
         # 记录各模块初始化用时和总用时
         self.logger.info(f"=== Auto初始化时间统计 ===")
         self.logger.info(f"Logger模块初始化用时: {logger_time}秒")
@@ -156,6 +178,15 @@ class Auto:
             bool: True表示需要中断任务，False表示继续执行
         """
         return self.stop_event.is_set()
+
+    def clear_screenshot_cache(self) -> None:
+        """
+        清除截图缓存
+        """
+        if self._screenshot_cache is not None:
+            self.logger.debug("清除截图缓存")
+            self._screenshot_cache = None
+            self._screenshot_cache_time = 0
 
     def set_should_stop(self, value: bool) -> None:
         """
@@ -441,6 +472,8 @@ class Auto:
                 else ("客户区物理坐标" if coord_type == "PHYSICAL" else "客户区逻辑坐标")
             )
             self.logger.info(f"点击成功: {coord_type_str}{pos} | 点击次数{click_time}")
+            # 清除截图缓存，因为点击操作可能改变界面
+            self.clear_screenshot_cache()
 
         return self.last_result
 
@@ -480,6 +513,8 @@ class Auto:
             self.logger.error(self.last_error)
         else:
             self.logger.info(f"按键成功: {key} | 按住时长{duration}s")
+            # 清除截图缓存，因为按键操作可能改变界面
+            self.clear_screenshot_cache()
 
         return self.last_result
 
@@ -539,6 +574,8 @@ class Auto:
             self.logger.error(self.last_error)
         else:
             self.logger.info(f"模板点击成功: {templates}{param_log} | 右键={right_click}")
+            # 清除截图缓存，因为点击操作可能改变界面
+            self.clear_screenshot_cache()
 
         return self.last_result
 
@@ -622,6 +659,8 @@ class Auto:
                 self.last_error = device.last_error or "文本点击执行失败"
                 self.logger.error(self.last_error)
                 return None
+            # 清除截图缓存，因为点击操作可能改变界面
+            self.clear_screenshot_cache()
             return click_center
         else:
             self.last_result = click_center
@@ -763,7 +802,11 @@ class Auto:
             return None
 
     def screenshot(
-        self, save_path: str = None, delay: float = DEFAULT_SCREENSHOT_DELAY, device_uri: str = None
+        self,
+        save_path: str = None,
+        delay: float = DEFAULT_SCREENSHOT_DELAY,
+        device_uri: str = None,
+        use_cache: bool = True,
     ) -> Optional[np.ndarray]:
         """
         截图并可选保存（返回BGR格式图像，自动适配窗口状态）
@@ -772,6 +815,7 @@ class Auto:
             save_path: 截图保存路径（None则不保存，仅返回图像数据）
             delay: 执行前延迟时间（秒），默认DEFAULT_SCREENSHOT_DELAY
             device_uri: 目标设备URI（None使用默认设备）
+            use_cache: 是否使用缓存（默认True）
 
         Returns:
             Optional[np.ndarray]: 截图图像（BGR格式），失败返回None
@@ -780,6 +824,23 @@ class Auto:
             self.logger.info("截图任务被中断")
             self.last_result = None
             return None
+
+        # 检查缓存是否有效
+        current_time = time.time()
+        if use_cache and self._screenshot_cache is not None:
+            cache_age = current_time - self._screenshot_cache_time
+            if cache_age < self._screenshot_cache_expire:
+                self.logger.debug(
+                    f"使用缓存截图 | 缓存年龄: {cache_age:.3f}s < 过期时间: {self._screenshot_cache_expire}s"
+                )
+                screen = self._screenshot_cache.copy()
+                self.last_result = screen
+                return screen
+            else:
+                self.logger.debug(
+                    f"缓存截图已过期 | 缓存年龄: {cache_age:.3f}s >= 过期时间: {self._screenshot_cache_expire}s"
+                )
+                self.clear_screenshot_cache()
 
         self._apply_delay(delay)
         device = self._get_device(device_uri)
@@ -797,6 +858,10 @@ class Auto:
                 self.last_error = "截图失败: 底层返回空图像"
                 self.logger.error(self.last_error)
                 return None
+
+            # 更新缓存
+            self._screenshot_cache = screen.copy()
+            self._screenshot_cache_time = current_time
 
             client_res = self.display_context.client_logical_res
             self.logger.debug(f"截图成功 | 图像尺寸: {screen.shape[1]}x{screen.shape[0]} | 客户区尺寸: {client_res}")
@@ -964,6 +1029,8 @@ class Auto:
                 coord_type.upper(), "未知坐标类型"
             )
             self.logger.info(f"滑动成功: 从{start_pos}到{end_pos} | 类型:{coord_type_name} | 时长{duration}s")
+            # 清除截图缓存，因为滑动操作可能改变界面
+            self.clear_screenshot_cache()
 
         return self.last_result
 
@@ -1002,5 +1069,7 @@ class Auto:
         else:
             log_text = text[:30] + "..." if len(text) > 30 else text
             self.logger.info(f"文本输入成功: {log_text}")
+            # 清除截图缓存，因为文本输入操作可能改变界面
+            self.clear_screenshot_cache()
 
         return self.last_result

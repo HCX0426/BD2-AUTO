@@ -72,6 +72,11 @@ class OCRProcessor:
         # 语言配置（默认/自定义）
         self._default_lang = kwargs.pop("languages", None) or get_default_languages(self.engine_type)
 
+        # OCR识别结果缓存
+        self.ocr_cache = {}
+        self.ocr_cache_expire = 3.0  # 缓存过期时间（秒）
+        self.max_ocr_cache_size = 50  # 最大缓存数量
+
         # 调试工具初始化
         self.debug_saver = DebugImageSaver(
             logger=self.logger, debug_dir=path_manager.get("match_ocr_debug"), test_mode=test_mode
@@ -114,6 +119,48 @@ class OCRProcessor:
         """
         return self.engine.enable_gpu(enable)
 
+    def _generate_image_hash(self, image: np.ndarray) -> str:
+        """
+        生成图像的哈希值，用于缓存键
+
+        Args:
+            image: 输入图像（numpy数组）
+
+        Returns:
+            str: 图像的哈希值
+        """
+        import hashlib
+
+        # 将图像转换为一维数组并计算MD5哈希
+        image_bytes = image.tobytes()
+        return hashlib.md5(image_bytes).hexdigest()
+
+    def _cleanup_ocr_cache(self) -> None:
+        """
+        清理过期的OCR缓存
+        """
+        import time
+
+        current_time = time.time()
+
+        # 清理过期缓存
+        expired_keys = [
+            key for key, (_, timestamp) in self.ocr_cache.items() if current_time - timestamp > self.ocr_cache_expire
+        ]
+
+        for key in expired_keys:
+            del self.ocr_cache[key]
+            self.logger.debug(f"清理过期OCR缓存: {key[:20]}...")
+
+        # 如果缓存数量仍超过最大值，清理最早的缓存
+        if len(self.ocr_cache) > self.max_ocr_cache_size:
+            sorted_keys = sorted(self.ocr_cache.items(), key=lambda x: x[1][1])
+
+            keys_to_remove = len(self.ocr_cache) - self.max_ocr_cache_size
+            for key, _ in sorted_keys[:keys_to_remove]:
+                del self.ocr_cache[key]
+                self.logger.debug(f"清理OCR缓存: {key[:20]}...")
+
     def find_text_position(
         self,
         image: np.ndarray,
@@ -136,12 +183,32 @@ class OCRProcessor:
             Optional[Tuple[int, int, int, int]]:
                 逻辑坐标矩形 - 匹配成功；None - 匹配失败
         """
+        import time
+
+        current_time = time.time()
+
+        # 清理过期缓存
+        self._cleanup_ocr_cache()
+
         # 1. 语言配置处理
         target_lang = lang or self._default_lang
         if target_lang and "ch_sim" not in target_lang:
             target_lang = f"ch_sim+{target_lang}"
         elif not target_lang:
             target_lang = "ch_sim"
+
+        # 2. 生成缓存键
+        image_hash = self._generate_image_hash(image)
+        cache_key = f"{image_hash}_{target_text}_{target_lang}_{min_confidence}_{region}"
+
+        # 3. 检查缓存
+        if cache_key in self.ocr_cache:
+            cached_result, timestamp = self.ocr_cache[cache_key]
+            if current_time - timestamp <= self.ocr_cache_expire:
+                self.logger.debug(f"使用OCR缓存 | 目标文本: '{target_text}'")
+                return cached_result
+
+        # 4. 缓存未命中，继续执行识别
 
         # 2. 基础参数校验
         if image is None or image.size == 0:
@@ -412,6 +479,15 @@ class OCRProcessor:
                 f"逻辑坐标: {final_bbox_log} | "
                 f"匹配数: {len(exact_matches)} | 显示模式: {'全屏' if is_fullscreen else '窗口'}"
             )
+
+            # 更新缓存
+            self.ocr_cache[cache_key] = (final_bbox_log, current_time)
+            self.logger.debug(f"更新OCR缓存 | 键: {cache_key[:20]}...")
+
             return final_bbox_log
         else:
+            # 更新缓存，即使未找到匹配结果
+            self.ocr_cache[cache_key] = (None, current_time)
+            self.logger.debug(f"更新OCR缓存 | 键: {cache_key[:20]}... | 结果: None")
+
             return None

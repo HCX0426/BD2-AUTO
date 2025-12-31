@@ -58,6 +58,11 @@ class DeviceManager:
         # 当前活动设备URI（小写）
         self.active_device: Optional[str] = None
 
+        # 自动重连配置
+        self.auto_reconnect_enabled = True  # 是否启用自动重连
+        self.max_reconnect_attempts = 3  # 最大重连尝试次数
+        self.reconnect_interval = 1.0  # 重连间隔（秒）
+
         # 共享组件
         self.logger = logger
         self.image_processor = image_processor
@@ -91,10 +96,62 @@ class DeviceManager:
             self.logger.error(f"设备{getattr(device, 'device_uri', '未知')}分辨率同步异常：{str(e)}", exc_info=True)
             return False
 
+    def _reconnect_device(self, device_uri: str) -> bool:
+        """
+        尝试重新连接设备
+
+        Args:
+            device_uri: 设备标识URI
+
+        Returns:
+            重连成功返回True，失败返回False
+        """
+        if not self.auto_reconnect_enabled:
+            self.logger.debug(f"自动重连已禁用，跳过设备{device_uri}的重连")
+            return False
+
+        lower_uri = device_uri.lower()
+        device = self.devices.get(lower_uri)
+
+        if not device:
+            self.logger.debug(f"设备{device_uri}不存在，无法重连")
+            return False
+
+        self.logger.info(f"开始尝试重连设备：{device_uri}")
+
+        # 尝试多次重连
+        for attempt in range(self.max_reconnect_attempts):
+            if self.stop_event.is_set():
+                self.logger.info(f"重连被中断，设备：{device_uri}")
+                return False
+
+            self.logger.info(f"重连尝试 {attempt+1}/{self.max_reconnect_attempts}，设备：{device_uri}")
+
+            # 断开现有连接
+            try:
+                device.disconnect()
+            except Exception as e:
+                self.logger.debug(f"断开设备{device_uri}连接时发生异常：{str(e)}")
+
+            # 等待一段时间后尝试重新连接
+            time.sleep(self.reconnect_interval)
+
+            # 尝试重新连接
+            if device.connect():
+                self.logger.info(f"设备{device_uri}重连成功")
+                # 同步分辨率
+                self._sync_device_resolution(device)
+                return True
+            else:
+                self.logger.warning(f"设备{device_uri}重连失败，尝试 {attempt+1}/{self.max_reconnect_attempts}")
+
+        self.logger.error(f"设备{device_uri}重连失败，已达到最大尝试次数 {self.max_reconnect_attempts}")
+        return False
+
     # ======================== 设备查询方法 ========================
     def get_device(self, device_uri: str) -> Optional[BaseDevice]:
         """
-        获取指定URI的设备实例
+        获取指定URI的设备实例，如果设备断开连接则尝试自动重连
 
         Args:
             device_uri: 设备标识URI
@@ -106,7 +163,16 @@ class DeviceManager:
         device = self.devices.get(lower_uri)
 
         if device:
-            self.logger.debug(f"获取设备成功: {device_uri}（状态: {device.get_state().name}）")
+            # 检查设备状态，如果断开连接则尝试自动重连
+            if not device.is_connected:
+                self.logger.warning(f"设备{device_uri}已断开连接，尝试自动重连...")
+                if self._reconnect_device(device_uri):
+                    self.logger.debug(f"获取设备成功: {device_uri}（状态: {device.get_state().name}）")
+                else:
+                    self.logger.error(f"获取设备失败: {device_uri}（重连失败）")
+                    return None
+            else:
+                self.logger.debug(f"获取设备成功: {device_uri}（状态: {device.get_state().name}）")
         else:
             self.logger.debug(f"未找到设备: {device_uri}")
         return device

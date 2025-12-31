@@ -3,5 +3,8 @@
   "python.defaultInterpreterPath": "C:\\Users\\hcx\\miniconda3\\envs\\bd2-auto-cpu\\python.exe",
   "python.terminal.activateEnvironment": true,
   "python.terminal.activateEnvInCurrentTerminal": true,
-  "terminal.integrated.defaultProfile.windows": "Command Prompt"
+  "terminal.integrated.defaultProfile.windows": "Command Prompt",
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
+  "python-envs.defaultPackageManager": "ms-python.python:conda",
+  "python-envs.pythonProjects": []
 }
