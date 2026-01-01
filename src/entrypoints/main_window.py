@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 
 # 现在可以导入src模块了
 from src.core.path_manager import path_manager
-from src.core.task_manager import load_task_modules
+from src.core.task_loader import load_task_modules
 from src.ui.controls.main_interface import MainInterface
 from src.ui.controls.settings_interface import SettingsInterface
 from src.ui.controls.sidebar import Sidebar
@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
         """
         启动自动初始化线程
         """
-        from src.ui.background.auto_init_thread import AutoInitThread
+        from src.ui.background.auto_initializer import AutoInitThread
 
         self.auto_init_thread = AutoInitThread()
         self.auto_init_thread.finished.connect(self.auto_init_thread.deleteLater)

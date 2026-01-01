@@ -2,7 +2,7 @@ import inspect
 import os
 import sys
 
-from src.core.path_manager import path_manager
+from .path_manager import path_manager
 
 
 def load_task_modules():

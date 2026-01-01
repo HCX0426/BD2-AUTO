@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
-from ...core.path_manager import ConfigLoader, PathManager
+from ...core.config_manager import ConfigLoader
+from ...core.path_manager import PathManager
 from ..config import (
     DEFAULT_BASE_RESOLUTION,
     DEFAULT_CHECK_ELEMENT_DELAY,
