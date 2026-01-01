@@ -42,10 +42,7 @@ class PathManager:
         self.backend_settings_path = os.path.join(self.static_base, "config", self.env, "settings.json")
 
         # 2. UI用户配置文件（app_settings.json）：用户通过UI修改的配置（持久化）
-        if self.is_packaged:
-            self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
-        else:
-            self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
+        self.ui_app_settings_path = os.path.join(self.dynamic_base, "app_settings.json")
 
         # 3. ROI配置文件（rois.json）：自动化任务中使用的ROI区域配置
         self.rois_config_path = os.path.join(self.static_base, "config", self.env, "rois.json")
