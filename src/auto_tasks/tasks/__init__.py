@@ -1,3 +1,7 @@
+"""自动任务模块
+
+包含所有自动任务的实现，包括登录、邮件领取、每日任务等
+"""
 # 显式导入模块中的函数
 from .daily_missions import daily_missions
 from .get_email import get_email

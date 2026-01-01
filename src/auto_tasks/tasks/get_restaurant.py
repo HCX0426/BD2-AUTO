@@ -1,8 +1,12 @@
+"""餐厅奖励领取模块
+
+包含餐厅奖励的领取和升级功能
+"""
+
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.tasks.public import (back_to_main,
-                                      calculate_remaining_timeout, click_back)
+from src.auto_tasks.tasks.public import back_to_main, calculate_remaining_timeout, click_back
 from src.auto_tasks.utils.roi_config import roi_config
 
 
@@ -11,6 +15,7 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
     Args:
         auto: Auto控制对象
         timeout: 超时时间(秒)
+        is_upgrade: 是否升级餐厅
     Returns:
         bool: 是否成功领取奖励
     """
@@ -18,8 +23,6 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
     logger = auto.get_task_logger("get_restaurant")
     logger.info("开始领取餐厅奖励")
     start_time = time.time()
-
-    # 状态定义
     state = "first"  # first -> second -> third -> fourth
 
     try:
@@ -31,56 +34,92 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                 logger.info("检测到停止信号，退出任务")
                 return True
 
+            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+
             if state == "first":
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                 if back_to_main(auto, remaining_timeout):
-                    if auto.click((163, 257), coord_type="BASIC"):
+                    if auto.click(
+                        (163, 257),
+                        coord_type="BASIC",
+                        verify={
+                            "type": "text",
+                            "target": "获得",
+                            "timeout": 5,
+                            "roi": roi_config.get_roi("obtain_restaurant_reward", "get_restaurant"),
+                        },
+                        retry=2,
+                        delay=1,
+                    ):
                         logger.info("点击经营管理, next: second")
-                        auto.sleep(2)
                         state = "second"
-                        continue
+                continue
 
             elif state == "second":
-                if auto.text_click("获得", roi=roi_config.get_roi("obtain_restaurant_reward", "get_restaurant")):
+                if auto.text_click(
+                    "获得",
+                    roi=roi_config.get_roi("obtain_restaurant_reward", "get_restaurant"),
+                    verify={
+                        "type": "text",
+                        "target": "立刻前往",
+                        "timeout": 5,
+                        "roi": roi_config.get_roi("immediate_go", "get_restaurant"),
+                    },
+                    retry=2,
+                    delay=1,
+                ):
                     logger.info("点击获得, next: third")
-                    auto.sleep(3)
                     remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                     if click_back(auto, remaining_timeout):
                         logger.info("领取成功")
                     else:
                         logger.info("无需结算")
                     state = "third"
-                    continue
                 else:
                     logger.info("未检测到一键获得按钮, next: first")
                     state = "first"  # 回到初始状态
-                    continue
+                continue
 
             elif state == "third":
-                if auto.text_click("立刻前往", roi=roi_config.get_roi("immediate_go", "get_restaurant")):
+                if auto.text_click(
+                    "立刻前往",
+                    roi=roi_config.get_roi("immediate_go", "get_restaurant"),
+                    verify={
+                        "type": "text",
+                        "target": "常客",
+                        "timeout": 5,
+                        "roi": roi_config.get_roi("frequent_visitor", "get_restaurant"),
+                    },
+                    retry=2,
+                    delay=1,
+                ):
                     logger.info("点击立刻前往, next: fourth")
-                    auto.sleep(3)
                     state = "fourth"
-                    continue
+                continue
 
             elif state == "fourth":
                 if pos_1 := auto.text_click(
                     "常客", click=False, roi=roi_config.get_roi("frequent_visitor", "get_restaurant")
                 ):
                     if is_upgrade:
-                        if pos := auto.check_element_exist("get_restaurant/下一阶段"):
+                        if auto.template_click(
+                            "get_restaurant/下一阶段",
+                            click_time=2,
+                            verify={"type": "exist", "target": "get_restaurant/下一阶段", "timeout": 3},
+                            retry=1,
+                        ):
                             logger.info("点击下一阶段")
-                            auto.click(pos, click_time=2)
-                            auto.sleep(1)
                             continue
 
-                        if pos := auto.check_element_exist("get_restaurant/升级"):
+                        if auto.template_click(
+                            "get_restaurant/升级",
+                            click_time=2,
+                            verify={"type": "exist", "target": "get_restaurant/升级", "timeout": 3},
+                            retry=1,
+                        ):
                             logger.info("点击升级")
-                            auto.click(pos, click_time=2)
-                            auto.sleep(1)
                             continue
 
-                    logger.info("点击常客, next: fifth")
+                    logger.info("点击常客, next: complete")
                     auto.click(pos_1, click_time=2, coord_type="LOGICAL")
                     auto.sleep(1)
                     auto.key_press("h")
@@ -104,12 +143,20 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                         auto.sleep(1)
                         continue
 
-                    if auto.text_click("立刻前往", roi=roi_config.get_roi("immediate_go", "get_restaurant")):
+                    if auto.text_click(
+                        "立刻前往",
+                        roi=roi_config.get_roi("immediate_go", "get_restaurant"),
+                        verify={
+                            "type": "text",
+                            "target": "常客",
+                            "timeout": 5,
+                            "roi": roi_config.get_roi("frequent_visitor", "get_restaurant"),
+                        },
+                        retry=1,
+                    ):
                         logger.info("点击立刻前往")
                         auto.sleep(3)
                         continue
-
-            auto.sleep(0.5)
 
     except Exception as e:
         logger.error(f"餐厅奖励领取出错: {e}")

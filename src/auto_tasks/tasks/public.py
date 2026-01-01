@@ -1,3 +1,8 @@
+"""公共任务函数模块
+
+包含各种任务共享的函数，如超时计算、返回主界面、返回地图等
+"""
+
 import time
 
 from src.auto_control.core.auto import Auto
@@ -33,48 +38,39 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
     start_time = time.time()
 
     try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.warning(f"返回主界面失败，已达超时时间 {timeout} 秒")
-                return False
+        # 检查是否已在主界面
+        if auto.check_element_exist("public/主界面", roi=roi_config.get_roi("main_menu")):
+            logger.debug("已在主界面")
+            return True
 
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
-                return True
+        # 等待主界面出现，使用新的wait_element API
+        if auto.wait_element("public/主界面", timeout=timeout, roi=roi_config.get_roi("main_menu")):
+            logger.debug("等待主界面成功")
+            return True
 
-            auto.sleep(2)
-            # 检查是否已在主界面
-            if auto.check_element_exist("public/主界面", roi=roi_config.get_roi("main_menu")):
-                logger.debug("已在主界面")
-                return True
+        # 备用返回方式，使用带有验证和重试的template_click
+        logger.info("尝试使用返回键返回主界面")
+        if auto.template_click(
+            ["public/返回键1", "public/返回键2"],
+            roi=roi_config.get_roi("back_button"),
+            verify={"type": "exist", "target": "public/主界面", "timeout": 5, "roi": roi_config.get_roi("main_menu")},
+            retry=3,
+        ):
+            return True
 
-            if _handle_confirmation_dialogs(auto):
-                continue
-
-            if _handle_return_identifiers(auto):
-                continue
-
-            # 检查返回是否成功
-            if auto.check_element_exist("public/主界面", roi=roi_config.get_roi("main_menu")):
-                return True
-
-            # 备用返回方式
-            auto.template_click(["public/返回键1", "public/返回键2"], roi=roi_config.get_roi("back_button"))
-
-            if auto.check_element_exist("public/主界面", roi=roi_config.get_roi("main_menu")):
-                return True
-
-            end_game_pos = auto.text_click("结束游戏", click=False, roi=roi_config.get_roi("end_game_text"))
-            if end_game_pos:
-                auto.key_press("esc")
-                auto.sleep(1)
-                auto.key_press("h")
-                auto.sleep(3)
-                # 检查返回是否成功
-                if auto.check_element_exist("public/主界面", roi=roi_config.get_roi("main_menu")):
-                    return True
-
+        # 检查结束游戏文本
+        end_game_pos = auto.text_click("结束游戏", click=False, roi=roi_config.get_roi("end_game_text"))
+        if end_game_pos:
+            logger.info("尝试使用ESC+H返回主界面")
+            auto.key_press("esc")
             auto.sleep(1)
+            auto.key_press("h")
+            # 使用wait_element等待主界面出现
+            if auto.wait_element("public/主界面", timeout=5, roi=roi_config.get_roi("main_menu")):
+                return True
+
+        logger.warning(f"返回主界面失败，已达超时时间 {timeout} 秒")
+        return False
 
     except Exception as e:
         logger.error(f"返回主界面时发生错误: {e}")
@@ -133,9 +129,8 @@ def back_to_map(auto: Auto, timeout: int = 30) -> bool:
             if dodge_pos or map_pos:
                 logger.info("已在地图")
                 return True
-            else:
-                auto.key_press("esc")
-                auto.sleep(1)
+            auto.key_press("esc")
+            auto.sleep(1)
 
             logger.debug("未检测到地图标识或地图按钮，重试")
     except Exception as e:
@@ -155,35 +150,32 @@ def click_back(auto: Auto, timeout: int = 30) -> bool:
         bool: 是否成功点击返回
     """
     logger = auto.get_task_logger("click_back")
-    start_time = time.time()
 
     try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.warning(f"点击返回超时，已达超时时间 {timeout} 秒")
-                return False
+        # 检查是否存在返回提示文本
+        if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
+            logger.debug("未检测到点击画面返回提示，任务已完成")
+            return True
 
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
-                return True
+        # 使用带有验证的text_click，验证文本消失
+        logger.info("尝试点击返回提示")
+        if auto.text_click(
+            "点击画面即可返回",
+            roi=roi_config.get_roi("back_image_text"),
+            verify={
+                "type": "disappear",
+                "target": "点击画面即可返回",
+                "timeout": 5,
+                "roi": roi_config.get_roi("back_image_text"),
+            },
+            retry=3,
+        ):
+            logger.debug("点击画面返回成功")
+            return True
 
-            # 检查是否存在返回提示文本
-            if auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
-                # 文本存在，尝试点击
-                if auto.text_click("点击画面即可返回", roi=roi_config.get_roi("back_image_text")):
-                    logger.debug("点击画面返回成功")
-                    auto.sleep(2)
-                    # 再次检查文本是否消失
-                    if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
-                        return True
-                    logger.debug("点击后文本仍存在，继续重试")
-                else:
-                    logger.debug("点击返回失败，重试")
-                auto.sleep(1)
-            else:
-                # 文本不存在，说明已经不在需要点击返回的界面了
-                logger.debug("未检测到点击画面返回提示，任务已完成")
-                return True
+        logger.warning(f"点击返回超时，已达超时时间 {timeout} 秒")
+        return False
+
     except Exception as e:
         logger.error(f"点击返回时发生错误: {e}")
         return False
@@ -202,35 +194,40 @@ def enter_map_select(auto: Auto, timeout: int = 30, swipe_duration: int = 6, is_
         bool: 是否成功进入地图选择
     """
     logger = auto.get_task_logger("enter_map_select")
-    start_time = time.time()
 
     try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.warning(f"进入地图选择超时，已达超时时间 {timeout} 秒")
-                return False
+        # 检查是否已在地图选择界面
+        if auto.text_click("游戏卡珍藏集", click=False, roi=roi_config.get_roi("game_collection_text")):
+            logger.debug("已在地图选择界面")
+            if is_swipe:
+                logger.debug("执行滑动操作")
+                auto.swipe((1800, 700), (1800, 900), duration=swipe_duration, steps=3, coord_type="BASE")
+                auto.sleep(2)
+            return True
 
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
-                return True
+        # 使用带有验证的click，验证进入地图选择界面
+        logger.info("尝试点击地图选择按钮")
+        if auto.click(
+            (1720, 990),
+            click_time=2,
+            coord_type="BASE",
+            verify={
+                "type": "text",
+                "target": "游戏卡珍藏集",
+                "timeout": 5,
+                "roi": roi_config.get_roi("game_collection_text"),
+            },
+            retry=3,
+        ):
+            if is_swipe:
+                logger.debug("执行滑动操作")
+                auto.swipe((1800, 700), (1800, 900), duration=swipe_duration, steps=3, coord_type="BASE")
+                auto.sleep(2)
+            logger.debug("成功进入地图选择界面")
+            return True
 
-            if not auto.click((1720, 990), click_time=2, coord_type="BASE"):
-                logger.warning("点击地图选择按钮失败，重试")
-                auto.sleep(1)
-                continue
-
-            auto.sleep(2)
-
-            if auto.text_click("游戏卡珍藏集", click=False, roi=roi_config.get_roi("game_collection_text")):
-                if is_swipe:
-                    logger.debug("执行滑动操作")
-                    if auto.swipe((1800, 700), (1800, 900), duration=swipe_duration, steps=3, coord_type="BASE"):
-                        auto.sleep(2)
-                logger.debug("检测到游戏卡珍藏集")
-                return True
-            else:
-                logger.warning("未检测到游戏卡珍藏集，重试")
-                auto.sleep(1)
+        logger.warning(f"进入地图选择超时，已达超时时间 {timeout} 秒")
+        return False
 
     except Exception as e:
         logger.error(f"进入地图选择时发生错误: {e}")

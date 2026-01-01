@@ -1,7 +1,12 @@
+"""地图奖励收集模块
+
+包含地图探索和奖励收集功能
+"""
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.tasks.public import (back_to_main,
+from src.auto_tasks.tasks.public import (
+                                      back_to_main,
                                       calculate_remaining_timeout,
                                       enter_map_select)
 
@@ -36,9 +41,10 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
                 logger.info("检测到停止信号，退出任务")
                 return True
 
+            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+            
             # 初始状态：进入地图选择
             if state == "init":
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                 if back_to_main(auto, remaining_timeout) and enter_map_select(auto, remaining_timeout):
                     logger.info("成功进入地图选择界面")
                     state = "chapter_selecting"
@@ -47,16 +53,22 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
             # 选择章节
             if state == "chapter_selecting":
                 # 尝试找到第七章地图
-                if pos := auto.check_element_exist("map_collection/第七章1"):
+                if auto.template_click(
+                    "map_collection/第七章1",
+                    verify={"type": "exist", "target": "map_collection/探寻", "timeout": 5},
+                    retry=1
+                ):
                     logger.info("进入第七章1")
-                    auto.click(pos)
-                elif pos := auto.check_element_exist("map_collection/第七章2"):
+                elif auto.template_click(
+                    "map_collection/第七章2",
+                    verify={"type": "exist", "target": "map_collection/探寻", "timeout": 5},
+                    retry=1
+                ):
                     logger.info("进入第七章2")
-                    auto.click(pos)
                 else:
                     # 滑动地图寻找第七章
                     logger.info("滑动寻找第七章")
-                    auto.swipe((1666, 266), (833, 266), duration=5, steps=4,coord_type="BASE")
+                    auto.swipe((1666, 266), (833, 266), duration=5, steps=4, coord_type="BASE")
                     auto.sleep(2)
                     continue
 
@@ -66,10 +78,13 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
 
             # 章节已选择状态
             if state == "chapter_selected":
-                if pos := auto.check_element_exist("map_collection/探寻"):
+                if auto.template_click(
+                    "map_collection/探寻",
+                    click_time=2,
+                    verify={"type": "exist", "target": "map_collection/材料吸收", "timeout": 10},
+                    retry=1
+                ):
                     logger.info("开始探寻")
-                    auto.click(pos, click_time=2)
-                    auto.sleep(5)
                     state = "exploring"
                 continue
 
@@ -77,27 +92,29 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
             if state == "exploring":
                 # 收集材料
                 if not materials_collected:
-                    if pos := auto.check_element_exist("map_collection/材料吸收"):
+                    if auto.template_click(
+                        "map_collection/材料吸收",
+                        click_time=2,
+                        verify={"type": "exist", "target": "map_collection/吸收材料完成", "timeout": 5},
+                        retry=2
+                    ):
                         logger.info("收集材料")
-                        auto.click(pos, click_time=2)
                         collect_attempts += 1
-
-                        if auto.check_element_exist("map_collection/吸收材料完成"):
-                            logger.info("材料收集完成")
-                            materials_collected = True
-                            auto.sleep(2)
+                        materials_collected = True
+                        auto.sleep(2)
 
                 # 收集金币
                 if not gold_collected:
-                    if pos := auto.check_element_exist("map_collection/金币吸收"):
+                    if auto.template_click(
+                        "map_collection/金币吸收",
+                        click_time=2,
+                        verify={"type": "exist", "target": "map_collection/金币吸收完成", "timeout": 5},
+                        retry=2
+                    ):
                         logger.info("收集金币")
-                        auto.click(pos, click_time=2)
                         collect_attempts += 1
-
-                        if auto.check_element_exist("map_collection/金币吸收完成"):
-                            logger.info("金币收集完成")
-                            gold_collected = True
-                            auto.sleep(2)
+                        gold_collected = True
+                        auto.sleep(2)
 
                 # 检查是否完成
                 if materials_collected and gold_collected:
@@ -106,7 +123,6 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
 
             # 完成状态
             if state == "completing":
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                 if back_to_main(auto, remaining_timeout):
                     total_time = round(time.time() - start_time, 2)
                     minutes = int(total_time // 60)

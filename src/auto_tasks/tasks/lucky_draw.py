@@ -1,10 +1,15 @@
+"""抽抽乐模块
+
+包含抽抽乐活动的抽奖功能
+"""
+
 import time
 
 from src.auto_control.core.auto import Auto
 from src.auto_tasks.tasks.public import back_to_main, calculate_remaining_timeout
 
 
-def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
+def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7) -> bool:
     """抽抽乐
 
     Args:
@@ -20,6 +25,7 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
         start_time = time.time()
         first = True
         last_count = target_count
+        completed_count = 0
 
         while True:
             if timeout > 0 and time.time() - start_time >= timeout:
@@ -28,16 +34,22 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
+
+            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+
             # 检测是否在主界面
             if first:
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                 if back_to_main(auto, remaining_timeout):
-                    auto.text_click("抽抽乐")
+                    if auto.text_click(
+                        "抽抽乐", verify={"type": "text", "target": "免费1次", "timeout": 5}, retry=2, delay=1
+                    ):
+                        logger.info("进入抽抽乐")
                     auto.sleep(3)
                     first = False
 
             if not first:
-                if auto.text_click("免费1次"):
+                # 尝试点击免费1次
+                if auto.text_click("免费1次", verify={"type": "exist", "target": "public/跳过", "timeout": 5}, retry=1):
                     logger.info("检测到免费1次")
                     auto.sleep(2)
                 else:
@@ -58,24 +70,29 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7):
                         auto.sleep(1)
                         logger.info("点击抽抽乐")
 
-                if auto.text_click("购买", click_time=2):
+                if auto.text_click(
+                    "购买", click_time=2, verify={"type": "exist", "target": "public/跳过", "timeout": 5}, retry=1
+                ):
                     logger.info("点击购买")
                     auto.sleep(2)
-                pos = None
-                if pos := auto.check_element_exist("public/跳过"):
+
+                # 跳过动画
+                if auto.template_click(
+                    "public/跳过", verify={"type": "exist", "target": "lucky_draw/抽完标识", "timeout": 5}, retry=1
+                ):
                     logger.info("点击跳过")
-                    auto.click(pos)
                     auto.sleep(1)
+
+                # 检查是否抽完
                 if auto.check_element_exist("lucky_draw/抽完标识"):
                     logger.info("检测到抽完标识")
                     auto.sleep(1)
                     auto.key_press("esc")
                     auto.sleep(1)
-                    target_count -= 1
-            else:
-                logger.info("进入抽抽乐")
-                first = True
-            if target_count <= 0:
+                    completed_count += 1
+
+            # 检查是否完成所有抽奖
+            if completed_count >= target_count:
                 logger.info("抽抽乐次数已达上限")
                 remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                 if back_to_main(auto, remaining_timeout):

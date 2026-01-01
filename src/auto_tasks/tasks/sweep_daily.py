@@ -1,11 +1,16 @@
+"""每日扫荡模块
+
+包含每日快速狩猎的扫荡功能，包括饭团和火炬的使用
+"""
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.tasks.public import (back_to_main,
+from src.auto_tasks.tasks.public import (
+                                      back_to_main,
                                       calculate_remaining_timeout, click_back)
 
 
-def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torch: str = "火之洞穴"):
+def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torch: str = "火之洞穴") -> bool:
     """每日扫荡
     Args:
         auto: Auto控制对象
@@ -37,9 +42,10 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
                 logger.info("检测到停止信号，退出任务")
                 return True
 
+            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+            
             # 检查主界面
             if not state["main_checked"]:
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                 if back_to_main(auto, remaining_timeout):
                     logger.info("成功返回主界面")
                     state["main_checked"] = True
@@ -48,67 +54,88 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
             # 进入扫荡界面
             if not state["sweep_entered"]:
                 logger.info("开始检测扫荡标识")
-                if pos := auto.text_click("快速狩猎", click=False, roi=(1713, 278, 100, 44)):
+                if auto.text_click(
+                    "快速狩猎",
+                    roi=(1713, 278, 100, 44),
+                    click_time=3,
+                    coord_type="PHYSICAL",
+                    verify={"type": "text", "target": "野猪洞穴", "timeout": 5},
+                    retry=2,
+                    delay=1
+                ):
                     logger.info("检测到快速狩猎标识")
-                    auto.click(pos, click_time=3, coord_type="PHYSICAL")
-                    auto.sleep(5)
-                    if auto.text_click("野猪洞穴", click=False):
-                        logger.info("进入到扫荡界面")
-                        auto.sleep(1)
-                        state["sweep_entered"] = True
+                    state["sweep_entered"] = True
                 continue
 
             # 处理饭团扫荡
             if not state["onigiri_completed"]:
                 if not state["onigiri_selected"]:
-                    if pos := auto.check_element_exist(f"sweep_daily/{onigiri}"):
-                        logger.info(f"检测到{onigiri}")
-                        auto.click(pos)
-                        auto.sleep(1)
-                        if auto.check_element_exist(f"sweep_daily/{onigiri}产出"):
-                            if auto.template_click("sweep_daily/快速狩猎"):
-                                logger.info("点击快速狩猎")
-                                auto.sleep(1)
-                                state["onigiri_selected"] = True
-                    continue
-
-                if pos := auto.text_click("MAX", click_time=3):
-                    auto.click(pos)
-                    if pos := auto.check_element_exist("sweep_daily/狩猎按钮"):
-                        logger.info("点击狩猎按钮")
-                        auto.click(pos)
-                        auto.sleep(3)
-                        remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-                        if not click_back(auto, remaining_timeout):
-                            auto.text_click("取消")
-                            logger.info("米饭已用完")
-                        state["onigiri_completed"] = True
+                    if auto.template_click(
+                        f"sweep_daily/{onigiri}",
+                        verify={"type": "exist", "target": f"sweep_daily/{onigiri}产出", "timeout": 5},
+                        retry=1
+                    ):
+                        logger.info("检测到%s", onigiri)
+                        if auto.template_click(
+                            "sweep_daily/快速狩猎",
+                            verify={"type": "text", "target": "MAX", "timeout": 5},
+                            retry=1
+                        ):
+                            logger.info("点击快速狩猎")
+                            state["onigiri_selected"] = True
                 else:
-                    state["onigiri_selected"] = False
+                    if pos := auto.text_click("MAX", click=False):
+                        logger.info("点击MAX")
+                        auto.click(pos, click_time=3)
+                        auto.sleep(1)
+                        if auto.template_click(
+                            "sweep_daily/狩猎按钮",
+                            verify={"type": "exist", "target": "public/返回键1", "timeout": 10},
+                            retry=1
+                        ):
+                            logger.info("点击狩猎按钮")
+                            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                            if not click_back(auto, remaining_timeout):
+                                auto.text_click("取消")
+                                logger.info("米饭已用完")
+                            state["onigiri_completed"] = True
+                    else:
+                        state["onigiri_selected"] = False
                 continue
 
             # 处理火把扫荡
             if not state["torch_selected"]:
-                if pos := auto.check_element_exist("sweep_daily/天赋本"):
+                if auto.template_click(
+                    "sweep_daily/天赋本",
+                    verify={"type": "text", "target": torch, "timeout": 5},
+                    retry=1
+                ):
                     logger.info("点击天赋本")
-                    auto.click(pos)
-                    auto.sleep(1)
-                    if auto.text_click(f"{torch}"):
-                        if auto.template_click("sweep_daily/快速狩猎"):
+                    if auto.text_click(
+                        f"{torch}",
+                        verify={"type": "text", "target": "快速狩猎", "timeout": 5},
+                        retry=1
+                    ):
+                        if auto.template_click(
+                            "sweep_daily/快速狩猎",
+                            verify={"type": "text", "target": "MAX", "timeout": 5},
+                            retry=1
+                        ):
                             logger.info(f"点击快速狩猎")
-                            auto.sleep(1)
                             state["torch_selected"] = True
-                    else:
-                        logger.info(f"未检测到{torch}")
                 continue
 
-            if pos := auto.text_click("MAX", click_time=3):
-                auto.click(pos)
-                if pos := auto.check_element_exist("sweep_daily/狩猎按钮"):
+            if pos := auto.text_click("MAX", click=False):
+                logger.info("点击MAX")
+                auto.click(pos, click_time=3)
+                if auto.template_click(
+                    "sweep_daily/狩猎按钮",
+                    verify={"type": "exist", "target": "public/返回键1", "timeout": 10},
+                    retry=1
+                ):
                     logger.info("点击狩猎按钮")
-                    auto.click(pos)
                     auto.sleep(3)
-                    remaining_timeout = max(0, timeout - int(time.time() - start_time)) if timeout > 0 else 0
+                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                     if not click_back(auto, remaining_timeout):
                         auto.text_click("取消")
                         logger.info("火把已用完")

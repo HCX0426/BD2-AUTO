@@ -1,3 +1,8 @@
+"""公会奖励领取模块
+
+包含公会奖励的领取功能
+"""
+
 import time
 
 from src.auto_control.core.auto import Auto
@@ -19,7 +24,7 @@ def get_guild(auto: Auto, timeout: int = 300) -> bool:
     logger.info("开始领取公会奖励")
 
     start_time = time.time()
-    state = "init"  # 状态机: init -> entered -> checking -> completed
+    state = "init"  # 状态机: init -> main_checked -> guild_entered -> completed
 
     try:
         while True:
@@ -30,51 +35,60 @@ def get_guild(auto: Auto, timeout: int = 300) -> bool:
                 logger.info("检测到停止信号，退出任务")
                 return True
 
-            # 初始状态：进入公会界面
+            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+
+            # 1. 返回主界面
             if state == "init":
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                logger.info("返回主界面")
                 if back_to_main(auto, remaining_timeout):
-                    if auto.template_click("get_guild/公会标识", roi=roi_config.get_roi("guild_icon", "get_guild")):
-                        logger.info("成功进入公会界面")
-                        auto.sleep(4)
-                        state = "entered"
+                    state = "main_checked"
                 continue
 
-            # 检查公会商店
-            if state == "entered":
-                if auto.check_element_exist("get_guild/公会商店", roi=roi_config.get_roi("guild_shop", "get_guild")):
-                    logger.info("检测到公会商店")
-                    state = "checking"
-                else:
-                    logger.warning("未检测到公会商店，重新尝试")
-                    state = "init"
+            # 2. 点击公会标识，进入公会界面
+            if state == "main_checked":
+                logger.info("点击公会标识，进入公会界面")
+                if auto.template_click(
+                    "get_guild/公会标识",
+                    roi=roi_config.get_roi("guild_icon", "get_guild"),
+                    verify={
+                        "type": "exist",
+                        "target": "get_guild/公会商店",
+                        "timeout": 10,
+                        "roi": roi_config.get_roi("guild_shop", "get_guild"),
+                    },
+                    retry=2,
+                    delay=1,
+                ):
+                    auto.sleep(2)
+                    state = "guild_entered"
                 continue
 
-            # 返回处理
-            if state == "checking":
-                if auto.template_click("public/返回键1", roi=roi_config.get_roi("back_button")):
-                    logger.info("成功点击返回键")
+            # 3. 点击返回键
+            if state == "guild_entered":
+                logger.info("点击返回键")
+                if auto.template_click(
+                    "public/返回键1",
+                    roi=roi_config.get_roi("back_button"),
+                    verify={"type": "exist", "target": "public/主界面", "timeout": 10},
+                    retry=2,
+                    delay=1,
+                ):
                     auto.sleep(2)
                     state = "completed"
-                else:
-                    logger.warning("返回失败，重新尝试")
-                    state = "entered"
                 continue
 
-            # 完成状态：返回主界面
+            # 4. 返回主界面，完成任务
             if state == "completed":
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-                if back_to_main(auto, remaining_timeout):
+                logger.info("返回主界面，完成任务")
+                if back_to_main(auto, 10):
                     total_time = round(time.time() - start_time, 2)
                     minutes = int(total_time // 60)
                     seconds = round(total_time % 60, 2)
                     logger.info(f"公会奖励领取完成，用时：{minutes}分{seconds}秒")
                     return True
-                logger.warning("返回主界面失败，重试中...")
-                state = "init"
-                continue
-
-            auto.sleep(0.5)
+                else:
+                    logger.warning("返回主界面失败，但任务已完成")
+                    return True
 
     except Exception as e:
         logger.error(f"领取公会奖励过程中出错: {e}")

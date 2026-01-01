@@ -1,7 +1,7 @@
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -74,7 +74,7 @@ class Auto:
         self.path_manager = path_manager or default_path_manager
         self.config = config or default_config
         self.test_mode = self.config.get("debug", False)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # 使用可重入锁，解决递归锁问题
         self.stop_event = threading.Event()
         self.running = False
         self.start_time = None
@@ -283,6 +283,76 @@ class Auto:
             self.last_result = False
             return False
 
+    # ======================== 优化后的等待与验证机制 ========================
+    def wait_for(
+        self, condition: Callable[[], bool], timeout: int = 30, interval: float = 0.5, desc: str = "条件验证"
+    ) -> bool:
+        """
+        等待条件满足，支持超时和中断检查
+
+        Args:
+            condition: 条件验证函数，返回True表示条件满足
+            timeout: 最大等待时间（秒），默认30秒
+            interval: 检查间隔（秒），默认0.5秒
+            desc: 条件描述，用于日志
+
+        Returns:
+            bool: 条件满足返回True，超时返回False
+        """
+        start_time = time.time()
+        self.logger.info(f"[等待] {desc}，超时: {timeout}秒")
+
+        while True:
+            if self.check_should_stop():
+                self.logger.info(f"[等待中断] {desc}")
+                return True
+
+            elapsed = time.time() - start_time
+            if elapsed >= timeout:
+                self.logger.warning(f"[等待超时] {desc}，耗时: {elapsed:.1f}秒")
+                return False
+
+            if condition():
+                self.logger.info(f"[等待成功] {desc}，耗时: {elapsed:.1f}秒")
+                return True
+
+            self.sleep(interval)
+
+    def verify(
+        self,
+        verify_type: str,
+        target: Union[str, List[str]],
+        timeout: int = 30,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+    ) -> bool:
+        """
+        统一的屏幕验证方法
+
+        Args:
+            verify_type: 验证类型，可选值："exist", "disappear", "text"
+            target: 验证目标，模板名称或文本
+            timeout: 验证超时时间（秒），默认30秒
+            roi: 验证区域（基准ROI）
+
+        Returns:
+            bool: 验证成功返回True，否则返回False
+        """
+        self.logger.info(f"[验证] {verify_type} - {target}，超时: {timeout}秒")
+
+        def condition() -> bool:
+            if verify_type == "exist":
+                return self.check_element_exist(target, roi=roi, wait_timeout=0) is not None
+            elif verify_type == "disappear":
+                return self.check_element_exist(target, roi=roi, wait_timeout=0) is None
+            elif verify_type == "text":
+                return self.text_click(target, click=False, roi=roi) is not None
+            else:
+                self.last_error = f"无效的验证类型: {verify_type}"
+                self.logger.error(self.last_error)
+                return False
+
+        return self.wait_for(condition, timeout, desc=f"{verify_type} - {target}")
+
     # ======================== 设备管理方法 ========================
     def add_device(self, device_uri: str = DEFAULT_DEVICE_URI, timeout: float = 10.0) -> bool:
         """
@@ -358,7 +428,7 @@ class Auto:
                 self.logger.info("系统已处于运行状态")
                 return
             self.running = True
-            self.should_stop = False
+            self.set_should_stop(False)  # 使用正确的方法重置中断标志
             self.start_time = time.time()
 
         self.logger.info("自动化系统开始启动")
@@ -383,8 +453,8 @@ class Auto:
             self.logger.info(f"系统运行时长: {minutes}分{seconds}秒")
             self.start_time = None
 
-        self.logger.shutdown()
         self.logger.info("BD2-AUTO 自动化系统已停止")
+        self.logger.shutdown()
 
     def get_status(self) -> dict:
         """
@@ -438,6 +508,8 @@ class Auto:
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
         coord_type: str = "LOGICAL",
+        verify: Optional[dict] = None,
+        retry: int = 0,
     ) -> bool:
         """
         坐标点击操作（自动进行坐标转换）
@@ -448,45 +520,67 @@ class Auto:
             delay: 执行前延迟时间（秒），默认DEFAULT_CLICK_DELAY
             device_uri: 目标设备URI（None使用默认设备）
             coord_type: 坐标类型（默认"LOGICAL"：客户区逻辑坐标；"BASE"：基准分辨率坐标；"PHYSICAL"：客户区物理坐标）
+            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
+            retry: 重试次数，默认0次
 
         Returns:
             bool: 点击成功返回True，失败返回False
         """
-        if self.check_should_stop():
-            self.logger.debug("点击任务被中断")
-            self.last_result = False
-            return False
+        coord_type_str = (
+            "基准坐标" if coord_type == "BASE" else ("客户区物理坐标" if coord_type == "PHYSICAL" else "客户区逻辑坐标")
+        )
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device:
-            self.last_result = False
-            return False
+        for attempt in range(retry + 1):
+            if self.check_should_stop():
+                self.logger.debug("点击任务被中断")
+                self.last_result = False
+                return False
 
-        # 根据字符串类型转换为CoordType枚举
-        if coord_type == "BASE":
-            device_coord_type = CoordType.BASE
-        elif coord_type == "PHYSICAL":
-            device_coord_type = CoordType.PHYSICAL
-        else:  # 默认LOGICAL
-            device_coord_type = CoordType.LOGICAL
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device:
+                self.last_result = False
+                continue
 
-        self.last_result = device.click((pos[0], pos[1]), click_time=click_time, coord_type=device_coord_type)
+            # 根据字符串类型转换为CoordType枚举
+            if coord_type == "BASE":
+                device_coord_type = CoordType.BASE
+            elif coord_type == "PHYSICAL":
+                device_coord_type = CoordType.PHYSICAL
+            else:  # 默认LOGICAL
+                device_coord_type = CoordType.LOGICAL
 
-        if not self.last_result:
-            self.last_error = device.last_error or "点击执行失败"
-            self.logger.error(self.last_error)
-        else:
-            coord_type_str = (
-                "基准坐标"
-                if coord_type == "BASE"
-                else ("客户区物理坐标" if coord_type == "PHYSICAL" else "客户区逻辑坐标")
-            )
+            result = device.click((pos[0], pos[1]), click_time=click_time, coord_type=device_coord_type)
+
+            if not result:
+                self.last_error = device.last_error or "点击执行失败"
+                self.logger.error(self.last_error)
+                continue
+
             self.logger.info(f"点击成功: {coord_type_str}{pos} | 点击次数{click_time}")
             # 清除截图缓存，因为点击操作可能改变界面
             self.clear_screenshot_cache()
 
-        return self.last_result
+            # 如果不需要验证，直接返回成功
+            if not verify:
+                self.last_result = True
+                return True
+
+            # 执行验证
+            if self.verify(
+                verify_type=verify.get("type"),
+                target=verify.get("target"),
+                timeout=verify.get("timeout", 10),
+                roi=verify.get("roi"),
+            ):
+                self.last_result = True
+                return True
+
+            self.logger.warning(f"[验证失败] 坐标点击 {coord_type_str}{pos}，尝试: {attempt + 1}/{retry + 1}")
+
+        self.logger.error(f"[坐标点击失败] {coord_type_str}{pos}，已达最大重试次数: {retry}")
+        self.last_result = False
+        return False
 
     def key_press(
         self,
@@ -494,6 +588,8 @@ class Auto:
         duration: float = DEFAULT_KEY_DURATION,
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
+        verify: Optional[dict] = None,
+        retry: int = 0,
     ) -> bool:
         """
         按键操作（支持系统按键和普通字符键）
@@ -503,96 +599,139 @@ class Auto:
             duration: 按键按住时长（秒），默认DEFAULT_KEY_DURATION
             delay: 执行前延迟时间（秒），默认DEFAULT_CLICK_DELAY
             device_uri: 目标设备URI（None使用默认设备）
+            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
+            retry: 重试次数，默认0次
 
         Returns:
             bool: 按键成功返回True，失败返回False
         """
-        if self.check_should_stop():
-            self.logger.debug("按键任务被中断")
-            self.last_result = False
-            return False
+        for attempt in range(retry + 1):
+            if self.check_should_stop():
+                self.logger.debug("按键任务被中断")
+                self.last_result = False
+                return False
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device:
-            self.last_result = False
-            return False
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device:
+                self.last_result = False
+                continue
 
-        self.last_result = device.key_press(key, duration=duration)
-        if not self.last_result:
-            self.last_error = device.last_error or f"按键 {key} 失败"
-            self.logger.error(self.last_error)
-        else:
+            result = device.key_press(key, duration=duration)
+            if not result:
+                self.last_error = device.last_error or f"按键 {key} 失败"
+                self.logger.error(self.last_error)
+                continue
+
             self.logger.info(f"按键成功: {key} | 按住时长{duration}s")
             # 清除截图缓存，因为按键操作可能改变界面
             self.clear_screenshot_cache()
 
-        return self.last_result
+            # 如果不需要验证，直接返回成功
+            if not verify:
+                self.last_result = True
+                return True
+
+            # 执行验证
+            if self.verify(
+                verify_type=verify.get("type"),
+                target=verify.get("target"),
+                timeout=verify.get("timeout", 10),
+                roi=verify.get("roi"),
+            ):
+                self.last_result = True
+                return True
+
+            self.logger.warning(f"[验证失败] 按键 {key}，尝试: {attempt + 1}/{retry + 1}")
+
+        self.logger.error(f"[按键失败] {key}，已达最大重试次数: {retry}")
+        self.last_result = False
+        return False
 
     def template_click(
         self,
-        template_name: Union[str, List[str]],
+        template: Union[str, List[str]],
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
         duration: float = 0.1,
         click_time: int = 1,
         right_click: bool = False,
         roi: Optional[Tuple[int, int, int, int]] = None,
+        verify: Optional[dict] = None,
+        retry: int = 0,
     ) -> bool:
         """
         模板匹配点击（支持多模板、ROI筛选，自动适配分辨率）
 
         Args:
-            template_name: 模板名称（单个或多个模板列表）
+            template: 模板名称（单个或多个模板列表）
             delay: 执行前延迟时间（秒），默认DEFAULT_CLICK_DELAY
             device_uri: 目标设备URI（None使用默认设备）
             duration: 点击按住时长（秒），默认0.1秒
             click_time: 点击次数，默认1次
             right_click: 是否右键点击（默认False：左键）
             roi: 搜索区域（基准ROI，格式 (x, y, width, height)，None则全屏搜索）
+            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
+            retry: 重试次数，默认0次
 
         Returns:
             bool: 点击成功返回True，失败返回False
         """
-        if self.check_should_stop():
-            self.logger.debug("模板点击任务被中断")
-            self.last_result = False
-            return False
+        templates = [template] if isinstance(template, str) else template
+        roi_info = f"，ROI: {roi}" if roi else ""
+        template_info = f"{templates[0]}等{len(templates)}个模板" if len(templates) > 1 else str(templates[0])
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device:
-            self.last_result = False
-            return False
+        for attempt in range(retry + 1):
+            self.logger.info(f"[模板点击] {template_info}{roi_info}，尝试: {attempt + 1}/{retry + 1}")
 
-        templates = [template_name] if isinstance(template_name, str) else template_name
+            if self.check_should_stop():
+                self.logger.debug("[模板点击中断] 任务被中断")
+                self.last_result = False
+                return False
 
-        params_info = []
-        if roi:
-            params_info.append(f"基准ROI: {roi}")
-        if len(templates) > 1:
-            params_info.append(f"模板数量: {len(templates)}")
-        param_log = f" | {', '.join(params_info)}" if params_info else ""
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device:
+                self.last_result = False
+                continue
 
-        self.logger.debug(f"模板点击请求: {templates}{param_log}")
+            result = device.click(
+                pos=templates, duration=duration, click_time=click_time, right_click=right_click, roi=roi
+            )
 
-        self.last_result = device.click(
-            pos=templates, duration=duration, click_time=click_time, right_click=right_click, roi=roi
-        )
+            if not result:
+                self.last_error = device.last_error or f"模板 {templates} 点击失败"
+                self.logger.warning(f"[点击失败] {template_info}{roi_info}")
+                continue
 
-        if not self.last_result:
-            self.last_error = device.last_error or f"模板 {templates} 点击失败"
-            self.logger.error(self.last_error)
-        else:
-            self.logger.info(f"模板点击成功: {templates}{param_log} | 右键={right_click}")
-            # 清除截图缓存，因为点击操作可能改变界面
+            self.logger.info(f"[点击成功] {template_info}{roi_info} | 右键={right_click}")
+            # 清除截图缓存
             self.clear_screenshot_cache()
 
-        return self.last_result
+            # 如果不需要验证，直接返回成功
+            if not verify:
+                self.last_result = True
+                return True
+
+            # 执行验证
+            if self.verify(
+                verify_type=verify.get("type"),
+                target=verify.get("target"),
+                timeout=verify.get("timeout", 10),
+                roi=verify.get("roi"),
+            ):
+                self.last_result = True
+                return True
+
+            self.logger.warning(f"[验证失败] {template_info}{roi_info}，尝试: {attempt + 1}/{retry + 1}")
+
+        self.logger.error(f"[模板点击失败] {template_info}{roi_info}，已达最大重试次数: {retry}")
+        self.last_result = False
+        return False
 
     def text_click(
         self,
-        target_text: str,
+        text: str,
         click: bool = True,
         lang: str = None,
         roi: Optional[tuple] = None,
@@ -601,12 +740,14 @@ class Auto:
         duration: float = 0.1,
         click_time: int = 1,
         right_click: bool = False,
+        verify: Optional[dict] = None,
+        retry: int = 0,
     ) -> Optional[Tuple[int, int]]:
         """
         OCR文本识别并点击（支持ROI筛选，自动坐标适配）
 
         Args:
-            target_text: 目标识别文本
+            text: 目标识别文本
             click: 是否执行点击（默认True：识别后点击）
             lang: OCR识别语言（默认自动适配）
             roi: 识别区域（基准ROI，格式 (x, y, width, height)，None则全屏识别）
@@ -615,138 +756,228 @@ class Auto:
             duration: 点击按住时长（秒），默认0.1秒
             click_time: 点击次数，默认1次
             right_click: 是否右键点击（默认False：左键）
+            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
+            retry: 重试次数，默认0次
 
         Returns:
             Optional[Tuple[int, int]]: 点击坐标（客户区逻辑坐标），未识别到文本或失败返回None
         """
-        if self.check_should_stop():
-            self.logger.debug("文本点击任务被中断")
-            self.last_result = None
-            return None
+        roi_info = f"，ROI: {roi}" if roi else ""
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device:
-            self.last_result = None
-            return None
+        for attempt in range(retry + 1):
+            self.logger.info(f"[文本点击] '{text}'{roi_info}，尝试: {attempt + 1}/{retry + 1}")
 
-        screen = device.capture_screen()
-        if screen is None:
-            self.last_error = "文本点击: 截图失败"
-            self.logger.error(self.last_error)
-            self.last_result = None
-            return None
-
-        if roi:
-            self.logger.debug(f"文本识别请求: '{target_text}' | 基准ROI: {roi}")
-
-        ocr_result = self.ocr_processor.find_text_position(image=screen, target_text=target_text, lang=lang, region=roi)
-
-        if not ocr_result:
-            self.last_error = f"文本点击: 未识别到文本 '{target_text}'"
-            self.logger.warning(self.last_error)
-            self.last_result = None
-            return None
-
-        text_pos_log = ocr_result
-        x_log, y_log, w_log, h_log = text_pos_log
-        click_center = (x_log + w_log // 2, y_log + h_log // 2)
-
-        is_fullscreen = self.coord_transformer.is_fullscreen
-        self.logger.info(
-            f"识别到文本 '{target_text}' | 模式: {'全屏' if is_fullscreen else '窗口'} | "
-            f"客户区逻辑坐标: ({x_log},{y_log},{w_log},{h_log}) | 点击中心点: {click_center}"
-        )
-
-        if click:
-            click_result = device.click(
-                pos=click_center,
-                duration=duration,
-                click_time=click_time,
-                right_click=right_click,
-                coord_type=CoordType.LOGICAL,  # 标识点击坐标为逻辑坐标
-            )
-            if not click_result:
-                self.last_error = device.last_error or "文本点击执行失败"
-                self.logger.error(self.last_error)
+            if self.check_should_stop():
+                self.logger.debug("[文本点击中断] 任务被中断")
+                self.last_result = None
                 return None
-            # 清除截图缓存，因为点击操作可能改变界面
-            self.clear_screenshot_cache()
-            return click_center
-        else:
-            self.last_result = click_center
-            return click_center
+
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device:
+                self.last_result = None
+                continue
+
+            screen = device.capture_screen()
+            if screen is None:
+                self.last_error = "[文本点击] 截图失败"
+                self.logger.error(self.last_error)
+                self.last_result = None
+                continue
+
+            if roi:
+                self.logger.debug(f"[文本识别] '{text}' | ROI: {roi}")
+
+            ocr_result = self.ocr_processor.find_text_position(image=screen, target_text=text, lang=lang, region=roi)
+
+            if not ocr_result:
+                self.last_error = f"[文本识别失败] 未识别到文本 '{text}'"
+                self.logger.warning(self.last_error)
+                self.last_result = None
+                continue
+
+            text_pos_log = ocr_result
+            x_log, y_log, w_log, h_log = text_pos_log
+            click_center = (x_log + w_log // 2, y_log + h_log // 2)
+
+            is_fullscreen = self.coord_transformer.is_fullscreen
+            self.logger.info(
+                f"[识别成功] '{text}' | 模式: {'全屏' if is_fullscreen else '窗口'} | "
+                f"坐标: ({x_log},{y_log},{w_log},{h_log}) | 中心点: {click_center}"
+            )
+
+            if click:
+                click_result = device.click(
+                    pos=click_center,
+                    duration=duration,
+                    click_time=click_time,
+                    right_click=right_click,
+                    coord_type=CoordType.LOGICAL,  # 标识点击坐标为逻辑坐标
+                )
+                if not click_result:
+                    self.last_error = device.last_error or "[文本点击执行失败]"
+                    self.logger.error(self.last_error)
+                    continue
+                # 清除截图缓存，因为点击操作可能改变界面
+                self.clear_screenshot_cache()
+            else:
+                self.logger.info(f"[识别成功] 未点击: '{text}'")
+                # 清除截图缓存，因为识别文本时使用了新的截图
+                self.clear_screenshot_cache()
+
+            # 如果不需要验证，直接返回成功
+            if not verify:
+                self.last_result = click_center
+                return click_center
+
+            # 执行验证
+            if self.verify(
+                verify_type=verify.get("type"),
+                target=verify.get("target"),
+                timeout=verify.get("timeout", 10),
+                roi=verify.get("roi"),
+            ):
+                self.last_result = click_center
+                return click_center
+
+            self.logger.warning(f"[验证失败] '{text}'{roi_info}，尝试: {attempt + 1}/{retry + 1}")
+
+        self.logger.error(f"[文本点击失败] '{text}'{roi_info}，已达最大重试次数: {retry}")
+        self.last_result = None
+        return None
 
     # ======================== 窗口管理方法 ========================
-    def minimize_window(self, delay: float = DEFAULT_WINDOW_OPERATION_DELAY, device_uri: Optional[str] = None) -> bool:
+    def minimize_window(
+        self,
+        delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
+        device_uri: Optional[str] = None,
+        verify: Optional[dict] = None,
+        retry: int = 0,
+    ) -> bool:
         """
         最小化目标窗口（窗口状态变化后自动同步分辨率）
 
         Args:
             delay: 执行前延迟时间（秒），默认DEFAULT_WINDOW_OPERATION_DELAY
             device_uri: 目标设备URI（None使用默认设备）
+            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
+            retry: 重试次数，默认0次
 
         Returns:
             bool: 最小化成功返回True，失败返回False
         """
-        if self.check_should_stop():
-            self.logger.debug("最小化窗口任务被中断")
-            self.last_result = False
-            return False
+        for attempt in range(retry + 1):
+            if self.check_should_stop():
+                self.logger.debug("最小化窗口任务被中断")
+                self.last_result = False
+                return False
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device or not device.is_connected:
-            self.last_error = "最小化失败: 设备未连接"
-            self.logger.error(self.last_error)
-            self.last_result = False
-            return False
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device or not device.is_connected:
+                self.last_error = "最小化失败: 设备未连接"
+                self.logger.error(self.last_error)
+                self.last_result = False
+                continue
 
-        self.last_result = device.minimize_window()
-        if self.last_result:
+            result = device.minimize_window()
+            if not result:
+                self.last_error = device.last_error or "窗口最小化失败"
+                self.logger.error(self.last_error)
+                continue
+
             self._apply_delay(0.3)
             self.device_manager.sync_active_device_resolution()
             self.logger.info("窗口最小化成功，已同步分辨率")
-        else:
-            self.last_error = device.last_error or "窗口最小化失败"
-            self.logger.error(self.last_error)
+            # 清除截图缓存，因为窗口操作可能改变界面
+            self.clear_screenshot_cache()
 
-        return self.last_result
+            # 如果不需要验证，直接返回成功
+            if not verify:
+                self.last_result = True
+                return True
 
-    def maximize_window(self, delay: float = DEFAULT_WINDOW_OPERATION_DELAY, device_uri: Optional[str] = None) -> bool:
+            # 执行验证
+            if self.verify(
+                verify_type=verify.get("type"),
+                target=verify.get("target"),
+                timeout=verify.get("timeout", 10),
+                roi=verify.get("roi"),
+            ):
+                self.last_result = True
+                return True
+
+            self.logger.warning(f"[验证失败] 窗口最小化，尝试: {attempt + 1}/{retry + 1}")
+
+        self.logger.error(f"[窗口最小化失败] 已达最大重试次数: {retry}")
+        self.last_result = False
+        return False
+
+    def maximize_window(
+        self,
+        delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
+        device_uri: Optional[str] = None,
+        verify: Optional[dict] = None,
+        retry: int = 0,
+    ) -> bool:
         """
         最大化目标窗口（窗口状态变化后自动同步分辨率）
 
         Args:
             delay: 执行前延迟时间（秒），默认DEFAULT_WINDOW_OPERATION_DELAY
             device_uri: 目标设备URI（None使用默认设备）
+            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
+            retry: 重试次数，默认0次
 
         Returns:
             bool: 最大化成功返回True，失败返回False
         """
-        if self.check_should_stop():
-            self.logger.debug("最大化窗口任务被中断")
-            self.last_result = False
-            return False
+        for attempt in range(retry + 1):
+            if self.check_should_stop():
+                self.logger.debug("最大化窗口任务被中断")
+                self.last_result = False
+                return False
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device or not device.is_connected:
-            self.last_error = "最大化失败: 设备未连接"
-            self.logger.error(self.last_error)
-            self.last_result = False
-            return False
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device or not device.is_connected:
+                self.last_error = "最大化失败: 设备未连接"
+                self.logger.error(self.last_error)
+                self.last_result = False
+                continue
 
-        self.last_result = device.maximize_window()
-        if self.last_result:
+            result = device.maximize_window()
+            if not result:
+                self.last_error = device.last_error or "窗口最大化失败"
+                self.logger.error(self.last_error)
+                continue
+
             self._apply_delay(0.3)
             self.device_manager.sync_active_device_resolution()
             self.logger.info("窗口最大化成功，已同步分辨率")
-        else:
-            self.last_error = device.last_error or "窗口最大化失败"
-            self.logger.error(self.last_error)
+            # 清除截图缓存，因为窗口操作可能改变界面
+            self.clear_screenshot_cache()
 
-        return self.last_result
+            # 如果不需要验证，直接返回成功
+            if not verify:
+                self.last_result = True
+                return True
+
+            # 执行验证
+            if self.verify(
+                verify_type=verify.get("type"),
+                target=verify.get("target"),
+                timeout=verify.get("timeout", 10),
+                roi=verify.get("roi"),
+            ):
+                self.last_result = True
+                return True
+
+            self.logger.warning(f"[验证失败] 窗口最大化，尝试: {attempt + 1}/{retry + 1}")
+
+        self.logger.error(f"[窗口最大化失败] 已达最大重试次数: {retry}")
+        self.last_result = False
+        return False
 
     # ======================== 图像相关方法 ========================
     def check_element_exist(
@@ -755,6 +986,7 @@ class Auto:
         delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
         device_uri: Optional[str] = None,
         roi: Optional[Tuple[int, int, int, int]] = None,
+        wait_timeout: int = 0,
     ) -> Optional[Tuple[int, int]]:
         """
         检查模板元素是否存在并返回坐标（支持多模板、ROI筛选）
@@ -764,52 +996,114 @@ class Auto:
             delay: 执行前延迟时间（秒），默认DEFAULT_CHECK_ELEMENT_DELAY
             device_uri: 目标设备URI（None使用默认设备）
             roi: 检查区域（基准ROI，格式 (x, y, width, height)，None则全屏检查）
+            wait_timeout: 等待元素出现的超时时间（秒），0表示不等待
 
         Returns:
             找到返回元素中心点坐标（客户区逻辑坐标），未找到或失败返回None
         """
-        if self.check_should_stop():
-            self.logger.debug("检查元素任务被中断")
-            self.last_result = None
-            return None
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device or not device.is_connected:
-            self.last_error = "检查元素失败: 设备未连接"
-            self.logger.error(self.last_error)
-            self.last_result = None
-            return None
+        # 内部检查函数，避免重复调用
+        def _check_once():
+            if self.check_should_stop():
+                self.logger.debug("检查元素任务被中断")
+                self.last_result = None
+                return None
 
-        templates = [template_name] if isinstance(template_name, str) else template_name
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device or not device.is_connected:
+                self.last_error = "检查元素失败: 设备未连接"
+                self.logger.error(self.last_error)
+                self.last_result = None
+                return None
 
-        params_info = []
-        if roi:
-            params_info.append(f"基准ROI: {roi}")
-        params_info.append(f"客户区尺寸: {self.display_context.client_logical_res}")
-        if len(templates) > 1:
-            params_info.append(f"模板数量: {len(templates)}")
-        param_log = f" | {', '.join(params_info)}" if params_info else ""
+            templates = [template_name] if isinstance(template_name, str) else template_name
 
-        self.logger.debug(f"检查元素请求: {templates}{param_log}")
+            params_info = []
+            if roi:
+                params_info.append(f"基准ROI: {roi}")
+            params_info.append(f"客户区尺寸: {self.display_context.client_logical_res}")
+            if len(templates) > 1:
+                params_info.append(f"模板数量: {len(templates)}")
+            param_log = f" | {', '.join(params_info)}" if params_info else ""
 
-        try:
-            result = device.exists(templates, roi=roi)
-            self.last_result = result
+            self.logger.debug(f"检查元素请求: {templates}{param_log}")
 
-            if device.last_error:
-                self.last_error = f"检查元素异常: {device.last_error}"
-                self.logger.warning(self.last_error)
+            try:
+                result = device.exists(templates, roi=roi)
+                self.last_result = result
 
-            if result:
-                self.logger.info(f"找到元素 {templates}{param_log}，中心点: {result}")
+                if device.last_error:
+                    self.last_error = f"检查元素异常: {device.last_error}"
+                    self.logger.warning(self.last_error)
+
+                if result:
+                    self.logger.info(f"找到元素 {templates}{param_log}，中心点: {result}")
+                else:
+                    self.logger.info(f"未找到元素 {templates}{param_log}")
+                return result
+            except Exception as e:
+                self.last_error = f"检查元素异常: {str(e)}"
+                self.logger.error(self.last_error, exc_info=True)
+                self.last_result = None
+                return None
+
+        # 直接检查或等待检查
+        if wait_timeout > 0:
+            result = None
+
+            def condition_func():
+                nonlocal result
+                result = _check_once()
+                return result is not None
+
+            if self.wait_for(condition_func, wait_timeout, desc=f"等待元素 {template_name} 出现"):
+                return result
             else:
-                self.logger.info(f"未找到元素 {templates}{param_log}")
+                return None
+        else:
+            return _check_once()
+
+    def wait_element(
+        self, template: Union[str, List[str]], timeout: int = 30, roi: Optional[Tuple[int, int, int, int]] = None
+    ) -> Optional[Tuple[int, int]]:
+        """
+        等待元素出现并返回坐标
+
+        Args:
+            template: 模板名称
+            timeout: 超时时间（秒）
+            roi: 搜索区域（基准ROI）
+
+        Returns:
+            Optional[Tuple[int, int]]: 找到返回元素中心点坐标，超时返回None
+        """
+        return self.check_element_exist(template, roi=roi, wait_timeout=timeout)
+
+    def wait_text(
+        self, text: str, timeout: int = 30, roi: Optional[Tuple[int, int, int, int]] = None
+    ) -> Optional[Tuple[int, int]]:
+        """
+        等待文本出现并返回坐标
+
+        Args:
+            text: 目标文本
+            timeout: 超时时间（秒）
+            roi: 搜索区域（基准ROI）
+
+        Returns:
+            Optional[Tuple[int, int]]: 找到返回文本中心点坐标，超时返回None
+        """
+        result = None
+
+        def condition_func():
+            nonlocal result
+            result = self.text_click(text, click=False, roi=roi)
+            return result is not None
+
+        if self.wait_for(condition_func, timeout, desc=f"等待文本 '{text}' 出现"):
             return result
-        except Exception as e:
-            self.last_error = f"检查元素异常: {str(e)}"
-            self.logger.error(self.last_error, exc_info=True)
-            self.last_result = None
+        else:
             return None
 
     def screenshot(
@@ -894,67 +1188,6 @@ class Auto:
             self.last_result = None
             return None
 
-    def wait_element(
-        self,
-        template_name: Union[str, List[str]],
-        timeout: float = DEFAULT_TASK_TIMEOUT,
-        delay: float = DEFAULT_CHECK_ELEMENT_DELAY,
-        device_uri: Optional[str] = None,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-    ) -> bool:
-        """
-        等待模板元素出现（超时返回False，支持多模板、ROI筛选）
-
-        Args:
-            template_name: 模板名称（单个或多个模板列表）
-            timeout: 最长等待时间（秒），默认DEFAULT_TASK_TIMEOUT
-            delay: 执行前延迟时间（秒），默认DEFAULT_CHECK_ELEMENT_DELAY
-            device_uri: 目标设备URI（None使用默认设备）
-            roi: 等待区域（基准ROI，格式 (x, y, width, height)，None则全屏等待）
-
-        Returns:
-            bool: 超时前找到元素返回True，超时或失败返回False
-        """
-        if self.check_should_stop():
-            self.logger.debug("等待元素任务被中断")
-            self.last_result = False
-            return False
-
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device or not device.is_connected:
-            self.last_error = "等待元素失败: 设备未连接"
-            self.logger.error(self.last_error)
-            self.last_result = False
-            return False
-
-        templates = [template_name] if isinstance(template_name, str) else template_name
-
-        params_info = []
-        if roi:
-            params_info.append(f"基准ROI: {roi}")
-        params_info.append(f"客户区尺寸: {self.display_context.client_logical_res}")
-        if len(templates) > 1:
-            params_info.append(f"模板数量: {len(templates)}")
-        param_log = f" | {', '.join(params_info)}" if params_info else ""
-
-        self.logger.debug(f"等待元素请求: {templates}{param_log} | 超时: {timeout}s")
-
-        start_time = time.time()
-        center_pos = device.wait(templates, timeout=timeout, roi=roi)
-        self.last_result = bool(center_pos)
-
-        if not self.last_result:
-            self.last_error = device.last_error or f"等待 {templates}{param_log} 超时（{timeout}s）"
-            self.logger.error(self.last_error)
-        else:
-            elapsed = time.time() - start_time
-            self.logger.info(
-                f"等待 {templates}{param_log} 成功（耗时{elapsed:.1f}s）| 中心点（客户区逻辑坐标）: {center_pos}"
-            )
-
-        return self.last_result
-
     def swipe(
         self,
         start_pos: tuple,
@@ -964,6 +1197,8 @@ class Auto:
         delay: float = DEFAULT_CLICK_DELAY,
         device_uri: Optional[str] = None,
         coord_type: str = "LOGICAL",
+        verify: Optional[dict] = None,
+        retry: int = 0,
     ) -> bool:
         """
         滑动操作（支持多种坐标类型，自动平滑移动）
@@ -976,77 +1211,107 @@ class Auto:
             delay: 执行前延迟时间（秒），默认DEFAULT_CLICK_DELAY
             device_uri: 目标设备URI（None使用默认设备）
             coord_type: 坐标类型（默认LOGICAL：客户区逻辑坐标；PHYSICAL：客户区物理坐标；BASE：基准分辨率采集的坐标）
+            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
+            retry: 重试次数，默认0次
 
         Returns:
             bool: 滑动成功返回True，失败返回False
         """
-        if self.check_should_stop():
-            self.logger.debug("滑动任务被中断")
-            self.last_result = False
-            return False
-
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device:
-            self.last_result = False
-            return False
-
-        if not (isinstance(start_pos, (tuple, list)) and len(start_pos) == 2):
-            self.last_error = f"滑动失败: 起始坐标格式无效（{start_pos}）"
-            self.logger.error(self.last_error)
-            self.last_result = False
-            return False
-        if not (isinstance(end_pos, (tuple, list)) and len(end_pos) == 2):
-            self.last_error = f"滑动失败: 结束坐标格式无效（{end_pos}）"
-            self.logger.error(self.last_error)
-            self.last_result = False
-            return False
-
-        # 坐标类型验证
-        valid_coord_types = {"LOGICAL", "PHYSICAL", "BASE"}
-        if coord_type not in valid_coord_types:
-            self.logger.warning(f"无效的坐标类型: {coord_type}，使用默认类型LOGICAL")
-            coord_type = "LOGICAL"
-
-        # 坐标范围检查（仅针对逻辑坐标）
-        if coord_type == "LOGICAL":
-            client_w, client_h = self.display_context.client_logical_res
-            sx, sy = start_pos
-            ex, ey = end_pos
-            if not (0 <= sx <= client_w and 0 <= sy <= client_h):
-                self.logger.warning(f"起始坐标超出客户区范围: {start_pos} | 客户区: {client_w}x{client_h}")
-            if not (0 <= ex <= client_w and 0 <= ey <= client_h):
-                self.logger.warning(f"结束坐标超出客户区范围: {end_pos} | 客户区: {client_w}x{client_h}")
-
-        # 转换字符串到CoordType枚举
-
-        coord_type_enum = getattr(CoordType, coord_type.upper())
-
-        self.last_result = device.swipe(
-            start_x=start_pos[0],
-            start_y=start_pos[1],
-            end_x=end_pos[0],
-            end_y=end_pos[1],
-            duration=duration,
-            steps=steps,
-            coord_type=coord_type_enum,
+        coord_type_name = {"LOGICAL": "客户区逻辑坐标", "PHYSICAL": "客户区物理坐标", "BASE": "基准坐标"}.get(
+            coord_type.upper(), "未知坐标类型"
         )
 
-        if not self.last_result:
-            self.last_error = device.last_error or "滑动执行失败"
-            self.logger.error(self.last_error)
-        else:
-            coord_type_name = {"LOGICAL": "客户区逻辑坐标", "PHYSICAL": "客户区物理坐标", "BASE": "基准坐标"}.get(
-                coord_type.upper(), "未知坐标类型"
+        for attempt in range(retry + 1):
+            if self.check_should_stop():
+                self.logger.debug("滑动任务被中断")
+                self.last_result = False
+                return False
+
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device:
+                self.last_result = False
+                continue
+
+            if not (isinstance(start_pos, (tuple, list)) and len(start_pos) == 2):
+                self.last_error = f"滑动失败: 起始坐标格式无效（{start_pos}）"
+                self.logger.error(self.last_error)
+                self.last_result = False
+                continue
+            if not (isinstance(end_pos, (tuple, list)) and len(end_pos) == 2):
+                self.last_error = f"滑动失败: 结束坐标格式无效（{end_pos}）"
+                self.logger.error(self.last_error)
+                self.last_result = False
+                continue
+
+            # 坐标类型验证
+            valid_coord_types = {"LOGICAL", "PHYSICAL", "BASE"}
+            if coord_type not in valid_coord_types:
+                self.logger.warning(f"无效的坐标类型: {coord_type}，使用默认类型LOGICAL")
+                coord_type = "LOGICAL"
+                coord_type_name = "客户区逻辑坐标"
+
+            # 坐标范围检查（仅针对逻辑坐标）
+            if coord_type == "LOGICAL":
+                client_w, client_h = self.display_context.client_logical_res
+                sx, sy = start_pos
+                ex, ey = end_pos
+                if not (0 <= sx <= client_w and 0 <= sy <= client_h):
+                    self.logger.warning(f"起始坐标超出客户区范围: {start_pos} | 客户区: {client_w}x{client_h}")
+                if not (0 <= ex <= client_w and 0 <= ey <= client_h):
+                    self.logger.warning(f"结束坐标超出客户区范围: {end_pos} | 客户区: {client_w}x{client_h}")
+
+            # 转换字符串到CoordType枚举
+            coord_type_enum = getattr(CoordType, coord_type.upper())
+
+            result = device.swipe(
+                start_x=start_pos[0],
+                start_y=start_pos[1],
+                end_x=end_pos[0],
+                end_y=end_pos[1],
+                duration=duration,
+                steps=steps,
+                coord_type=coord_type_enum,
             )
+
+            if not result:
+                self.last_error = device.last_error or "滑动执行失败"
+                self.logger.error(self.last_error)
+                continue
+
             self.logger.info(f"滑动成功: 从{start_pos}到{end_pos} | 类型:{coord_type_name} | 时长{duration}s")
             # 清除截图缓存，因为滑动操作可能改变界面
             self.clear_screenshot_cache()
 
-        return self.last_result
+            # 如果不需要验证，直接返回成功
+            if not verify:
+                self.last_result = True
+                return True
+
+            # 执行验证
+            if self.verify(
+                verify_type=verify.get("type"),
+                target=verify.get("target"),
+                timeout=verify.get("timeout", 10),
+                roi=verify.get("roi"),
+            ):
+                self.last_result = True
+                return True
+
+            self.logger.warning(f"[验证失败] 滑动从{start_pos}到{end_pos}，尝试: {attempt + 1}/{retry + 1}")
+
+        self.logger.error(f"[滑动失败] 从{start_pos}到{end_pos}，已达最大重试次数: {retry}")
+        self.last_result = False
+        return False
 
     def text_input(
-        self, text: str, interval: float = 0.05, delay: float = DEFAULT_CLICK_DELAY, device_uri: Optional[str] = None
+        self,
+        text: str,
+        interval: float = 0.05,
+        delay: float = DEFAULT_CLICK_DELAY,
+        device_uri: Optional[str] = None,
+        verify: Optional[dict] = None,
+        retry: int = 0,
     ) -> bool:
         """
         文本输入（优先粘贴模式，粘贴失败时自动降级为逐字符输入）
@@ -1056,31 +1321,55 @@ class Auto:
             interval: 逐字符输入时间间隔（秒），默认0.05秒
             delay: 执行前延迟时间（秒），默认DEFAULT_CLICK_DELAY
             device_uri: 目标设备URI（None使用默认设备）
+            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
+            retry: 重试次数，默认0次
 
         Returns:
             bool: 输入成功返回True，失败返回False
         """
-        if self.check_should_stop():
-            self.logger.debug("文本输入任务被中断")
-            self.last_result = False
-            return False
+        log_text = text[:30] + "..." if len(text) > 30 else text
 
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device or not device.is_connected:
-            self.last_error = "文本输入失败: 设备未连接"
-            self.logger.error(self.last_error)
-            self.last_result = False
-            return False
+        for attempt in range(retry + 1):
+            if self.check_should_stop():
+                self.logger.debug("文本输入任务被中断")
+                self.last_result = False
+                return False
 
-        self.last_result = device.text_input(text, interval=interval)
-        if not self.last_result:
-            self.last_error = device.last_error or f"输入文本 '{text}' 失败"
-            self.logger.error(self.last_error)
-        else:
-            log_text = text[:30] + "..." if len(text) > 30 else text
+            self._apply_delay(delay)
+            device = self._get_device(device_uri)
+            if not device or not device.is_connected:
+                self.last_error = "文本输入失败: 设备未连接"
+                self.logger.error(self.last_error)
+                self.last_result = False
+                continue
+
+            result = device.text_input(text, interval=interval)
+            if not result:
+                self.last_error = device.last_error or f"输入文本 '{log_text}' 失败"
+                self.logger.error(self.last_error)
+                continue
+
             self.logger.info(f"文本输入成功: {log_text}")
             # 清除截图缓存，因为文本输入操作可能改变界面
             self.clear_screenshot_cache()
 
-        return self.last_result
+            # 如果不需要验证，直接返回成功
+            if not verify:
+                self.last_result = True
+                return True
+
+            # 执行验证
+            if self.verify(
+                verify_type=verify.get("type"),
+                target=verify.get("target"),
+                timeout=verify.get("timeout", 10),
+                roi=verify.get("roi"),
+            ):
+                self.last_result = True
+                return True
+
+            self.logger.warning(f"[验证失败] 文本输入 '{log_text}'，尝试: {attempt + 1}/{retry + 1}")
+
+        self.logger.error(f"[文本输入失败] '{log_text}'，已达最大重试次数: {retry}")
+        self.last_result = False
+        return False

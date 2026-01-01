@@ -1,7 +1,12 @@
+"""通行证奖励领取模块
+
+包含通行证奖励的领取功能
+"""
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.tasks.public import (back_to_main,
+from src.auto_tasks.tasks.public import (
+                                      back_to_main,
                                       calculate_remaining_timeout, click_back)
 from src.auto_tasks.utils.roi_config import roi_config
 
@@ -43,21 +48,19 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                 logger.info("检测到停止信号，退出任务")
                 return True
 
+            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+            
             # 初始状态：进入通行证界面
             if state == "init":
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                 if back_to_main(auto, remaining_timeout):
-                    if pos := auto.check_element_exist("pass_rewards/通行证标识"):
-                        if auto.click(pos):
-                            logger.info("进入通行证界面")
-                            auto.sleep(2)
-
-                            # 检测是否进入成功
-                            if auto.text_click("基础", click=False, roi=(1235, 300, 69, 37)):
-                                logger.info("已进入通行证界面")
-                                state = "entered"
-                            else:
-                                logger.error("未成功进入通行证界面")
+                    if auto.template_click(
+                        "pass_rewards/通行证标识",
+                        verify={"type": "text", "target": "基础", "timeout": 5, "roi": (1235, 300, 69, 37)},
+                        retry=2,
+                        delay=1
+                    ):
+                        logger.info("进入通行证界面")
+                        state = "entered"
                 continue
 
             # 领取奖励状态
@@ -66,29 +69,41 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                     x, y = reward_positions[current_reward]
 
                     # 点击奖励位置
-                    if auto.click((x, y), click_time=2, coord_type="BASE"):
+                    if auto.click(
+                        (x, y),
+                        click_time=2,
+                        coord_type="BASE",
+                        verify={"type": "exist", "target": "public/返回键1", "timeout": 5},
+                        retry=1
+                    ):
+                        logger.info(f"点击第{current_reward+1}个奖励")
                         auto.sleep(1.5)
                         # 点击领取按钮位置
-                        if auto.click((1590, 680), click_time=2, coord_type="BASE"):
-                            if auto.text_click("全部获得", roi=(1390, 750, 100, 30)):
+                        if auto.click(
+                            (1590, 680),
+                            click_time=2,
+                            coord_type="BASE",
+                            verify={"type": "text", "target": "全部获得", "timeout": 5, "roi": (1390, 750, 100, 30)},
+                            retry=1
+                        ):
+                            if auto.text_click(
+                                "全部获得",
+                                roi=(1390, 750, 100, 30),
+                                verify={"type": "exist", "target": "pass_rewards/通行证标识", "timeout": 5},
+                                retry=1
+                            ):
                                 logger.info(f"领取第{current_reward+1}个奖励")
-                                auto.sleep(3)
-
-                                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-                                if click_back(auto, remaining_timeout):
-                                    logger.info("返回通行证界面")
-                                    current_reward += 1
-                                else:
-                                    current_reward += 1
-                                    logger.warning("无奖励可领取,下一个奖励")
-
+                                current_reward += 1
+                            else:
+                                logger.warning(f"领取第{current_reward+1}个奖励失败")
+                                click_back(auto, remaining_timeout)
+                                current_reward += 1
                 else:
                     state = "completing"
                 continue
 
             # 完成状态：返回主界面
             if state == "completing":
-                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
                 if back_to_main(auto, remaining_timeout):
                     total_time = round(time.time() - start_time, 2)
                     minutes = int(total_time // 60)
