@@ -117,15 +117,15 @@ class DeviceManager:
             self.logger.debug(f"设备{device_uri}不存在，无法重连")
             return False
 
-        self.logger.info(f"开始尝试重连设备：{device_uri}")
+        self.logger.debug(f"开始尝试重连设备：{device_uri}")
 
         # 尝试多次重连
         for attempt in range(self.max_reconnect_attempts):
             if self.stop_event.is_set():
-                self.logger.info(f"重连被中断，设备：{device_uri}")
+                self.logger.debug(f"重连被中断，设备：{device_uri}")
                 return False
 
-            self.logger.info(f"重连尝试 {attempt+1}/{self.max_reconnect_attempts}，设备：{device_uri}")
+            self.logger.debug(f"重连尝试 {attempt+1}/{self.max_reconnect_attempts}，设备：{device_uri}")
 
             # 断开现有连接
             try:
@@ -138,7 +138,7 @@ class DeviceManager:
 
             # 尝试重新连接
             if device.connect():
-                self.logger.info(f"设备{device_uri}重连成功")
+                self.logger.debug(f"设备{device_uri}重连成功")
                 # 同步分辨率
                 self._sync_device_resolution(device)
                 return True

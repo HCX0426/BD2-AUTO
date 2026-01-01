@@ -252,7 +252,7 @@ class OCRProcessor:
 
         # 6. OCR识别前检查是否需要停止
         if self.stop_event and self.stop_event.is_set():
-            self.logger.info("OCR识别被中断：收到停止信号")
+            self.logger.debug("OCR识别被中断：收到停止信号")
             return None
 
         # 7. OCR识别
@@ -296,7 +296,7 @@ class OCRProcessor:
             # 等待识别完成或停止信号
             while not result_event.is_set():
                 if self.stop_event and self.stop_event.is_set():
-                    self.logger.info("OCR识别过程中被中断：收到停止信号")
+                    self.logger.debug("OCR识别过程中被中断：收到停止信号")
                     return None
                 # 短暂休眠，避免CPU占用过高
                 from time import sleep
@@ -305,14 +305,14 @@ class OCRProcessor:
 
             # OCR识别后检查是否需要停止
             if self.stop_event and self.stop_event.is_set():
-                self.logger.info("OCR识别完成后被中断：收到停止信号")
+                self.logger.debug("OCR识别完成后被中断：收到停止信号")
                 return None
 
             # 识别结果格式化（子图→原图坐标转换）
             for result in raw_results:
                 # 检查是否需要停止
                 if self.stop_event and self.stop_event.is_set():
-                    self.logger.info("OCR结果处理被中断：收到停止信号")
+                    self.logger.debug("OCR结果处理被中断：收到停止信号")
                     return None
 
                 bbox, text, confidence = result[:3]

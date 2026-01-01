@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
-from ...core.config_manager import ConfigLoader
+# 延迟导入 ConfigLoader，避免循环依赖
 from ...core.path_manager import PathManager
 from ..config import (
     DEFAULT_BASE_RESOLUTION,
@@ -51,7 +51,7 @@ class Auto:
         device_uri: str = None,
         original_base_res: Tuple[int, int] = DEFAULT_BASE_RESOLUTION,
         path_manager: PathManager = None,
-        config: ConfigLoader = None,
+        config: "ConfigLoader" = None,
     ):
         """
         初始化自动化系统核心实例
@@ -169,15 +169,15 @@ class Auto:
         total_seconds = round(total_init_time % 60, 3)
 
         # 记录各模块初始化用时和总用时
-        self.logger.info(f"=== Auto初始化时间统计 ===")
-        self.logger.info(f"Logger模块初始化用时: {logger_time}秒")
-        self.logger.info(f"DisplayContext模块初始化用时: {display_time}秒")
-        self.logger.info(f"CoordinateTransformer模块初始化用时: {coord_time}秒")
-        self.logger.info(f"ImageProcessor模块初始化用时: {image_time}秒")
-        self.logger.info(f"DeviceManager模块初始化用时: {device_time}秒")
-        self.logger.info(f"OCRProcessor模块初始化用时: {ocr_time}秒")
-        self.logger.info(f"Auto总初始化用时: {total_minutes}分{total_seconds}秒")
-        self.logger.info("========================")
+        self.logger.debug(f"=== Auto初始化时间统计 ===")
+        self.logger.debug(f"Logger模块初始化用时: {logger_time}秒")
+        self.logger.debug(f"DisplayContext模块初始化用时: {display_time}秒")
+        self.logger.debug(f"CoordinateTransformer模块初始化用时: {coord_time}秒")
+        self.logger.debug(f"ImageProcessor模块初始化用时: {image_time}秒")
+        self.logger.debug(f"DeviceManager模块初始化用时: {device_time}秒")
+        self.logger.debug(f"OCRProcessor模块初始化用时: {ocr_time}秒")
+        self.logger.debug(f"Auto总初始化用时: {total_minutes}分{total_seconds}秒")
+        self.logger.debug("========================")
         self.logger.info("自动化系统初始化完成")
 
     def check_should_stop(self) -> bool:
@@ -206,12 +206,13 @@ class Auto:
             value: True设置中断标志，False清除中断标志
         """
         with self.lock:
-            if value:
+            current_state = self.stop_event.is_set()
+            if value and not current_state:
                 self.stop_event.set()
                 self.logger.info("任务已接收中断指令")
-            else:
+            elif not value and current_state:
                 self.stop_event.clear()
-                self.logger.info("任务中断指令已取消")
+                self.logger.debug("任务中断标志已重置")
 
     def _get_device(self, device_uri: Optional[str] = None) -> Optional[BaseDevice]:
         """
@@ -261,7 +262,7 @@ class Auto:
             bool: True睡眠完成，False被中断或执行失败
         """
         if self.check_should_stop():
-            self.logger.info("睡眠任务被中断")
+            self.logger.debug("睡眠任务被中断")
             self.last_result = False
             return False
 
@@ -295,7 +296,7 @@ class Auto:
             bool: 添加请求提交成功返回True，失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("添加设备任务被中断")
+            self.logger.debug("添加设备任务被中断")
             self.last_result = False
             return False
 
@@ -452,7 +453,7 @@ class Auto:
             bool: 点击成功返回True，失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("点击任务被中断")
+            self.logger.debug("点击任务被中断")
             self.last_result = False
             return False
 
@@ -507,7 +508,7 @@ class Auto:
             bool: 按键成功返回True，失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("按键任务被中断")
+            self.logger.debug("按键任务被中断")
             self.last_result = False
             return False
 
@@ -554,7 +555,7 @@ class Auto:
             bool: 点击成功返回True，失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("模板点击任务被中断")
+            self.logger.debug("模板点击任务被中断")
             self.last_result = False
             return False
 
@@ -619,7 +620,7 @@ class Auto:
             Optional[Tuple[int, int]]: 点击坐标（客户区逻辑坐标），未识别到文本或失败返回None
         """
         if self.check_should_stop():
-            self.logger.info("文本点击任务被中断")
+            self.logger.debug("文本点击任务被中断")
             self.last_result = None
             return None
 
@@ -689,7 +690,7 @@ class Auto:
             bool: 最小化成功返回True，失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("最小化窗口任务被中断")
+            self.logger.debug("最小化窗口任务被中断")
             self.last_result = False
             return False
 
@@ -724,7 +725,7 @@ class Auto:
             bool: 最大化成功返回True，失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("最大化窗口任务被中断")
+            self.logger.debug("最大化窗口任务被中断")
             self.last_result = False
             return False
 
@@ -768,7 +769,7 @@ class Auto:
             找到返回元素中心点坐标（客户区逻辑坐标），未找到或失败返回None
         """
         if self.check_should_stop():
-            self.logger.info("检查元素任务被中断")
+            self.logger.debug("检查元素任务被中断")
             self.last_result = None
             return None
 
@@ -831,7 +832,7 @@ class Auto:
             Optional[np.ndarray]: 截图图像（BGR格式），失败返回None
         """
         if self.check_should_stop():
-            self.logger.info("截图任务被中断")
+            self.logger.debug("截图任务被中断")
             self.last_result = None
             return None
 
@@ -915,7 +916,7 @@ class Auto:
             bool: 超时前找到元素返回True，超时或失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("等待元素任务被中断")
+            self.logger.debug("等待元素任务被中断")
             self.last_result = False
             return False
 
@@ -980,7 +981,7 @@ class Auto:
             bool: 滑动成功返回True，失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("滑动任务被中断")
+            self.logger.debug("滑动任务被中断")
             self.last_result = False
             return False
 
@@ -1060,7 +1061,7 @@ class Auto:
             bool: 输入成功返回True，失败返回False
         """
         if self.check_should_stop():
-            self.logger.info("文本输入任务被中断")
+            self.logger.debug("文本输入任务被中断")
             self.last_result = False
             return False
 
