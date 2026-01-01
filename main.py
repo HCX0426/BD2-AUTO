@@ -16,7 +16,9 @@ def main():
     主函数，启动整个应用程序
     """
     # 2. 初始化非阻塞组件
-    from src.core.task_manager import AppSettingsManager, TaskConfigManager, load_task_modules
+    from src.core.task_manager import load_task_modules
+    from src.ui.core.settings import AppSettingsManager
+    from src.ui.core.task_config import TaskConfigManager
     settings_manager = AppSettingsManager()  # 应用设置管理器
     config_manager = TaskConfigManager()  # 任务配置管理器
     task_mapping = load_task_modules()  # 加载任务模块映射

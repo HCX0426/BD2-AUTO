@@ -66,6 +66,10 @@ class SettingsInterface(QWidget):
         self.auto_clear_log_check = QCheckBox()
         app_layout.addRow("自动清理日志:", self.auto_clear_log_check)
 
+        # 记住界面位置和大小
+        self.remember_window_pos_check = QCheckBox()
+        app_layout.addRow("记住界面位置和大小:", self.remember_window_pos_check)
+
         app_group.setLayout(app_layout)
         layout.addWidget(app_group)
 
@@ -144,6 +148,9 @@ class SettingsInterface(QWidget):
         # 加载日志自动清理设置
         self.auto_clear_log_check.setChecked(self.settings_manager.get_setting("auto_clear_log", False))
 
+        # 加载记住界面位置和大小设置
+        self.remember_window_pos_check.setChecked(self.settings_manager.get_setting("remember_window_pos", True))
+
         # 加载设备连接超时
         self.device_timeout_spin.setValue(self.settings_manager.get_setting("device_timeout", 10))
 
@@ -174,6 +181,9 @@ class SettingsInterface(QWidget):
         # 保存日志自动清理设置
         self.settings_manager.set_setting("auto_clear_log", self.auto_clear_log_check.isChecked())
 
+        # 保存记住界面位置和大小设置
+        self.settings_manager.set_setting("remember_window_pos", self.remember_window_pos_check.isChecked())
+
         # 保存设备连接超时
         self.settings_manager.set_setting("device_timeout", self.device_timeout_spin.value())
 
@@ -188,7 +198,7 @@ class SettingsInterface(QWidget):
 
         # 保存到文件
         self.settings_manager.save_settings()
-        
+
         # 发送侧边栏宽度变更信号
         signal_bus.emit_sidebar_width_changed(self.sidebar_width_spin.value())
 
@@ -207,11 +217,12 @@ class SettingsInterface(QWidget):
         self.sidebar_width_spin.setValue(60)
         self.auto_save_check.setChecked(True)
         self.auto_clear_log_check.setChecked(False)
+        self.remember_window_pos_check.setChecked(True)
         self.device_timeout_spin.setValue(10)
         self.device_path_edit.setText("")
         self.task_timeout_spin.setValue(60)
         self.retry_count_spin.setValue(0)
-        
+
         # 发送侧边栏宽度变更信号
         signal_bus.emit_sidebar_width_changed(60)
 

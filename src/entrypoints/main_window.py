@@ -26,10 +26,12 @@ from PyQt6.QtWidgets import (
 
 # 现在可以导入src模块了
 from src.core.path_manager import path_manager
-from src.core.task_manager import AppSettingsManager, TaskConfigManager, load_task_modules
+from src.core.task_manager import load_task_modules
 from src.ui.controls.main_interface import MainInterface
 from src.ui.controls.settings_interface import SettingsInterface
 from src.ui.controls.sidebar import Sidebar
+from src.ui.core.settings import AppSettingsManager
+from src.ui.core.task_config import TaskConfigManager
 
 
 class MainWindow(QMainWindow):
@@ -86,8 +88,22 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """初始化主窗口UI"""
         self.setWindowTitle("自动任务控制系统")
+
+        # 设置窗口大小
         self.resize(*self.settings_manager.get_setting("window_size", [1280, 720]))
         self.setMinimumSize(1024, 600)
+
+        # 如果设置了记住窗口位置，则加载位置，否则居中显示
+        if self.settings_manager.get_setting("remember_window_pos", True):
+            window_pos = self.settings_manager.get_setting("window_pos", None)
+            if window_pos:
+                self.move(window_pos[0], window_pos[1])
+            else:
+                # 如果没有保存的位置，则居中显示
+                self.center_window()
+        else:
+            # 如果不记住位置，则居中显示
+            self.center_window()
 
         # 主窗口布局
         central_widget = QWidget()
@@ -105,6 +121,19 @@ class MainWindow(QMainWindow):
         self.init_main_interface()
         self.init_settings_interface()
         main_layout.addWidget(self.stacked_widget, 1)
+
+    def center_window(self):
+        """
+        将窗口居中显示在屏幕上
+        """
+        # 获取屏幕的几何信息
+        screen_geometry = self.screen().geometry()
+        # 获取窗口的几何信息
+        window_geometry = self.frameGeometry()
+        # 计算居中位置
+        window_geometry.moveCenter(screen_geometry.center())
+        # 移动窗口到居中位置
+        self.move(window_geometry.topLeft())
 
     def init_main_interface(self):
         """初始化主界面组件"""
@@ -332,7 +361,7 @@ class MainWindow(QMainWindow):
                 self.task_worker.task_finished.disconnect(self.on_task_finished)
             except:
                 pass  # 忽略已经断开的连接
-            
+
             # 如果线程仍在运行，尝试停止
             if self.task_worker.isRunning():
                 if force:
@@ -341,7 +370,7 @@ class MainWindow(QMainWindow):
                     self.task_worker.wait(1000)  # 等待1秒
                 else:
                     self.task_worker.stop()
-            
+
             # 清理任务工作器引用
             self.task_worker = None
 
@@ -394,6 +423,11 @@ class MainWindow(QMainWindow):
         """
         # 保存窗口大小
         self.settings_manager.set_setting("window_size", [self.width(), self.height()])
+
+        # 如果设置了记住窗口位置，则保存位置
+        if self.settings_manager.get_setting("remember_window_pos", True):
+            self.settings_manager.set_setting("window_pos", [self.x(), self.y()])
+
         self.settings_manager.save_settings()
         from src.ui.core.signals import get_signal_bus_instance
 
@@ -469,14 +503,14 @@ class MainWindow(QMainWindow):
                     signal_bus.emit_log(f"清理自动化核心时发生异常: {str(e)}")
                 finally:
                     self.auto_instance = None
-            
+
             # 确保应用程序完全退出
             signal_bus.emit_log("正在退出应用程序...")
             QApplication.quit()
-        
+
         # 使用QTimer在主线程中异步执行清理
         QTimer.singleShot(0, cleanup_resources)
-        
+
         # 接受关闭事件
         event.accept()
 
