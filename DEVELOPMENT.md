@@ -162,20 +162,7 @@ BD2-AUTO/
 │   │       ├── display_context.py        # 显示上下文工具
 │   │       └── logger.py                 # 日志工具
 │   ├── auto_tasks/       # 自动化任务模块
-│   │   ├── pc/           # PC端任务
-│   │   │   ├── templates/# 任务模板图像
-│   │   │   │   ├── get_email/           # 获取邮件模板
-│   │   │   │   ├── get_guild/           # 公会任务模板
-│   │   │   │   ├── get_pvp/             # PVP任务模板
-│   │   │   │   ├── get_restaurant/      # 餐厅任务模板
-│   │   │   │   ├── intensive_decomposition/ # 强化分解模板
-│   │   │   │   ├── login/               # 登录模板
-│   │   │   │   ├── lucky_draw/          # 抽奖模板
-│   │   │   │   ├── map_collection/      # 地图收集模板
-│   │   │   │   ├── pass_activity/       # 通行证活动模板
-│   │   │   │   ├── pass_rewards/        # 通行证奖励模板
-│   │   │   │   ├── public/              # 公共模板
-│   │   │   │   └── sweep_daily/         # 日常扫荡模板
+│   │   ├── tasks/        # 自动化任务实现
 │   │   │   ├── daily_missions.py        # 日常任务实现
 │   │   │   ├── get_email.py             # 获取邮件任务实现
 │   │   │   ├── get_guild.py             # 公会任务实现
@@ -189,6 +176,19 @@ BD2-AUTO/
 │   │   │   ├── pass_rewards.py          # 通行证奖励任务实现
 │   │   │   ├── public.py                # 公共任务工具
 │   │   │   └── sweep_daily.py           # 日常扫荡任务实现
+│   │   ├── templates/    # 任务模板图像
+│   │   │   ├── get_email/           # 获取邮件模板
+│   │   │   ├── get_guild/           # 公会任务模板
+│   │   │   ├── get_pvp/             # PVP任务模板
+│   │   │   ├── get_restaurant/      # 餐厅任务模板
+│   │   │   ├── intensive_decomposition/ # 强化分解模板
+│   │   │   ├── login/               # 登录模板
+│   │   │   ├── lucky_draw/          # 抽奖模板
+│   │   │   ├── map_collection/      # 地图收集模板
+│   │   │   ├── pass_activity/       # 通行证活动模板
+│   │   │   ├── pass_rewards/        # 通行证奖励模板
+│   │   │   ├── public/              # 公共模板
+│   │   │   └── sweep_daily/         # 日常扫荡模板
 │   │   └── utils/        # 任务工具模块
 │   │       └── roi_config.py            # ROI配置管理
 │   ├── core/             # 核心功能模块
@@ -267,11 +267,12 @@ BD2-AUTO/
   - **TaskConfigManager**：任务配置管理，负责任务配置的加载和保存
   - **AppSettingsManager**：应用设置管理，负责应用级设置的加载和保存
 
-### 3. 自动化任务（auto\_tasks）
+### 3. 自动化任务（autotasks）
 
 自动化任务模块包含了所有具体的游戏任务实现。
 
-- **pc/**：PC端游戏任务实现，包括登录、日常任务、竞技场等
+- **tasks/**：所有自动化任务的具体实现，包括登录、日常任务、竞技场等
+- **templates/**：任务所需的模板图像，按任务类型分类存放
 - **utils/roi_config.py**：ROI（感兴趣区域）配置管理，用于定义游戏界面上的关键区域
 
 ### 4. GUI界面（entrypoints/main\_window）
@@ -454,9 +455,9 @@ python console_test.py
 
 ### 2. 添加新任务
 
-1. 在`src/auto_tasks/pc/`目录下创建新的任务模块（例如：`new_task.py`）
+1. 在`src/auto_tasks/tasks/`目录下创建新的任务模块（例如：`new_task.py`）
 2. 实现任务逻辑，遵循现有任务的结构和命名规范
-3. 添加任务模板图像到`templates/new_task/`目录
+3. 添加任务模板图像到`src/auto_tasks/templates/new_task/`目录
 4. 在任务模块中定义任务步骤和图像识别逻辑
 5. 任务会自动被`load_task_modules()`函数加载到GUI中
 
