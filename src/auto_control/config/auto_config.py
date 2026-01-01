@@ -1,6 +1,6 @@
 """自动化框架全局配置"""
 
-from src.core.path_manager import config
+from src.core.config_manager import config
 
 # OCR与设备相关
 DEFAULT_OCR_ENGINE = config.get("framework.default_ocr_engine", "easyocr")  # 默认值兜底

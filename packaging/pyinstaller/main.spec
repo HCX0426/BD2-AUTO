@@ -50,7 +50,8 @@ def get_ocr_model_path(model_name: str) -> Path:
 # -------------------------- 资源文件打包配置 --------------------------
 datas = [
     (str(project_root / "config"), "config"),
-    (str(project_root / "src/auto_tasks/pc"), "src/auto_tasks/pc"),
+    (str(project_root / "src/auto_tasks/tasks"), "src/auto_tasks/tasks"),
+    (str(project_root / "src/auto_tasks/templates"), "src/auto_tasks/templates"),
     (str(project_root / "runtime/dev/task_configs.json"), "runtime/prod"),
     (str(project_root / "runtime/dev/app_settings.json"), "runtime/prod"),
     # 模型文件输出路径（保持原始配置）
@@ -62,19 +63,19 @@ datas = [
 # 保留你原始的依赖配置，未添加任何补充依赖
 hiddenimports = [
     # PC端自动任务模块（与任务导出列表一致）
-    "src.auto_tasks.pc.daily_missions",
-    "src.auto_tasks.pc.get_email",
-    "src.auto_tasks.pc.get_guild",
-    "src.auto_tasks.pc.get_pvp",
-    "src.auto_tasks.pc.get_restaurant",
-    "src.auto_tasks.pc.intensive_decomposition",
-    "src.auto_tasks.pc.login",
-    "src.auto_tasks.pc.lucky_draw",
-    "src.auto_tasks.pc.map_collection",
-    "src.auto_tasks.pc.pass_activity",
-    "src.auto_tasks.pc.pass_rewards",
-    "src.auto_tasks.pc.sweep_daily",
-    "src.auto_tasks.pc.public",
+    "src.auto_tasks.tasks.daily_missions",
+    "src.auto_tasks.tasks.get_email",
+    "src.auto_tasks.tasks.get_guild",
+    "src.auto_tasks.tasks.get_pvp",
+    "src.auto_tasks.tasks.get_restaurant",
+    "src.auto_tasks.tasks.intensive_decomposition",
+    "src.auto_tasks.tasks.login",
+    "src.auto_tasks.tasks.lucky_draw",
+    "src.auto_tasks.tasks.map_collection",
+    "src.auto_tasks.tasks.pass_activity",
+    "src.auto_tasks.tasks.pass_rewards",
+    "src.auto_tasks.tasks.sweep_daily",
+    "src.auto_tasks.tasks.public",
     # 项目核心组件
     "src.core.path_manager",
     "src.core.task_manager",

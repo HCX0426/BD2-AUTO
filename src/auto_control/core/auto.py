@@ -47,7 +47,8 @@ class Auto:
     def __init__(
         self,
         ocr_engine: str = DEFAULT_OCR_ENGINE,
-        device_uri: str = DEFAULT_DEVICE_URI,
+        device_type: str = "windows",
+        device_uri: str = None,
         original_base_res: Tuple[int, int] = DEFAULT_BASE_RESOLUTION,
         path_manager: PathManager = None,
         config: ConfigLoader = None,
@@ -57,7 +58,8 @@ class Auto:
 
         Args:
             ocr_engine: OCR识别引擎类型，默认使用配置的DEFAULT_OCR_ENGINE
-            device_uri: 默认设备标识URI，默认使用DEFAULT_DEVICE_URI
+            device_type: 设备类型，支持"windows"或"adb"，默认"windows"
+            device_uri: 默认设备标识URI，None则根据设备类型自动生成
             original_base_res: 基准分辨率（宽, 高），默认使用DEFAULT_BASE_RESOLUTION
             path_manager: 路径管理器实例，用于获取项目路径
             config: 配置加载器实例，用于获取配置信息
@@ -66,7 +68,7 @@ class Auto:
         total_init_start = time.time()
 
         # 使用传入的依赖或创建默认实例
-        from ...core.path_manager import config as default_config
+        from ...core.config_manager import config as default_config
         from ...core.path_manager import path_manager as default_path_manager
 
         self.path_manager = path_manager or default_path_manager
@@ -144,7 +146,14 @@ class Auto:
         )
         ocr_time = round(time.time() - ocr_start, 3)
 
-        self.default_device_uri = device_uri
+        # 根据设备类型设置默认device_uri
+        if device_uri is None:
+            if device_type == "adb":
+                self.default_device_uri = "adb://default"
+            else:  # windows
+                self.default_device_uri = DEFAULT_DEVICE_URI
+        else:
+            self.default_device_uri = device_uri
 
         self.last_result = None
         self.last_error = None

@@ -1,6 +1,7 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -76,6 +77,11 @@ class SettingsInterface(QWidget):
         # 设备设置组
         device_group = QGroupBox("设备设置")
         device_layout = QFormLayout()
+
+        # 设备类型选择
+        self.device_type_combo = QComboBox()
+        self.device_type_combo.addItems(["窗口设备", "ADB设备"])
+        device_layout.addRow("设备类型:", self.device_type_combo)
 
         # 设备连接超时
         self.device_timeout_spin = QSpinBox()
@@ -154,10 +160,13 @@ class SettingsInterface(QWidget):
         # 加载设备连接超时
         self.device_timeout_spin.setValue(self.settings_manager.get_setting("device_timeout", 10))
 
-        # 加载设备路径
-        self.device_path_edit.setText(self.settings_manager.get_setting("device_path", ""))
+        # 加载设备类型
+        device_type = self.settings_manager.get_setting("device_type", "windows")
+        device_type_index = 0 if device_type == "windows" else 1
+        self.device_type_combo.setCurrentIndex(device_type_index)
 
-        # 加载任务执行超时
+        # 加载设备路径
+        self.device_path_edit.setText(self.settings_manager.get_setting("device_path", ""))   # 关键：设备路径配置     # 加载任务执行超时
         self.task_timeout_spin.setValue(self.settings_manager.get_setting("task_timeout", 60))
 
         # 加载自动重试次数
@@ -187,10 +196,12 @@ class SettingsInterface(QWidget):
         # 保存设备连接超时
         self.settings_manager.set_setting("device_timeout", self.device_timeout_spin.value())
 
-        # 保存设备路径
-        self.settings_manager.set_setting("device_path", self.device_path_edit.text())
+        # 保存设备类型
+        device_type = "windows" if self.device_type_combo.currentIndex() == 0 else "adb"
+        self.settings_manager.set_setting("device_type", device_type)
 
-        # 保存任务执行超时
+        # 保存设备路径
+        self.settings_manager.set_setting("device_path", self.device_path_edit.text())   # 关键：保存设备路径     # 保存任务执行超时
         self.settings_manager.set_setting("task_timeout", self.task_timeout_spin.value())
 
         # 保存自动重试次数
@@ -219,6 +230,7 @@ class SettingsInterface(QWidget):
         self.auto_clear_log_check.setChecked(False)
         self.remember_window_pos_check.setChecked(True)
         self.device_timeout_spin.setValue(10)
+        self.device_type_combo.setCurrentIndex(0)  # 默认窗口设备
         self.device_path_edit.setText("")
         self.task_timeout_spin.setValue(60)
         self.retry_count_spin.setValue(0)

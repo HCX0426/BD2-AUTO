@@ -5,7 +5,7 @@ import sys
 
 from src.auto_control.config import *
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc import *
+from src.auto_tasks.tasks import *
 
 # 获取当前脚本的绝对路径
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -1,7 +1,7 @@
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.pc.public import (back_to_main, back_to_map,
+from src.auto_tasks.tasks.public import (back_to_main, back_to_map,
                                       calculate_remaining_timeout)
 from src.auto_tasks.utils.roi_config import roi_config
 

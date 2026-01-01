@@ -1,5 +1,5 @@
 # 任务注册模块
-from .pc import *  # 导入PC端所有任务函数
+from .tasks import *  # 导入所有任务函数
 
 
 def register_all_tasks(task_manager):
@@ -8,7 +8,7 @@ def register_all_tasks(task_manager):
     Args:
         task_manager: 任务管理器实例，需要支持register_task方法
     """
-    # 注册PC端所有任务
+    # 注册所有任务
     task_manager.register_task('login', login)
     task_manager.register_task('get_email', get_email)
     task_manager.register_task('get_restaurant', get_restaurant)

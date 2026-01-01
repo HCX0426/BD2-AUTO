@@ -51,8 +51,8 @@ class PathManager:
         self.rois_config_path = os.path.join(self.static_base, "config", self.env, "rois.json")
 
         # 3. 其他原有路径
-        self.task_template_path = os.path.join(self.static_base, "src", "auto_tasks", "pc", "templates")
-        self.task_path = os.path.join(self.static_base, "src", "auto_tasks", "pc")  # 定义 task_path
+        self.task_template_path = os.path.join(self.static_base, "src", "auto_tasks", "templates")
+        self.task_path = os.path.join(self.static_base, "src", "auto_tasks", "tasks")  # 定义 task_path
         self.log_path = os.path.join(self.dynamic_base, "logs")
         self.cache_path = os.path.join(self.dynamic_base, "cache")
         self.task_configs_path = os.path.join(self.dynamic_base, "task_configs.json")
@@ -105,8 +105,5 @@ class PathManager:
         return path_map.get(path_key, "")
 
 
-# 全局路径单例
+## 全局路径单例
 path_manager = PathManager()
-
-# 导入配置管理器，确保全局config变量可用
-from .config_manager import config

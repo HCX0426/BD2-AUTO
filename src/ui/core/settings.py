@@ -19,6 +19,7 @@ class AppSettingsManager:
             "theme": "light",
             "remember_window_pos": True,
             "window_pos": None,
+            "device_type": "windows",
         }
         try:
             if os.path.exists(self.settings_file):
