@@ -163,9 +163,31 @@ class MainWindow(QMainWindow):
         """
         启动自动初始化线程
         """
+        import os
+
         from src.ui.background.auto_initializer import AutoInitThread
 
-        self.auto_init_thread = AutoInitThread()
+        # 从设置中获取设备参数
+        device_type = self.settings_manager.get_setting("device_type", "windows")
+        device_path = self.settings_manager.get_setting("device_path", "")
+        ocr_engine = self.settings_manager.get_setting("ocr_engine", "easyocr")
+        device_uri = None
+
+        # 根据设备类型和路径生成device_uri
+        if device_path:
+            if device_type == "windows":
+                # 如果是EXE文件，提取文件名作为标题匹配
+                if device_path.endswith(".exe"):
+                    exe_name = os.path.basename(device_path)
+                    # 使用标题正则表达式匹配
+                    device_uri = f"Windows:///?title_re=.*{exe_name[:-4]}.*"
+                else:
+                    # 否则直接作为URI
+                    device_uri = device_path
+            else:  # adb
+                device_uri = device_path
+
+        self.auto_init_thread = AutoInitThread(device_type=device_type, device_uri=device_uri, ocr_engine=ocr_engine)
         self.auto_init_thread.finished.connect(self.auto_init_thread.deleteLater)
         self.auto_init_thread.start()
 
@@ -389,33 +411,70 @@ class MainWindow(QMainWindow):
 
     def launch_game(self):
         """启动游戏"""
+        import os
+        import shlex
+        import subprocess
+
         from src.ui.core.signals import get_signal_bus_instance
 
         signal_bus = get_signal_bus_instance()
 
-        pc_game_path = self.settings_manager.get_setting("pc_game_path", "")
-        if not pc_game_path:
-            QMessageBox.warning(self, "警告", "请先在设置中配置PC游戏路径")
-            signal_bus.emit_log("警告：未配置PC游戏路径")
-            return
+        # 从设备设置中获取游戏路径和启动参数
+        device_type = self.settings_manager.get_setting("device_type", "windows")
+        device_path = self.settings_manager.get_setting("device_path", "")
+        device_args = self.settings_manager.get_setting("device_args", "")
 
-        try:
-            import os
-            import subprocess
+        # 如果是Windows设备且设备路径包含EXE文件，则启动该游戏
+        if device_type == "windows":
+            try:
+                # 检查路径是否存在
+                if not os.path.exists(device_path):
+                    QMessageBox.critical(self, "错误", f"游戏路径不存在: {device_path}")
+                    signal_bus.emit_log(f"错误：游戏路径不存在: {device_path}")
+                    return
 
-            # 检查路径是否存在
-            if not os.path.exists(pc_game_path):
-                QMessageBox.critical(self, "错误", f"游戏路径不存在: {pc_game_path}")
-                signal_bus.emit_log(f"错误：游戏路径不存在: {pc_game_path}")
-                return
+                # 组合游戏路径和启动参数
+                full_cmd = f"{device_path} {device_args}"
 
-            # 启动游戏
-            subprocess.Popen(pc_game_path)
-            signal_bus.emit_log(f"已启动游戏: {pc_game_path}")
+                # 解析命令行
+                cmd = shlex.split(full_cmd)
 
-        except Exception as e:
-            signal_bus.emit_log(f"启动游戏失败: {str(e)}")
-            QMessageBox.critical(self, "错误", f"启动游戏失败: {str(e)}")
+                # 启动游戏
+                subprocess.Popen(cmd)
+                signal_bus.emit_log(f"已启动游戏: {full_cmd}")
+
+            except Exception as e:
+                signal_bus.emit_log(f"启动游戏失败: {str(e)}")
+                QMessageBox.critical(self, "错误", f"启动游戏失败: {str(e)}")
+        else:
+            # 否则使用旧的游戏路径设置（兼容旧版本）
+            pc_game_path = self.settings_manager.get_setting("pc_game_path", "")
+            if pc_game_path:
+                try:
+                    # 处理带有命令行参数的情况
+                    if ".exe" in pc_game_path:
+                        # 查找EXE文件的结束位置
+                        exe_end_index = pc_game_path.index(".exe") + 4
+                        exe_path = pc_game_path[:exe_end_index]
+
+                        if not os.path.exists(exe_path):
+                            QMessageBox.critical(self, "错误", f"游戏路径不存在: {exe_path}")
+                            signal_bus.emit_log(f"错误：游戏路径不存在: {exe_path}")
+                            return
+
+                        # 解析命令行参数
+                        cmd = shlex.split(pc_game_path)
+
+                        # 启动游戏
+                        subprocess.Popen(cmd)
+                        signal_bus.emit_log(f"已启动游戏: {pc_game_path}")
+
+                except Exception as e:
+                    signal_bus.emit_log(f"启动游戏失败: {str(e)}")
+                    QMessageBox.critical(self, "错误", f"启动游戏失败: {str(e)}")
+            else:
+                QMessageBox.warning(self, "警告", "请先在设备设置中配置PC游戏路径")
+                signal_bus.emit_log("警告：未配置PC游戏路径")
 
     def closeEvent(self, event: QCloseEvent):
         """

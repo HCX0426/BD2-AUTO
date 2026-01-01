@@ -98,6 +98,10 @@ class SettingsInterface(QWidget):
         path_layout.addWidget(self.browse_path_btn)
         device_layout.addRow("设备路径:", path_layout)
 
+        # 添加命令行参数输入框
+        self.device_args_edit = QLineEdit()
+        device_layout.addRow("启动参数:", self.device_args_edit)
+
         device_group.setLayout(device_layout)
         layout.addWidget(device_group)
 
@@ -107,7 +111,7 @@ class SettingsInterface(QWidget):
 
         # 任务执行超时
         self.task_timeout_spin = QSpinBox()
-        self.task_timeout_spin.setRange(10, 300)
+        self.task_timeout_spin.setRange(0, 300)
         self.task_timeout_spin.setSuffix("秒")
         task_layout.addRow("任务执行超时:", self.task_timeout_spin)
 
@@ -166,8 +170,13 @@ class SettingsInterface(QWidget):
         self.device_type_combo.setCurrentIndex(device_type_index)
 
         # 加载设备路径
-        self.device_path_edit.setText(self.settings_manager.get_setting("device_path", ""))   # 关键：设备路径配置     # 加载任务执行超时
-        self.task_timeout_spin.setValue(self.settings_manager.get_setting("task_timeout", 60))
+        self.device_path_edit.setText(self.settings_manager.get_setting("device_path", ""))
+
+        # 加载设备启动参数
+        self.device_args_edit.setText(self.settings_manager.get_setting("device_args", ""))
+
+        # 加载任务执行超时
+        self.task_timeout_spin.setValue(self.settings_manager.get_setting("task_timeout", 0))
 
         # 加载自动重试次数
         self.retry_count_spin.setValue(self.settings_manager.get_setting("retry_count", 0))
@@ -201,7 +210,12 @@ class SettingsInterface(QWidget):
         self.settings_manager.set_setting("device_type", device_type)
 
         # 保存设备路径
-        self.settings_manager.set_setting("device_path", self.device_path_edit.text())   # 关键：保存设备路径     # 保存任务执行超时
+        self.settings_manager.set_setting("device_path", self.device_path_edit.text())
+
+        # 保存设备启动参数
+        self.settings_manager.set_setting("device_args", self.device_args_edit.text())
+
+        # 保存任务执行超时
         self.settings_manager.set_setting("task_timeout", self.task_timeout_spin.value())
 
         # 保存自动重试次数
@@ -232,7 +246,8 @@ class SettingsInterface(QWidget):
         self.device_timeout_spin.setValue(10)
         self.device_type_combo.setCurrentIndex(0)  # 默认窗口设备
         self.device_path_edit.setText("")
-        self.task_timeout_spin.setValue(60)
+        self.device_args_edit.setText("")  # 重置命令行参数
+        self.task_timeout_spin.setValue(0)
         self.retry_count_spin.setValue(0)
 
         # 发送侧边栏宽度变更信号
@@ -244,6 +259,19 @@ class SettingsInterface(QWidget):
         """
         浏览设备路径
         """
-        dir_path = QFileDialog.getExistingDirectory(self, "选择设备路径")
-        if dir_path:
-            self.device_path_edit.setText(dir_path)
+        # 获取当前设备类型
+        device_type_index = self.device_type_combo.currentIndex()
+        device_type = "windows" if device_type_index == 0 else "adb"
+
+        # 设置文件过滤器
+        if device_type == "windows":
+            # Windows设备允许选择EXE文件
+            file_filter = "可执行文件 (*.exe);;所有文件 (*.*)"
+        else:
+            # ADB设备允许选择所有文件
+            file_filter = "所有文件 (*.*)"
+
+        # 打开文件选择对话框
+        file_path, _ = QFileDialog.getOpenFileName(self, "选择设备路径", "", file_filter)
+        if file_path:
+            self.device_path_edit.setText(file_path)

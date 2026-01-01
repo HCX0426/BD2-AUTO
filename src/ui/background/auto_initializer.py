@@ -7,11 +7,19 @@ class AutoInitThread(QThread):
     使用信号总线与UI通信
     """
 
-    def __init__(self):
+    def __init__(self, device_type="windows", device_uri=None, ocr_engine="easyocr"):
         """
         初始化Auto实例后台初始化线程
+
+        Args:
+            device_type: 设备类型，支持"windows"或"adb"，默认"windows"
+            device_uri: 设备URI，None则根据设备类型自动生成
+            ocr_engine: OCR识别引擎类型，默认"easyocr"
         """
         super().__init__()
+        self.device_type = device_type
+        self.device_uri = device_uri
+        self.ocr_engine = ocr_engine
 
     def run(self):
         """
@@ -21,7 +29,7 @@ class AutoInitThread(QThread):
             # 不使用signal_bus发送日志，避免在QApplication创建前使用Qt信号机制
             from src.auto_control.core.auto import Auto
 
-            auto_instance = Auto()
+            auto_instance = Auto(ocr_engine=self.ocr_engine, device_type=self.device_type, device_uri=self.device_uri)
             # 延迟导入signal_bus，确保它已经被初始化
             from src.ui.core.signals import signal_bus
 
