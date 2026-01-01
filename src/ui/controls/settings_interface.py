@@ -109,12 +109,6 @@ class SettingsInterface(QWidget):
         task_group = QGroupBox("任务设置")
         task_layout = QFormLayout()
 
-        # 任务执行超时
-        self.task_timeout_spin = QSpinBox()
-        self.task_timeout_spin.setRange(0, 300)
-        self.task_timeout_spin.setSuffix("秒")
-        task_layout.addRow("任务执行超时:", self.task_timeout_spin)
-
         # 自动重试次数
         self.retry_count_spin = QSpinBox()
         self.retry_count_spin.setRange(0, 5)
@@ -175,9 +169,6 @@ class SettingsInterface(QWidget):
         # 加载设备启动参数
         self.device_args_edit.setText(self.settings_manager.get_setting("device_args", ""))
 
-        # 加载任务执行超时
-        self.task_timeout_spin.setValue(self.settings_manager.get_setting("task_timeout", 0))
-
         # 加载自动重试次数
         self.retry_count_spin.setValue(self.settings_manager.get_setting("retry_count", 0))
 
@@ -215,9 +206,6 @@ class SettingsInterface(QWidget):
         # 保存设备启动参数
         self.settings_manager.set_setting("device_args", self.device_args_edit.text())
 
-        # 保存任务执行超时
-        self.settings_manager.set_setting("task_timeout", self.task_timeout_spin.value())
-
         # 保存自动重试次数
         self.settings_manager.set_setting("retry_count", self.retry_count_spin.value())
 
@@ -247,7 +235,6 @@ class SettingsInterface(QWidget):
         self.device_type_combo.setCurrentIndex(0)  # 默认窗口设备
         self.device_path_edit.setText("")
         self.device_args_edit.setText("")  # 重置命令行参数
-        self.task_timeout_spin.setValue(0)
         self.retry_count_spin.setValue(0)
 
         # 发送侧边栏宽度变更信号
