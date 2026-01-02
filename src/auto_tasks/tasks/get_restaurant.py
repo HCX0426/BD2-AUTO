@@ -40,11 +40,10 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                 if back_to_main(auto, remaining_timeout):
                     if auto.click(
                         (163, 257),
-                        coord_type="BASIC",
+                        coord_type="BASE",
                         verify={
                             "type": "text",
                             "target": "获得",
-                            "timeout": 5,
                             "roi": roi_config.get_roi("obtain_restaurant_reward", "get_restaurant"),
                         },
                         retry=2,
@@ -58,12 +57,6 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                 if auto.text_click(
                     "获得",
                     roi=roi_config.get_roi("obtain_restaurant_reward", "get_restaurant"),
-                    verify={
-                        "type": "text",
-                        "target": "立刻前往",
-                        "timeout": 5,
-                        "roi": roi_config.get_roi("immediate_go", "get_restaurant"),
-                    },
                     retry=2,
                     delay=1,
                 ):
@@ -86,7 +79,6 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                     verify={
                         "type": "text",
                         "target": "常客",
-                        "timeout": 5,
                         "roi": roi_config.get_roi("frequent_visitor", "get_restaurant"),
                     },
                     retry=2,
@@ -141,21 +133,6 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                     if click_back(auto, remaining_timeout):
                         logger.info("点击返回")
                         auto.sleep(1)
-                        continue
-
-                    if auto.text_click(
-                        "立刻前往",
-                        roi=roi_config.get_roi("immediate_go", "get_restaurant"),
-                        verify={
-                            "type": "text",
-                            "target": "常客",
-                            "timeout": 5,
-                            "roi": roi_config.get_roi("frequent_visitor", "get_restaurant"),
-                        },
-                        retry=1,
-                    ):
-                        logger.info("点击立刻前往")
-                        auto.sleep(3)
                         continue
 
     except Exception as e:

@@ -14,7 +14,9 @@ DEFAULT_SCREENSHOT_DELAY = config.get("framework.default_screenshot_delay", 0.0)
 DEFAULT_SCREENSHOT_CACHE_EXPIRE = config.get("framework.default_screenshot_cache_expire", 0.5)  # 截图缓存过期时间（秒）
 DEFAULT_CHECK_ELEMENT_DELAY = config.get("framework.default_check_element_delay", 0.0)
 DEFAULT_CLICK_DELAY = config.get("framework.default_click_delay", 0.0)
+DEFAULT_AFTER_CLICK_DELAY = config.get("framework.default_after_click_delay", 2)  # 点击后等待画面变化的延迟
 DEFAULT_KEY_DURATION = config.get("framework.default_key_duration", 0.1)
+DEFAULT_WAIT_TIMEOUT = config.get("framework.default_wait_timeout", 30)
 
 # 分辨率与路径相关
 DEFAULT_BASE_RESOLUTION = config.get("framework.default_base_resolution", (1920, 1080))

@@ -152,8 +152,8 @@ def click_back(auto: Auto, timeout: int = 30) -> bool:
     logger = auto.get_task_logger("click_back")
 
     try:
-        # 检查是否存在返回提示文本
-        if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text")):
+        # 检查是否存在返回提示文本，允许重试3次
+        if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text"), retry=3):
             logger.debug("未检测到点击画面返回提示，任务已完成")
             return True
 

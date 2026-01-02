@@ -12,13 +12,11 @@ from ..config import (
     DEFAULT_BASE_RESOLUTION,
     DEFAULT_CHECK_ELEMENT_DELAY,
     DEFAULT_CLICK_DELAY,
+    DEFAULT_AFTER_CLICK_DELAY,
     DEFAULT_DEVICE_URI,
     DEFAULT_KEY_DURATION,
     DEFAULT_OCR_ENGINE,
-    DEFAULT_SCREENSHOT_CACHE_EXPIRE,
-    DEFAULT_SCREENSHOT_DELAY,
-    DEFAULT_TASK_TIMEOUT,
-    DEFAULT_WINDOW_OPERATION_DELAY,
+    DEFAULT_WAIT_TIMEOUT,
 )
 from ..devices.base_device import BaseDevice
 from ..devices.device_manager import DeviceManager
@@ -158,11 +156,6 @@ class Auto:
         self.last_result = None
         self.last_error = None
 
-        # 图像缓存相关属性
-        self._screenshot_cache = None
-        self._screenshot_cache_time = 0
-        self._screenshot_cache_expire = DEFAULT_SCREENSHOT_CACHE_EXPIRE
-
         # 计算总初始化时间
         total_init_time = round(time.time() - total_init_start, 3)
         total_minutes = int(total_init_time // 60)
@@ -188,15 +181,6 @@ class Auto:
             bool: True表示需要中断任务，False表示继续执行
         """
         return self.stop_event.is_set()
-
-    def clear_screenshot_cache(self) -> None:
-        """
-        清除截图缓存
-        """
-        if self._screenshot_cache is not None:
-            self.logger.debug("清除截图缓存")
-            self._screenshot_cache = None
-            self._screenshot_cache_time = 0
 
     def set_should_stop(self, value: bool) -> None:
         """
@@ -283,7 +267,7 @@ class Auto:
             self.last_result = False
             return False
 
-    # ======================== 优化后的等待与验证机制 ========================
+    # ======================== 等待与验证机制 ========================
     def wait_for(
         self, condition: Callable[[], bool], timeout: int = 30, interval: float = 0.5, desc: str = "条件验证"
     ) -> bool:
@@ -428,7 +412,7 @@ class Auto:
                 self.logger.info("系统已处于运行状态")
                 return
             self.running = True
-            self.set_should_stop(False)  # 使用正确的方法重置中断标志
+            self.set_should_stop(False)
             self.start_time = time.time()
 
         self.logger.info("自动化系统开始启动")
@@ -558,8 +542,9 @@ class Auto:
                 continue
 
             self.logger.info(f"点击成功: {coord_type_str}{pos} | 点击次数{click_time}")
-            # 清除截图缓存，因为点击操作可能改变界面
-            self.clear_screenshot_cache()
+
+            # 点击后等待画面变化
+            self._apply_delay(DEFAULT_AFTER_CLICK_DELAY)
 
             # 如果不需要验证，直接返回成功
             if not verify:
@@ -570,7 +555,7 @@ class Auto:
             if self.verify(
                 verify_type=verify.get("type"),
                 target=verify.get("target"),
-                timeout=verify.get("timeout", 10),
+                timeout=verify.get("timeout", DEFAULT_WAIT_TIMEOUT),
                 roi=verify.get("roi"),
             ):
                 self.last_result = True
@@ -624,8 +609,9 @@ class Auto:
                 continue
 
             self.logger.info(f"按键成功: {key} | 按住时长{duration}s")
-            # 清除截图缓存，因为按键操作可能改变界面
-            self.clear_screenshot_cache()
+
+            # 按键后等待画面变化
+            self._apply_delay(DEFAULT_AFTER_CLICK_DELAY)
 
             # 如果不需要验证，直接返回成功
             if not verify:
@@ -636,7 +622,7 @@ class Auto:
             if self.verify(
                 verify_type=verify.get("type"),
                 target=verify.get("target"),
-                timeout=verify.get("timeout", 10),
+                timeout=verify.get("timeout", DEFAULT_WAIT_TIMEOUT),
                 roi=verify.get("roi"),
             ):
                 self.last_result = True
@@ -705,8 +691,9 @@ class Auto:
                 continue
 
             self.logger.info(f"[点击成功] {template_info}{roi_info} | 右键={right_click}")
-            # 清除截图缓存
-            self.clear_screenshot_cache()
+
+            # 点击后等待画面变化
+            self._apply_delay(DEFAULT_AFTER_CLICK_DELAY)
 
             # 如果不需要验证，直接返回成功
             if not verify:
@@ -717,7 +704,7 @@ class Auto:
             if self.verify(
                 verify_type=verify.get("type"),
                 target=verify.get("target"),
-                timeout=verify.get("timeout", 10),
+                timeout=verify.get("timeout", DEFAULT_WAIT_TIMEOUT),
                 roi=verify.get("roi"),
             ):
                 self.last_result = True
@@ -818,12 +805,11 @@ class Auto:
                     self.last_error = device.last_error or "[文本点击执行失败]"
                     self.logger.error(self.last_error)
                     continue
-                # 清除截图缓存，因为点击操作可能改变界面
-                self.clear_screenshot_cache()
             else:
                 self.logger.info(f"[识别成功] 未点击: '{text}'")
-                # 清除截图缓存，因为识别文本时使用了新的截图
-                self.clear_screenshot_cache()
+
+            # 点击或识别后等待画面变化
+            self._apply_delay(DEFAULT_AFTER_CLICK_DELAY)
 
             # 如果不需要验证，直接返回成功
             if not verify:
@@ -834,7 +820,7 @@ class Auto:
             if self.verify(
                 verify_type=verify.get("type"),
                 target=verify.get("target"),
-                timeout=verify.get("timeout", 10),
+                timeout=verify.get("timeout", DEFAULT_WAIT_TIMEOUT),
                 roi=verify.get("roi"),
             ):
                 self.last_result = click_center
@@ -845,139 +831,6 @@ class Auto:
         self.logger.error(f"[文本点击失败] '{text}'{roi_info}，已达最大重试次数: {retry}")
         self.last_result = None
         return None
-
-    # ======================== 窗口管理方法 ========================
-    def minimize_window(
-        self,
-        delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
-        device_uri: Optional[str] = None,
-        verify: Optional[dict] = None,
-        retry: int = 0,
-    ) -> bool:
-        """
-        最小化目标窗口（窗口状态变化后自动同步分辨率）
-
-        Args:
-            delay: 执行前延迟时间（秒），默认DEFAULT_WINDOW_OPERATION_DELAY
-            device_uri: 目标设备URI（None使用默认设备）
-            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
-            retry: 重试次数，默认0次
-
-        Returns:
-            bool: 最小化成功返回True，失败返回False
-        """
-        for attempt in range(retry + 1):
-            if self.check_should_stop():
-                self.logger.debug("最小化窗口任务被中断")
-                self.last_result = False
-                return False
-
-            self._apply_delay(delay)
-            device = self._get_device(device_uri)
-            if not device or not device.is_connected:
-                self.last_error = "最小化失败: 设备未连接"
-                self.logger.error(self.last_error)
-                self.last_result = False
-                continue
-
-            result = device.minimize_window()
-            if not result:
-                self.last_error = device.last_error or "窗口最小化失败"
-                self.logger.error(self.last_error)
-                continue
-
-            self._apply_delay(0.3)
-            self.device_manager.sync_active_device_resolution()
-            self.logger.info("窗口最小化成功，已同步分辨率")
-            # 清除截图缓存，因为窗口操作可能改变界面
-            self.clear_screenshot_cache()
-
-            # 如果不需要验证，直接返回成功
-            if not verify:
-                self.last_result = True
-                return True
-
-            # 执行验证
-            if self.verify(
-                verify_type=verify.get("type"),
-                target=verify.get("target"),
-                timeout=verify.get("timeout", 10),
-                roi=verify.get("roi"),
-            ):
-                self.last_result = True
-                return True
-
-            self.logger.warning(f"[验证失败] 窗口最小化，尝试: {attempt + 1}/{retry + 1}")
-
-        self.logger.error(f"[窗口最小化失败] 已达最大重试次数: {retry}")
-        self.last_result = False
-        return False
-
-    def maximize_window(
-        self,
-        delay: float = DEFAULT_WINDOW_OPERATION_DELAY,
-        device_uri: Optional[str] = None,
-        verify: Optional[dict] = None,
-        retry: int = 0,
-    ) -> bool:
-        """
-        最大化目标窗口（窗口状态变化后自动同步分辨率）
-
-        Args:
-            delay: 执行前延迟时间（秒），默认DEFAULT_WINDOW_OPERATION_DELAY
-            device_uri: 目标设备URI（None使用默认设备）
-            verify: 验证配置，格式：{"type": "exist", "target": "template_name", "timeout": 10}
-            retry: 重试次数，默认0次
-
-        Returns:
-            bool: 最大化成功返回True，失败返回False
-        """
-        for attempt in range(retry + 1):
-            if self.check_should_stop():
-                self.logger.debug("最大化窗口任务被中断")
-                self.last_result = False
-                return False
-
-            self._apply_delay(delay)
-            device = self._get_device(device_uri)
-            if not device or not device.is_connected:
-                self.last_error = "最大化失败: 设备未连接"
-                self.logger.error(self.last_error)
-                self.last_result = False
-                continue
-
-            result = device.maximize_window()
-            if not result:
-                self.last_error = device.last_error or "窗口最大化失败"
-                self.logger.error(self.last_error)
-                continue
-
-            self._apply_delay(0.3)
-            self.device_manager.sync_active_device_resolution()
-            self.logger.info("窗口最大化成功，已同步分辨率")
-            # 清除截图缓存，因为窗口操作可能改变界面
-            self.clear_screenshot_cache()
-
-            # 如果不需要验证，直接返回成功
-            if not verify:
-                self.last_result = True
-                return True
-
-            # 执行验证
-            if self.verify(
-                verify_type=verify.get("type"),
-                target=verify.get("target"),
-                timeout=verify.get("timeout", 10),
-                roi=verify.get("roi"),
-            ):
-                self.last_result = True
-                return True
-
-            self.logger.warning(f"[验证失败] 窗口最大化，尝试: {attempt + 1}/{retry + 1}")
-
-        self.logger.error(f"[窗口最大化失败] 已达最大重试次数: {retry}")
-        self.last_result = False
-        return False
 
     # ======================== 图像相关方法 ========================
     def check_element_exist(
@@ -1106,88 +959,6 @@ class Auto:
         else:
             return None
 
-    def screenshot(
-        self,
-        save_path: str = None,
-        delay: float = DEFAULT_SCREENSHOT_DELAY,
-        device_uri: str = None,
-        use_cache: bool = True,
-    ) -> Optional[np.ndarray]:
-        """
-        截图并可选保存（返回BGR格式图像，自动适配窗口状态）
-
-        Args:
-            save_path: 截图保存路径（None则不保存，仅返回图像数据）
-            delay: 执行前延迟时间（秒），默认DEFAULT_SCREENSHOT_DELAY
-            device_uri: 目标设备URI（None使用默认设备）
-            use_cache: 是否使用缓存（默认True）
-
-        Returns:
-            Optional[np.ndarray]: 截图图像（BGR格式），失败返回None
-        """
-        if self.check_should_stop():
-            self.logger.debug("截图任务被中断")
-            self.last_result = None
-            return None
-
-        # 检查缓存是否有效
-        current_time = time.time()
-        if use_cache and self._screenshot_cache is not None:
-            cache_age = current_time - self._screenshot_cache_time
-            if cache_age < self._screenshot_cache_expire:
-                self.logger.debug(
-                    f"使用缓存截图 | 缓存年龄: {cache_age:.3f}s < 过期时间: {self._screenshot_cache_expire}s"
-                )
-                screen = self._screenshot_cache.copy()
-                self.last_result = screen
-                return screen
-            else:
-                self.logger.debug(
-                    f"缓存截图已过期 | 缓存年龄: {cache_age:.3f}s >= 过期时间: {self._screenshot_cache_expire}s"
-                )
-                self.clear_screenshot_cache()
-
-        self._apply_delay(delay)
-        device = self._get_device(device_uri)
-        if not device or not device.is_connected:
-            self.last_error = "截图失败: 设备未连接"
-            self.logger.error(self.last_error)
-            self.last_result = None
-            return None
-
-        try:
-            screen = device.capture_screen()
-            self.last_result = screen
-
-            if screen is None:
-                self.last_error = "截图失败: 底层返回空图像"
-                self.logger.error(self.last_error)
-                return None
-
-            # 更新缓存
-            self._screenshot_cache = screen.copy()
-            self._screenshot_cache_time = current_time
-
-            client_res = self.display_context.client_logical_res
-            self.logger.debug(f"截图成功 | 图像尺寸: {screen.shape[1]}x{screen.shape[0]} | 客户区尺寸: {client_res}")
-
-            if save_path:
-                try:
-                    cv2.imwrite(save_path, screen)
-                    self.logger.info(f"截图保存成功: {save_path}")
-                except Exception as save_e:
-                    self.last_error = f"截图保存失败: {str(save_e)}"
-                    self.logger.error(self.last_error)
-            else:
-                self.logger.info("截图成功（未保存）")
-
-            return screen
-        except Exception as e:
-            self.last_error = f"截图异常: {str(e)}"
-            self.logger.error(self.last_error, exc_info=True)
-            self.last_result = None
-            return None
-
     def swipe(
         self,
         start_pos: tuple,
@@ -1280,8 +1051,6 @@ class Auto:
                 continue
 
             self.logger.info(f"滑动成功: 从{start_pos}到{end_pos} | 类型:{coord_type_name} | 时长{duration}s")
-            # 清除截图缓存，因为滑动操作可能改变界面
-            self.clear_screenshot_cache()
 
             # 如果不需要验证，直接返回成功
             if not verify:
@@ -1292,7 +1061,7 @@ class Auto:
             if self.verify(
                 verify_type=verify.get("type"),
                 target=verify.get("target"),
-                timeout=verify.get("timeout", 10),
+                timeout=verify.get("timeout", DEFAULT_WAIT_TIMEOUT),
                 roi=verify.get("roi"),
             ):
                 self.last_result = True
@@ -1362,7 +1131,7 @@ class Auto:
             if self.verify(
                 verify_type=verify.get("type"),
                 target=verify.get("target"),
-                timeout=verify.get("timeout", 10),
+                timeout=verify.get("timeout", DEFAULT_WAIT_TIMEOUT),
                 roi=verify.get("roi"),
             ):
                 self.last_result = True
