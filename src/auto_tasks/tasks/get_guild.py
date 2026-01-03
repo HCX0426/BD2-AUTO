@@ -20,7 +20,7 @@ def get_guild(auto: Auto, timeout: int = 300) -> bool:
     Returns:
         bool: 是否成功完成领取
     """
-    logger = auto.get_task_logger("get_guild")
+    logger = auto.logger.create_task_logger("get_guild")
     logger.info("开始领取公会奖励")
 
     start_time = time.time()

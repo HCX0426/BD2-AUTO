@@ -27,6 +27,7 @@ class DeviceManager:
         coord_transformer: CoordinateTransformer,
         display_context: RuntimeDisplayContext,
         stop_event: Event,
+        config: object,
     ):
         """
         初始化设备管理器
@@ -37,6 +38,7 @@ class DeviceManager:
             coord_transformer: 坐标转换器实例（必需）
             display_context: 显示上下文实例（必需）
             stop_event: 全局停止事件（用于中断设备阻塞操作，必需）
+            config: 配置对象（必需）
 
         Raises:
             ValueError: 任意必需参数缺失/类型错误时抛出
@@ -52,6 +54,8 @@ class DeviceManager:
             raise ValueError("初始化失败：display_context必须是RuntimeDisplayContext实例")
         if not isinstance(stop_event, Event):
             raise ValueError("初始化失败：stop_event必须是threading.Event实例")
+        if not config:
+            raise ValueError("初始化失败：config不能为空")
 
         # 设备存储：URI（小写）→ 设备实例
         self.devices: Dict[str, BaseDevice] = {}
@@ -67,6 +71,7 @@ class DeviceManager:
         self.logger = logger
         self.image_processor = image_processor
         self.coord_transformer = coord_transformer
+        self.config = config
         self.display_context = display_context
         self.stop_event = stop_event
 
@@ -159,6 +164,9 @@ class DeviceManager:
         Returns:
             设备实例（不存在返回None）
         """
+        if not device_uri:
+            self.logger.error("获取设备失败：device_uri 不能为空")
+            return None
         lower_uri = device_uri.lower()
         device = self.devices.get(lower_uri)
 
@@ -265,6 +273,9 @@ class DeviceManager:
         Returns:
             添加并连接成功返回True，失败返回False
         """
+        if not device_uri:
+            self.logger.error("添加设备失败：device_uri 不能为空")
+            return False
         lower_uri = device_uri.lower()
 
         # 检查设备是否已存在

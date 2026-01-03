@@ -78,7 +78,7 @@ hiddenimports = [
     "src.auto_tasks.tasks.public",
     # 项目核心组件
     "src.core.path_manager",
-    "src.core.task_manager",
+    "src.core.task_loader",
     "src.auto_control.core.auto",
     "src.auto_control.devices.windows_device",
     # GUI相关组件

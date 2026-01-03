@@ -34,7 +34,7 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
     Returns:
         bool: 是否成功返回主界面
     """
-    logger = auto.get_task_logger("back_to_main")
+    logger = auto.logger.create_task_logger("back_to_main")
     start_time = time.time()
 
     try:
@@ -111,7 +111,7 @@ def back_to_map(auto: Auto, timeout: int = 30) -> bool:
     Returns:
         bool: 是否成功返回地图
     """
-    logger = auto.get_task_logger("back_to_map")
+    logger = auto.logger.create_task_logger("back_to_map")
     start_time = time.time()
     try:
         while True:
@@ -149,7 +149,7 @@ def click_back(auto: Auto, timeout: int = 30) -> bool:
     Returns:
         bool: 是否成功点击返回
     """
-    logger = auto.get_task_logger("click_back")
+    logger = auto.logger.create_task_logger("click_back")
 
     try:
         # 检查是否存在返回提示文本，允许重试3次
@@ -193,7 +193,7 @@ def enter_map_select(auto: Auto, timeout: int = 30, swipe_duration: int = 6, is_
     Returns:
         bool: 是否成功进入地图选择
     """
-    logger = auto.get_task_logger("enter_map_select")
+    logger = auto.logger.create_task_logger("enter_map_select")
 
     try:
         # 检查是否已在地图选择界面

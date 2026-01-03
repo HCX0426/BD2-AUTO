@@ -4,7 +4,7 @@ from typing import Dict, List
 import cv2
 import numpy as np
 
-from src.auto_control.config.ocr_config import (
+from .ocr_config import (
     convert_lang_code,
     get_default_languages,
     get_engine_config,

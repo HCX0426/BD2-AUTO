@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from src.auto_control.config.ocr_config import get_default_languages
+from .ocr_config import get_default_languages
 from src.auto_control.ocr.base_ocr import BaseOCR
 from src.auto_control.ocr.easyocr_wrapper import EasyOCRWrapper
 from src.auto_control.ocr.paddleocr_wrapper import PaddleOCRWrapper
@@ -58,7 +58,7 @@ class OCRProcessor:
             raise ValueError("初始化失败：display_context必须是RuntimeDisplayContext实例")
 
         # 引擎类型校验
-        self.engine_type = engine.lower()
+        self.engine_type = (engine or "easyocr").lower()
         if self.engine_type not in ["easyocr", "paddleocr"]:
             raise ValueError(f"不支持的OCR引擎: {engine}，仅支持 'easyocr' 和 'paddleocr'")
 
@@ -68,6 +68,8 @@ class OCRProcessor:
         self.display_context = display_context  # 全局显示状态容器
         self.test_mode = test_mode
         self.stop_event = stop_event
+        # 文本匹配配置：是否启用模糊匹配（部分匹配）
+        self.fuzzy_match = kwargs.pop("fuzzy_match", True)
 
         # 语言配置（默认/自定义）
         self._default_lang = kwargs.pop("languages", None) or get_default_languages(self.engine_type)
@@ -368,7 +370,7 @@ class OCRProcessor:
                     }
                 )
 
-        # 8. 匹配逻辑：精确匹配 + 部分匹配
+        # 8. 匹配逻辑：精确匹配 + 部分匹配（如果启用）
         best_match_phys = None
         highest_confidence = 0.0
         exact_matches = []
@@ -388,8 +390,8 @@ class OCRProcessor:
                     f"达标({min_confidence}): {'是' if res['confidence'] >= min_confidence else '否'} | "
                     f"物理坐标: {res['bbox_orig_phys']}"
                 )
-            # 部分匹配：目标文本是识别文本的子字符串
-            elif target_text_normalized in res_text_normalized:
+            # 部分匹配：目标文本是识别文本的子字符串（仅当启用模糊匹配时）
+            elif self.fuzzy_match and target_text_normalized in res_text_normalized:
                 partial_matches.append(res)
                 if res["confidence"] > highest_confidence:
                     highest_confidence = res["confidence"]

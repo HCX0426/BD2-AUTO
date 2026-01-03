@@ -22,8 +22,9 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 def console_execute():
     auto = Auto()
     try:
-        if not auto.add_device():
-            auto.logger.error(f"设备添加失败: {auto.last_error}")
+        result = auto.add_device()
+        if not result.success:
+            auto.logger.error(f"设备添加失败: {result.error_msg}")
             return False
         auto.start()
 

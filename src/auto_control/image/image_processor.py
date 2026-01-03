@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
-from src.auto_control.config.auto_config import TEMPLATE_EXTENSIONS
+
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.utils.debug_image_saver import DebugImageSaver
 from src.auto_control.utils.display_context import RuntimeDisplayContext
@@ -24,6 +24,7 @@ class ImageProcessor:
         display_context: Optional[RuntimeDisplayContext] = None,
         template_dir: str = None,
         test_mode: bool = False,
+        config: Optional[object] = None,
     ) -> None:
         """
         初始化图像处理器（强制依赖上层传入有效实例）
@@ -56,6 +57,11 @@ class ImageProcessor:
         self.display_context = display_context
         self.template_dir = template_dir or path_manager.get("task_template")
         self.test_mode = test_mode
+        
+        # 配置初始化
+        self.config = config
+        # 获取模板扩展名配置，支持外部配置覆盖默认值
+        self.template_extensions = getattr(config, "TEMPLATE_EXTENSIONS", (".png", ".jpg", ".jpeg", ".bmp"))
 
         # 模板缓存，采用LRU策略
         self.templates: Dict[str, np.ndarray] = {}
@@ -118,7 +124,7 @@ class ImageProcessor:
 
         for root, dirs, files in os.walk(self.template_dir):
             for filename in files:
-                if filename.lower().endswith(TEMPLATE_EXTENSIONS):
+                if filename.lower().endswith(self.template_extensions):
                     rel_path = os.path.relpath(root, self.template_dir)
                     template_name = (
                         os.path.join(rel_path, os.path.splitext(filename)[0]).replace("\\", "/")
