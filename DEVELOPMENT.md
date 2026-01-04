@@ -19,7 +19,7 @@
   - [代码结构](#代码结构)
   - [核心模块说明](#核心模块说明)
     - [1. 自动控制核心（auto\_control）](#1-自动控制核心auto_control)
-    - [2. 任务管理（core/task\_manager）](#2-任务管理coretask_manager)
+    - [2. 核心功能模块（core/）](#2-核心功能模块core)
     - [3. 自动化任务（auto\_tasks）](#3-自动化任务auto_tasks)
     - [4. GUI界面（entrypoints/main\_window）](#4-gui界面entrypointsmain_window)
     - [5. UI模块（ui/）](#5-ui模块ui)
@@ -82,6 +82,9 @@ BD2-AUTO是一个基于PyQt6开发的BD2游戏自动化工具，使用OCR进行�
 - **OpenCV**：图像处理
 - **PyTorch**：深度学习框架（EasyOCR依赖）
 - **pywin32**：Windows系统API访问
+- **PyDirectInput**：Windows输入模拟
+- **psutil**：系统资源监控
+- **pyperclip**：剪贴板操作
 
 ## 开发环境搭建
 
@@ -119,6 +122,8 @@ pip install -r requirements/dev.txt
 
 ### 4. 安装开发工具
 
+开发工具已包含在requirements/dev.txt中，无需单独安装。如果需要单独安装：
+
 ```bash
 pip install pyinstaller black flake8 mypy
 ```
@@ -144,7 +149,14 @@ BD2-AUTO/
 │   │   │   ├── auto_config.py     # 自动控制配置
 │   │   │   └── ocr_config.py      # OCR识别配置
 │   │   ├── core/         # 核心控制逻辑
-│   │   │   └── auto.py            # 控制核心类
+│   │   │   ├── auto.py            # 控制核心类
+│   │   │   ├── auto_base.py       # 控制基类
+│   │   │   ├── auto_chain.py      # 链式调用管理
+│   │   │   ├── auto_decorators.py # 控制装饰器
+│   │   │   ├── auto_devices.py    # 设备管理集成
+│   │   │   ├── auto_operations.py # 操作实现
+│   │   │   ├── auto_utils.py      # 控制工具
+│   │   │   └── auto_verify.py     # 验证功能
 │   │   ├── devices/      # 设备管理
 │   │   │   ├── adb_device.py      # ADB设备控制（预留）
 │   │   │   ├── base_device.py     # 设备控制基类
@@ -192,11 +204,16 @@ BD2-AUTO/
 │   │   └── utils/        # 任务工具模块
 │   │       └── roi_config.py            # ROI配置管理
 │   ├── core/             # 核心功能模块
-│   │   ├── path_manager.py  # 路径管理
-│   │   └── task_manager.py  # 任务管理
+│   │   ├── path_manager.py    # 路径管理
+│   │   ├── config_manager.py  # 配置管理
+│   │   └── task_loader.py     # 任务加载
 │   ├── entrypoints/      # 程序入口点
 │   │   └── main_window.py  # GUI窗口
 │   └── ui/               # UI模块（包含界面组件和布局）
+│       ├── background/    # 背景相关组件
+│       ├── controls/      # 控制组件
+│       ├── core/          # UI核心功能
+│       └── utils/         # UI工具
 ├── config/               # 配置文件
 │   ├── dev/              # 开发环境配置
 │   │   ├── app_settings.json  # 应用设置
@@ -236,6 +253,13 @@ BD2-AUTO/
 
 - **core/**：
   - **auto.py**：控制核心类，负责任务的调度、执行和管理
+  - **auto_base.py**：控制基类，定义了自动化操作的基本接口和属性
+  - **auto_chain.py**：链式调用管理，实现线性步骤执行和重试机制
+  - **auto_decorators.py**：控制装饰器，提供日志、重试、超时等功能增强
+  - **auto_devices.py**：设备管理集成，简化设备操作的调用方式
+  - **auto_operations.py**：操作实现，包含点击、拖拽、输入等具体操作逻辑
+  - **auto_utils.py**：控制工具，提供各种辅助函数
+  - **auto_verify.py**：验证功能，用于验证操作结果
 
 - **devices/**：
   - **base_device.py**：设备控制的抽象基类，定义了设备操作的标准接口
@@ -257,17 +281,15 @@ BD2-AUTO/
   - **display_context.py**：显示上下文工具，用于管理和操作显示设备
   - **logger.py**：日志工具，提供统一的日志记录功能
 
-### 2. 任务管理（core/task\_manager）
+### 2. 核心功能模块（core/）
 
-任务管理模块负责任务的动态加载、配置管理和设置存储。
+核心功能模块负责项目的基础功能支持，包括路径管理、任务加载和配置管理。
 
 - **path_manager.py**：路径管理工具，提供统一的路径获取接口，适配开发和打包环境
-- **task_manager.py**：
-  - **load_task_modules()**：动态加载任务模块，自动发现和注册新任务
-  - **TaskConfigManager**：任务配置管理，负责任务配置的加载和保存
-  - **AppSettingsManager**：应用设置管理，负责应用级设置的加载和保存
+- **task_loader.py**：任务加载器，动态加载任务模块，自动发现和注册新任务
+- **config_manager.py**：配置管理器，负责任务配置和应用设置的加载和保存
 
-### 3. 自动化任务（autotasks）
+### 3. 自动化任务（auto\_tasks）
 
 自动化任务模块包含了所有具体的游戏任务实现。
 
@@ -283,9 +305,12 @@ GUI界面模块提供了用户与自动化系统交互的界面。
 
 ### 5. UI模块（ui/）
 
-UI模块包含了应用程序的界面组件和布局定义。
+UI模块包含了应用程序的界面组件和布局定义，支持应用程序的界面展示和用户交互。
 
-- 提供了各种UI组件的实现，支持应用程序的界面展示和用户交互
+- **background/**：背景相关组件，包括自动化和任务背景
+- **controls/**：控制组件，包括主控件和设置控件
+- **core/**：UI核心功能，包括设置管理和信号处理
+- **utils/**：UI工具，包括游戏管理器等辅助功能
 
 ## 坐标系统
 
@@ -448,10 +473,14 @@ python main.py
 #### 控制台测试模式
 
 ```bash
+# 正常运行模式
 python console_test.py
+
+# 热重载模式（修改代码后自动重启）
+python console_test.py --reload
 ```
 
-控制台测试模式用于快速测试和调试单个功能，无需启动GUI。
+控制台测试模式用于快速测试和调试单个功能，无需启动GUI。热重载模式支持代码修改后自动重启，提高开发效率。
 
 ### 2. 添加新任务
 
