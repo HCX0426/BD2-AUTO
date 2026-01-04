@@ -77,7 +77,14 @@ class ConfigLoader:
             return False
 
     def _get_nested_value(self, data: dict, key_path: str, default):
-        """从嵌套字典按路径获取值（支持如 "device.windows_app_title"）"""
+        """
+        从嵌套字典按路径获取值
+        
+        :param data: 要查找的嵌套字典
+        :param key_path: 点分隔的路径字符串，如 "device.windows_app_title"
+        :param default: 如果路径不存在时返回的默认值
+        :return: 找到的值或默认值
+        """
         keys = key_path.split(".")
         value = data
         for key in keys:

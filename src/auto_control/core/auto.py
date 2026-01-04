@@ -48,6 +48,13 @@ class Auto:
     ):
         """
         初始化自动化系统核心实例
+        
+        :param ocr_engine: OCR引擎类型，默认使用配置中的DEFAULT_OCR_ENGINE
+        :param device_type: 设备类型，支持"windows"和"adb"，默认"windows"
+        :param device_uri: 设备URI，默认根据设备类型自动生成
+        :param original_base_res: 原始基准分辨率，默认使用配置中的BASE_RESOLUTION
+        :param path_manager: 路径管理器实例，默认使用全局单例
+        :param config: 自动化配置实例，默认创建新实例
         """
         # 记录总初始化开始时间
         total_init_start = time.time()
@@ -201,7 +208,15 @@ class Auto:
                 self.logger.info("任务中断标志已重置为False")
 
     def start(self) -> AutoResult:
-        """启动自动化系统（初始化设备+标记运行状态）"""
+        """
+        启动自动化系统（初始化设备+标记运行状态）
+        
+        :return: AutoResult对象，包含启动结果
+        - success: 布尔值，表示启动是否成功
+        - data: 布尔值，始终为True
+        - error_msg: 错误信息，仅在失败时提供
+        - elapsed_time: 启动耗时（秒）
+        """
         start_time = time.time()
         with self.lock_manager:
             if self.running:
@@ -226,7 +241,15 @@ class Auto:
                 return AutoResult.fail_result(error_msg=str(e), elapsed_time=elapsed)
 
     def stop(self) -> AutoResult:
-        """停止自动化系统（释放设备+清理资源）"""
+        """
+        停止自动化系统（释放设备+清理资源）
+        
+        :return: AutoResult对象，包含停止结果
+        - success: 布尔值，表示停止是否成功
+        - data: 布尔值，始终为True
+        - error_msg: 错误信息，仅在失败时提供
+        - elapsed_time: 停止耗时（秒）
+        """
         start_time = time.time()
         with self.lock_manager:
             if not self.running:
@@ -258,12 +281,23 @@ class Auto:
 
     # ======================== 设备管理代理方法（对外暴露） ========================
     def add_device(self, device_uri: str = None, timeout: float = None) -> AutoResult:
-        """代理调用设备处理器的添加设备方法"""
+        """
+        代理调用设备处理器的添加设备方法
+        
+        :param device_uri: 设备URI，默认使用初始化时设置的默认设备URI
+        :param timeout: 设备连接超时时间（秒），默认使用配置中的DEFAULT_DEVICE_TIMEOUT
+        :return: AutoResult对象，包含添加设备的结果
+        """
         device_uri = device_uri or self.default_device_uri
         return self.device_handler.add_device(device_uri, timeout)
 
     def set_active_device(self, device_uri: str) -> AutoResult:
-        """代理调用设备处理器的设置活动设备方法"""
+        """
+        代理调用设备处理器的设置活动设备方法
+        
+        :param device_uri: 要设置为活动设备的URI
+        :return: AutoResult对象，包含设置结果
+        """
         return self.device_handler.set_active_device(device_uri)
 
     # ======================== 验证方法代理（对外暴露） ========================
@@ -345,6 +379,11 @@ class Auto:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def get_task_logger(self, task_name: str) -> Any:
-        """获取任务日志器（向后兼容方法）"""
+    def get_task_logger(self, task_name: str) -> 'Logger':
+        """
+        获取任务日志器（向后兼容方法）
+        
+        :param task_name: 任务名称
+        :return: 配置好的任务Logger实例
+        """
         return self.logger.create_task_logger(task_name)
