@@ -31,7 +31,7 @@ class VerifyHandler:
             if self.auto.check_should_stop():
                 elapsed = time.time() - start_time
                 self.logger.info(f"[等待中断] {desc}")
-                return AutoResult.success_result(data=True, elapsed_time=elapsed, is_interrupted=True)
+                return AutoResult.fail_result(error_msg=f"{desc}被中断", elapsed_time=elapsed, is_interrupted=True)
 
             # 超时检查
             elapsed = time.time() - start_time
