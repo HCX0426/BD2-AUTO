@@ -42,7 +42,16 @@ def with_retry_and_check(func: Callable) -> Callable:
 
             # 3. 获取设备（核心依赖）
             try:
-                device = self.auto.device_manager.get_device(device_uri) or self.auto.device_manager.get_active_device()
+                # 优化：如果device_uri为空，直接使用active_device，避免不必要的错误日志
+                if device_uri and str(device_uri).strip():
+                    device = self.auto.device_manager.get_device(device_uri)
+                else:
+                    device = None
+                
+                # 如果指定设备不存在，使用active_device
+                if not device:
+                    device = self.auto.device_manager.get_active_device()
+                
                 if not device:
                     raise DeviceError("未找到可用设备")
             except DeviceError as e:

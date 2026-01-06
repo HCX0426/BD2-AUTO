@@ -3,6 +3,7 @@
 import logging
 import threading
 import time
+from asyncio.windows_events import NULL
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from src.auto_control.devices.base_device import BaseDevice
@@ -14,6 +15,7 @@ from src.auto_control.utils.display_context import RuntimeDisplayContext
 from src.auto_control.utils.logger import Logger
 
 # 外部依赖导入
+from src.core import config_manager
 from src.core.path_manager import PathManager
 from src.core.path_manager import path_manager as global_path_manager
 
@@ -45,16 +47,18 @@ class Auto:
         original_base_res: Tuple[int, int] = None,
         path_manager: PathManager = None,
         config: AutoConfig = None,
+        settings_manager=None,
     ):
         """
         初始化自动化系统核心实例
-        
+
         :param ocr_engine: OCR引擎类型，默认使用配置中的DEFAULT_OCR_ENGINE
         :param device_type: 设备类型，支持"windows"和"adb"，默认"windows"
         :param device_uri: 设备URI，默认根据设备类型自动生成
         :param original_base_res: 原始基准分辨率，默认使用配置中的BASE_RESOLUTION
         :param path_manager: 路径管理器实例，默认使用全局单例
         :param config: 自动化配置实例，默认创建新实例
+        :param settings_manager: 设置管理器实例，用于获取永久置顶等设置
         """
         # 记录总初始化开始时间
         total_init_start = time.time()
@@ -63,7 +67,7 @@ class Auto:
         self.config = config or AutoConfig()
         original_base_res = original_base_res or self.config.BASE_RESOLUTION
         ocr_engine = ocr_engine or self.config.DEFAULT_OCR_ENGINE
-        self.test_mode = self.config.LOG_LEVEL == "DEBUG"
+        self.test_mode: bool = config_manager.config.get("debug", False)
 
         # 状态变量初始化
         self.lock_manager = LockManager()
@@ -128,6 +132,7 @@ class Auto:
             display_context=self.display_context,
             stop_event=self.stop_event,
             config=self.config,
+            settings_manager=settings_manager,
         )
         device_time = round(time.time() - device_start, 3)
 
@@ -210,7 +215,7 @@ class Auto:
     def start(self) -> AutoResult:
         """
         启动自动化系统（初始化设备+标记运行状态）
-        
+
         :return: AutoResult对象，包含启动结果
         - success: 布尔值，表示启动是否成功
         - data: 布尔值，始终为True
@@ -243,7 +248,7 @@ class Auto:
     def stop(self) -> AutoResult:
         """
         停止自动化系统（释放设备+清理资源）
-        
+
         :return: AutoResult对象，包含停止结果
         - success: 布尔值，表示停止是否成功
         - data: 布尔值，始终为True
@@ -280,10 +285,10 @@ class Auto:
                 return AutoResult.fail_result(error_msg=str(e), elapsed_time=elapsed)
 
     # ======================== 设备管理代理方法（对外暴露） ========================
-    def add_device(self, device_uri: str = None, timeout: float = None) -> AutoResult:
+    def add_device(self, device_uri: str = "", timeout: float = None) -> AutoResult:
         """
         代理调用设备处理器的添加设备方法
-        
+
         :param device_uri: 设备URI，默认使用初始化时设置的默认设备URI
         :param timeout: 设备连接超时时间（秒），默认使用配置中的DEFAULT_DEVICE_TIMEOUT
         :return: AutoResult对象，包含添加设备的结果
@@ -294,7 +299,7 @@ class Auto:
     def set_active_device(self, device_uri: str) -> AutoResult:
         """
         代理调用设备处理器的设置活动设备方法
-        
+
         :param device_uri: 要设置为活动设备的URI
         :return: AutoResult对象，包含设置结果
         """
@@ -379,10 +384,10 @@ class Auto:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def get_task_logger(self, task_name: str) -> 'Logger':
+    def get_task_logger(self, task_name: str) -> "Logger":
         """
         获取任务日志器（向后兼容方法）
-        
+
         :param task_name: 任务名称
         :return: 配置好的任务Logger实例
         """

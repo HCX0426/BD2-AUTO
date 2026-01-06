@@ -3,7 +3,7 @@
   "debug": true,
   "framework": {
     "default_ocr_engine": "easyocr",
-    "default_device_uri": "Windows:///?title_re=.*BrownDust.*",
+    "default_device_uri": "windows://title=BrownDust II",
     "default_task_timeout": 300,
     "default_text_fuzzy_match": true,
     "default_window_operation_delay": 0.0,

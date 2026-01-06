@@ -53,7 +53,7 @@ def get_guild(auto: Auto, timeout: int = 300) -> bool:
                     verify={
                         "type": "exist",
                         "target": "get_guild/公会商店",
-                        "timeout": 10,
+                        "timeout": 20,
                         "roi": roi_config.get_roi("guild_shop", "get_guild"),
                     },
                     retry=2,
@@ -69,7 +69,7 @@ def get_guild(auto: Auto, timeout: int = 300) -> bool:
                 if auto.template_click(
                     "public/返回键1",
                     roi=roi_config.get_roi("back_button"),
-                    verify={"type": "exist", "target": "public/主界面", "timeout": 10},
+                    verify={"type": "exist", "target": "public/主界面", "timeout": 20},
                     retry=2,
                     delay=1,
                 ):

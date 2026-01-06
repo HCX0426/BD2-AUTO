@@ -94,6 +94,49 @@ class OperationHandler:
         self.logger.info(f"按键成功: {key} | 按住时长{duration}s")
         return AutoResult.success_result(data=key)
 
+    def _check_window_state(self, _device) -> bool:
+        """检查窗口状态，用于模板点击前的验证"""
+        try:
+            import win32con
+            import win32gui
+            from src.auto_control.devices.windows_device import WindowsDevice
+            
+            if isinstance(_device, WindowsDevice):
+                # 1. 检查窗口是否存在
+                if not win32gui.IsWindow(_device.hwnd):
+                    _device.logger.debug(f"窗口不存在，句柄: {_device.hwnd}")
+                    return True  # 窗口不存在时默认继续执行
+                
+                # 2. 检查窗口是否可见
+                if not win32gui.IsWindowVisible(_device.hwnd):
+                    _device.logger.warning("窗口不可见，模板点击失败")
+                    return False
+                
+                # 3. 检查窗口是否最小化
+                if win32gui.IsIconic(_device.hwnd):
+                    _device.logger.warning("窗口被最小化，模板点击失败")
+                    return False
+                
+                # 4. 检查窗口是否在前台
+                current_foreground = win32gui.GetForegroundWindow()
+                if current_foreground != _device.hwnd:
+                    _device.logger.debug(f"窗口不在前台，当前前台句柄: {current_foreground}，目标句柄: {_device.hwnd}")
+                    # 临时激活窗口，给用户一个机会
+                    win32gui.ShowWindow(_device.hwnd, win32con.SW_SHOW)
+                    win32gui.SetForegroundWindow(_device.hwnd)
+                    # 等待100ms让窗口有时间激活
+                    import time
+                    time.sleep(0.1)
+                    # 再次检查
+                    current_foreground = win32gui.GetForegroundWindow()
+                    if current_foreground != _device.hwnd:
+                        _device.logger.warning(f"窗口不在前台，模板点击失败，当前前台句柄: {current_foreground}，目标句柄: {_device.hwnd}")
+                        return False
+            return True
+        except Exception as e:
+            _device.logger.error(f"检查窗口状态异常: {e}")
+            return True  # 非Windows设备或异常时默认继续执行
+    
     @with_retry_and_check
     def template_click(
         self,
@@ -118,6 +161,10 @@ class OperationHandler:
         roi_info = LogFormatter.format_roi(roi)
         template_info = LogFormatter.format_template(template)
         self.logger.info(f"[模板点击] {template_info}{roi_info}，尝试: {_attempt + 1}")
+        
+        # 检查窗口状态
+        if not self._check_window_state(_device):
+            return AutoResult.fail_result(error_msg="窗口状态异常，无法执行模板点击")
 
         # 执行模板点击
         try:

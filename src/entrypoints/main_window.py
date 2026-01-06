@@ -187,7 +187,12 @@ class MainWindow(QMainWindow):
             else:  # adb
                 device_uri = device_path
 
-        self.auto_init_thread = AutoInitThread(device_type=device_type, device_uri=device_uri, ocr_engine=ocr_engine)
+        self.auto_init_thread = AutoInitThread(
+            device_type=device_type,
+            device_uri=device_uri,
+            ocr_engine=ocr_engine,
+            settings_manager=self.settings_manager,
+        )
         self.auto_init_thread.finished.connect(self.auto_init_thread.deleteLater)
         self.auto_init_thread.start()
 
@@ -198,6 +203,33 @@ class MainWindow(QMainWindow):
         from src.ui.core.signals import get_signal_bus_instance
 
         signal_bus = get_signal_bus_instance()
+
+        # 应用设置中的截图模式和点击模式到设备
+        device = self.auto_instance.device_manager.get_active_device()
+        if device:
+            # 获取截图模式设置
+            screenshot_mode_setting = self.settings_manager.get_setting("screenshot_mode", "自动选择")
+            # 转换为设备支持的截图模式
+            screenshot_mode_map = {
+                "自动选择": None,  # 使用设备自动检测的最优策略
+                "PrintWindow": "printwindow",
+                "BitBlt": "bitblt",
+                "DXCam": "dxcam",
+                "临时激活": "temp_foreground",
+            }
+            screenshot_mode = screenshot_mode_map.get(screenshot_mode_setting)
+            if screenshot_mode:
+                device.screenshot_mode = screenshot_mode
+                signal_bus.emit_log(f"已设置截图模式: {screenshot_mode_setting}")
+
+            # 获取点击模式设置
+            click_mode_setting = self.settings_manager.get_setting("click_mode", "前台点击")
+            # 转换为设备支持的点击模式
+            click_mode_map = {"前台点击": "foreground", "后台点击": "background"}
+            click_mode = click_mode_map.get(click_mode_setting)
+            if click_mode:
+                device.click_mode = click_mode
+                signal_bus.emit_log(f"已设置点击模式: {click_mode_setting}")
 
         signal_bus.emit_log("自动化核心初始化完成，系统就绪")
         self.main_interface.enable_task_controls(start_enabled=True, stop_enabled=False)

@@ -28,6 +28,7 @@ class DeviceManager:
         display_context: RuntimeDisplayContext,
         stop_event: Event,
         config: object,
+        settings_manager=None,
     ):
         """
         初始化设备管理器
@@ -39,6 +40,7 @@ class DeviceManager:
             display_context: 显示上下文实例（必需）
             stop_event: 全局停止事件（用于中断设备阻塞操作，必需）
             config: 配置对象（必需）
+            settings_manager: 设置管理器实例（用于获取永久置顶等设置，可选）
 
         Raises:
             ValueError: 任意必需参数缺失/类型错误时抛出
@@ -74,6 +76,7 @@ class DeviceManager:
         self.config = config
         self.display_context = display_context
         self.stop_event = stop_event
+        self.settings_manager = settings_manager
 
         self.logger.info("设备管理器初始化完成")
 
@@ -111,20 +114,25 @@ class DeviceManager:
         Returns:
             重连成功返回True，失败返回False
         """
+        # 新增：前置空值校验
+        if not device_uri or str(device_uri).strip() == "":
+            self.logger.error("设备重连失败：device_uri 不能为空")
+            return False
+
         if not self.auto_reconnect_enabled:
             self.logger.debug(f"自动重连已禁用，跳过设备{device_uri}的重连")
             return False
 
-        lower_uri = device_uri.lower()
+        lower_uri = device_uri.strip().lower()  # 新增：标准化URI
         device = self.devices.get(lower_uri)
 
         if not device:
-            self.logger.debug(f"设备{device_uri}不存在，无法重连")
+            self.logger.debug(f"设备{device_uri}不存在（标准化URI: {lower_uri}），无法重连")
             return False
 
-        self.logger.debug(f"开始尝试重连设备：{device_uri}")
+        self.logger.debug(f"开始尝试重连设备：{device_uri}（标准化URI: {lower_uri}）")
 
-        # 尝试多次重连
+        # 尝试多次重连（原有逻辑不变）
         for attempt in range(self.max_reconnect_attempts):
             if self.stop_event.is_set():
                 self.logger.debug(f"重连被中断，设备：{device_uri}")
@@ -164,10 +172,12 @@ class DeviceManager:
         Returns:
             设备实例（不存在返回None）
         """
-        if not device_uri:
-            self.logger.error("获取设备失败：device_uri 不能为空")
+        # 强化空值校验：不仅判断空字符串，还判断None/空白字符
+        if not device_uri or str(device_uri).strip() == "":
+            self.logger.error("获取设备失败：device_uri 不能为空（None/空字符串/全空白均不允许）")
             return None
-        lower_uri = device_uri.lower()
+
+        lower_uri = device_uri.strip().lower()  # 新增：去除空白字符后再转小写
         device = self.devices.get(lower_uri)
 
         if device:
@@ -182,7 +192,9 @@ class DeviceManager:
             else:
                 self.logger.debug(f"获取设备成功: {device_uri}（状态: {device.get_state().name}）")
         else:
-            self.logger.debug(f"未找到设备: {device_uri}")
+            self.logger.debug(
+                f"未找到设备: {device_uri}（URI已标准化为: {lower_uri}）"
+            )  # 新增：打印标准化URI，方便排查
         return device
 
     def get_active_device(self) -> Optional[BaseDevice]:
@@ -192,13 +204,15 @@ class DeviceManager:
         Returns:
             活动设备实例（无/无效返回None）
         """
-        if not self.active_device:
-            self.logger.debug("无活动设备")
+        if not self.active_device or str(self.active_device).strip() == "":  # 新增：校验active_device是否为有效字符串
+            self.logger.debug("无活动设备（active_device为空/无效）")
             return None
 
-        device = self.get_device(self.active_device)
+        # 新增：提前校验active_device格式，避免传递空/无效URI给get_device
+        active_device_str = str(self.active_device).strip()
+        device = self.get_device(active_device_str)  # 新增：去除空白字符
         if not device:
-            self.logger.warning(f"活动设备{self.active_device}不存在，已重置")
+            self.logger.warning(f"活动设备{self.active_device}不存在/无效，已重置active_device")
             self.active_device = None
         return device
 
@@ -310,6 +324,7 @@ class DeviceManager:
                     coord_transformer=self.coord_transformer,
                     display_context=self.display_context,
                     stop_event=self.stop_event,
+                    settings_manager=self.settings_manager,
                 )
             else:  # ADB设备
                 device = ADBDevice(device_uri=device_uri, logger=self.logger)
@@ -337,10 +352,14 @@ class DeviceManager:
                 self.logger.error(
                     f"设备连接失败: {device_uri} | " f"耗时: {elapsed_time:.2f}s | " f"错误原因: {error_msg}"
                 )
+                self.logger.error(f"设备连接失败时的详细状态: hwnd={device.hwnd}, last_error={device.last_error}")
                 return False
 
         except Exception as e:
-            self.logger.error(f"添加设备异常: {device_uri} - {str(e)}", exc_info=True)
+            import traceback
+
+            self.logger.error(f"添加设备异常: {device_uri} - {str(e)}")
+            self.logger.error(f"异常堆栈: {traceback.format_exc()}")
             return False
 
     def remove_device(self, device_uri: str) -> bool:
