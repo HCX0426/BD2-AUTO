@@ -116,9 +116,7 @@ class SettingsInterface(QWidget):
         self.click_mode_combo.addItems(["前台点击", "后台点击"])
         device_layout.addRow("点击模式:", self.click_mode_combo)
 
-        # 永久置顶选择
-        self.permanent_topmost_check = QCheckBox()
-        device_layout.addRow("永久置顶窗口:", self.permanent_topmost_check)
+
 
         device_group.setLayout(device_layout)
         layout.addWidget(device_group)
@@ -223,8 +221,7 @@ class SettingsInterface(QWidget):
         click_mode = self.settings_manager.get_setting("click_mode", "前台点击")
         self.click_mode_combo.setCurrentText(click_mode)
 
-        # 加载永久置顶设置
-        self.permanent_topmost_check.setChecked(self.settings_manager.get_setting("permanent_topmost", False))
+
 
         # 加载自动重试次数
         self.retry_count_spin.setValue(self.settings_manager.get_setting("retry_count", 0))
@@ -272,8 +269,7 @@ class SettingsInterface(QWidget):
         # 保存点击模式
         self.settings_manager.set_setting("click_mode", self.click_mode_combo.currentText())
 
-        # 保存永久置顶设置
-        self.settings_manager.set_setting("permanent_topmost", self.permanent_topmost_check.isChecked())
+
 
         # 保存自动重试次数
         self.settings_manager.set_setting("retry_count", self.retry_count_spin.value())
@@ -306,7 +302,6 @@ class SettingsInterface(QWidget):
         self.device_args_edit.setText("")  # 重置命令行参数
         self.screenshot_mode_combo.setCurrentText("自动选择")  # 默认自动选择截图模式
         self.click_mode_combo.setCurrentText("前台点击")  # 默认前台点击模式
-        self.permanent_topmost_check.setChecked(False)  # 默认不永久置顶
         self.retry_count_spin.setValue(0)
 
         # 发送侧边栏宽度变更信号

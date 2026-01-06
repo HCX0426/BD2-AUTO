@@ -156,9 +156,6 @@ class WindowsDevice(BaseDevice):
         self.ACTIVATE_RETRY_COOLDOWN = 1.0
 
         self._topmost_lock = Lock()
-        # 新增：foreground模式置顶检查线程
-        self._topmost_check_thread: Optional[Thread] = None
-        self._topmost_check_stop = Event()
 
         # 启用DPI感知
         self._enable_dpi_awareness()
@@ -268,7 +265,7 @@ class WindowsDevice(BaseDevice):
     # -------------- 模式适配：临时置顶逻辑修改 --------------
     def _set_window_temp_topmost(self) -> bool:
         """
-        background点击模式专用：临时设置窗口置顶，foreground点击模式下直接返回True（已永久置顶）。
+        background点击模式专用：临时设置窗口置顶，foreground点击模式下直接返回True。
         """
         # foreground点击模式无需临时置顶
         if self._click_mode == "foreground":
@@ -884,32 +881,16 @@ class WindowsDevice(BaseDevice):
                 if not self._screenshot_mode:
                     self._screenshot_mode = self._best_screenshot_strategy
 
-                # 前台模式初始化：根据设置决定是否设置永久置顶
+                # 前台模式初始化：确保窗口被激活
                 if self._best_screenshot_strategy in ["bitblt", "dxcam", "temp_foreground"]:
-                    # 从设置管理器获取永久置顶设置
-                    permanent_topmost = False
-                    if self.settings_manager:
-                        permanent_topmost = self.settings_manager.get_setting("permanent_topmost", False)
-
-                    if permanent_topmost:
-                        # 只有用户明确设置了永久置顶，才设置窗口永久置顶
-                        self.logger.info("用户设置了永久置顶，设置窗口永久置顶")
-                        self._set_permanent_topmost()
-                    else:
-                        self.logger.info("用户未设置永久置顶，不设置窗口永久置顶，允许窗口被遮挡")
-
-                    # 启动置顶检查线程
-                    self._topmost_check_stop.clear()
-                    self._topmost_check_thread = Thread(target=self._check_topmost_status, daemon=True)
-                    self._topmost_check_thread.start()
-                    # 首次连接时，确保窗口置顶
+                    # 首次连接时，确保窗口被激活
                     try:
                         # 使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
                         ctypes.windll.user32.SwitchToThisWindow(self.hwnd, True)
                         time.sleep(self.WINDOW_ACTIVATE_DELAY)
-                        self.logger.info("前台模式窗口首次置顶成功")
+                        self.logger.info("前台模式窗口首次激活成功")
                     except Exception as e:
-                        self.logger.warning(f"前台模式窗口首次置顶失败: {e}")
+                        self.logger.warning(f"前台模式窗口首次激活失败: {e}")
 
                 # 检查窗口状态，只要窗口存在且未被最小化即可连接
                 is_window = win32gui.IsWindow(self.hwnd)
@@ -944,7 +925,6 @@ class WindowsDevice(BaseDevice):
         断开设备连接，清理窗口控制环境。
 
         核心功能：
-        - foreground模式下：停止置顶检查线程
         - background模式下：恢复窗口原始置顶状态
         - 重置显示上下文
         - 重置所有窗口相关属性
@@ -956,45 +936,6 @@ class WindowsDevice(BaseDevice):
         self.clear_last_error()
         if self.hwnd:
             self.logger.info(f"断开窗口连接 | 标题: {self.window_title} | 句柄: {self.hwnd}")
-
-            # foreground截图模式清理：停止置顶检查线程
-            if self._screenshot_mode == "foreground":
-                if self._topmost_check_thread and self._topmost_check_thread.is_alive():
-                    self._topmost_check_stop.set()
-                    self._topmost_check_thread.join(timeout=2.0)
-                    self.logger.info("foreground截图模式置顶检查线程已停止")
-
-            # 恢复原窗口置顶状态（适用于所有模式）
-            try:
-                # 恢复原置顶状态（如果之前保存过）
-                if self._original_topmost_state is not None:
-                    current_ex_style = win32gui.GetWindowLong(self.hwnd, win32con.GWL_EXSTYLE)
-                    if self._original_topmost_state:
-                        # 恢复为置顶
-                        win32gui.SetWindowPos(
-                            self.hwnd,
-                            win32con.HWND_TOPMOST,
-                            0,
-                            0,
-                            0,
-                            0,
-                            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
-                        )
-                        self.logger.info(f"恢复窗口置顶状态：True")
-                    else:
-                        # 恢复为不置顶
-                        win32gui.SetWindowPos(
-                            self.hwnd,
-                            win32con.HWND_NOTOPMOST,
-                            0,
-                            0,
-                            0,
-                            0,
-                            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
-                        )
-                        self.logger.info(f"恢复窗口置顶状态：False")
-            except Exception as e:
-                self.logger.warning(f"恢复窗口置顶状态失败: {e}")
 
             # 重置显示上下文
             self.display_context.update_from_window(
@@ -1271,54 +1212,51 @@ class WindowsDevice(BaseDevice):
         # -------------------------- 模式适配：执行截图策略 --------------------------
         img_np = None
 
-        # 如果设置了具体的截图方法，先尝试该方法
-        if self._screenshot_mode in ["temp_foreground", "bitblt", "dxcam", "printwindow"]:
-            self.logger.debug(f"使用已设置的截图方法: {self._screenshot_mode}")
-            if self._screenshot_mode == "temp_foreground":
-                img_np = try_temp_foreground_screenshot()
-            elif self._screenshot_mode == "bitblt":
-                img_np = try_bitblt()
-            elif self._screenshot_mode == "dxcam":
-                img_np = try_dxcam()
-            elif self._screenshot_mode == "printwindow":
-                img_np = try_print_window()
+        # 检查窗口是否在前台
+        is_foreground = win32gui.GetForegroundWindow() == self.hwnd
 
-            # 新增：如果指定的截图方法失败，执行降级流程
+        # 无论设置了什么截图方法，只要窗口在前台，优先使用temp_foreground，确保获取到正确的窗口内容
+        if is_foreground:
+            self.logger.debug("窗口在前台，优先使用temp_foreground确保获取到正确的窗口内容")
+            img_np = try_temp_foreground_screenshot()
+
+        # 如果temp_foreground失败或者窗口不在前台，再尝试其他截图方法
+        if img_np is None:
+            # 如果设置了具体的截图方法，尝试该方法
+            if self._screenshot_mode in ["temp_foreground", "bitblt", "dxcam", "printwindow"]:
+                self.logger.debug(f"使用已设置的截图方法: {self._screenshot_mode}")
+                if self._screenshot_mode == "temp_foreground":
+                    img_np = try_temp_foreground_screenshot()
+                elif self._screenshot_mode == "bitblt":
+                    img_np = try_bitblt()
+                elif self._screenshot_mode == "dxcam":
+                    img_np = try_dxcam()
+                elif self._screenshot_mode == "printwindow":
+                    img_np = try_print_window()
+            # background截图模式：强制使用PrintWindow，失败则降级
+            elif self._screenshot_mode == "background":
+                img_np = try_print_window()
+            # foreground截图模式：使用temp_foreground优先，确保获取到正确的窗口内容
+            elif self._screenshot_mode == "foreground":
+                # 优先使用temp_foreground，确保获取到正确的窗口内容
+                self.logger.debug("foreground截图模式优先使用temp_foreground，确保获取到正确的窗口内容")
+                img_np = try_temp_foreground_screenshot()
+            else:
+                # 兜底：使用temp_foreground
+                self.logger.warning(f"未知截图模式: {self._screenshot_mode}，使用temp_foreground兜底")
+                img_np = try_temp_foreground_screenshot()
+
+            # 如果指定的截图方法失败，执行降级流程
             if img_np is None:
                 self.logger.debug(f"指定截图方法 {self._screenshot_mode} 失败，执行降级流程")
                 # 尝试所有其他可用方法，按优先级排序
-                if self._screenshot_mode != "bitblt":
-                    img_np = try_bitblt()
-                if img_np is None and self._screenshot_mode != "dxcam":
-                    img_np = try_dxcam()
-                if img_np is None and self._screenshot_mode != "printwindow":
-                    img_np = try_print_window()
-                if img_np is None and self._screenshot_mode != "temp_foreground":
-                    img_np = try_temp_foreground_screenshot()
-        # background截图模式：强制使用PrintWindow，失败则降级
-        elif self._screenshot_mode == "background":
-            img_np = try_print_window()
-            if img_np is None:
-                self.logger.debug("background模式PrintWindow失败，尝试temp_foreground兜底")
                 img_np = try_temp_foreground_screenshot()
-        # foreground截图模式：使用temp_foreground优先，确保获取到正确的窗口内容
-        elif self._screenshot_mode == "foreground":
-            # 优先使用temp_foreground，确保获取到正确的窗口内容
-            self.logger.debug("foreground截图模式优先使用temp_foreground，确保获取到正确的窗口内容")
-            img_np = try_temp_foreground_screenshot()
-
-            # 如果temp_foreground失败，尝试其他方法
-            if img_np is None:
-                self.logger.debug("temp_foreground截图失败，执行降级流程")
-                img_np = try_bitblt()
+                if img_np is None:
+                    img_np = try_bitblt()
                 if img_np is None:
                     img_np = try_dxcam()
                 if img_np is None:
                     img_np = try_print_window()
-        else:
-            # 兜底：使用temp_foreground
-            self.logger.warning(f"未知截图模式: {self._screenshot_mode}，使用temp_foreground兜底")
-            img_np = try_temp_foreground_screenshot()
 
         # 所有策略均失败
         if img_np is None:
@@ -1513,7 +1451,7 @@ class WindowsDevice(BaseDevice):
         # 只有在执行实际点击操作时，才记录和恢复鼠标位置
         original_mouse_pos = win32api.GetCursorPos()
         self.logger.debug(f"记录原鼠标位置: {original_mouse_pos}")
-        
+
         try:
             win32api.SetCursorPos((screen_x, screen_y))
             time.sleep(0.1)  # 增加鼠标移动后的延迟，确保系统识别到鼠标位置变化
@@ -1536,7 +1474,7 @@ class WindowsDevice(BaseDevice):
             # 恢复原始鼠标位置
             win32api.SetCursorPos(original_mouse_pos)
             self.logger.debug(f"恢复原鼠标位置: {original_mouse_pos}")
-            
+
             # 模式适配：恢复置顶状态（仅background点击模式生效）
             self._restore_window_original_topmost()
 

@@ -47,6 +47,10 @@ class OperationHandler:
 
         # 坐标类型名称格式化
         coord_type_str = LogFormatter.format_coord_type(coord_type)
+        
+        # 检查窗口状态
+        if not self._check_window_state(_device):
+            return AutoResult.fail_result(error_msg="窗口状态异常，无法执行坐标点击")
 
         # 执行点击
         try:
@@ -95,43 +99,80 @@ class OperationHandler:
         return AutoResult.success_result(data=key)
 
     def _check_window_state(self, _device) -> bool:
-        """检查窗口状态，用于模板点击前的验证"""
+        """检查窗口状态，无限等待直到窗口在前台且可见"""
         try:
             import win32con
             import win32gui
+            import time
             from src.auto_control.devices.windows_device import WindowsDevice
             
             if isinstance(_device, WindowsDevice):
-                # 1. 检查窗口是否存在
-                if not win32gui.IsWindow(_device.hwnd):
-                    _device.logger.debug(f"窗口不存在，句柄: {_device.hwnd}")
-                    return True  # 窗口不存在时默认继续执行
-                
-                # 2. 检查窗口是否可见
-                if not win32gui.IsWindowVisible(_device.hwnd):
-                    _device.logger.warning("窗口不可见，模板点击失败")
-                    return False
-                
-                # 3. 检查窗口是否最小化
-                if win32gui.IsIconic(_device.hwnd):
-                    _device.logger.warning("窗口被最小化，模板点击失败")
-                    return False
-                
-                # 4. 检查窗口是否在前台
-                current_foreground = win32gui.GetForegroundWindow()
-                if current_foreground != _device.hwnd:
-                    _device.logger.debug(f"窗口不在前台，当前前台句柄: {current_foreground}，目标句柄: {_device.hwnd}")
-                    # 临时激活窗口，给用户一个机会
-                    win32gui.ShowWindow(_device.hwnd, win32con.SW_SHOW)
-                    win32gui.SetForegroundWindow(_device.hwnd)
-                    # 等待100ms让窗口有时间激活
-                    import time
-                    time.sleep(0.1)
-                    # 再次检查
+                while True:
+                    # 中断检查
+                    if self.auto.check_should_stop():
+                        _device.logger.info("任务被中断，退出窗口状态检查")
+                        return False
+                    
+                    # 1. 检查窗口是否存在
+                    if not win32gui.IsWindow(_device.hwnd):
+                        _device.logger.debug(f"窗口不存在，句柄: {_device.hwnd}")
+                        return True  # 窗口不存在时默认继续执行
+                    
+                    # 2. 检查窗口是否可见
+                    if not win32gui.IsWindowVisible(_device.hwnd):
+                        _device.logger.warning("窗口不可见，等待窗口可见...")
+                        time.sleep(1)  # 等待1秒后重试
+                        continue
+                    
+                    # 3. 检查窗口是否最小化
+                    if win32gui.IsIconic(_device.hwnd):
+                        _device.logger.warning("窗口被最小化，尝试恢复窗口...")
+                        win32gui.ShowWindow(_device.hwnd, win32con.SW_RESTORE)
+                        time.sleep(0.5)  # 等待恢复
+                        continue
+                    
+                    # 4. 检查窗口是否在前台
                     current_foreground = win32gui.GetForegroundWindow()
                     if current_foreground != _device.hwnd:
-                        _device.logger.warning(f"窗口不在前台，模板点击失败，当前前台句柄: {current_foreground}，目标句柄: {_device.hwnd}")
-                        return False
+                        _device.logger.warning(f"窗口不在前台，当前前台句柄: {current_foreground}，目标句柄: {_device.hwnd}，等待窗口到前台...")
+                        # 获取当前前台窗口标题，方便调试
+                        try:
+                            foreground_title = win32gui.GetWindowText(current_foreground)
+                            _device.logger.debug(f"当前前台窗口标题: {foreground_title}")
+                        except Exception as e:
+                            _device.logger.debug(f"获取前台窗口标题失败: {e}")
+                        # 尝试多种方式激活窗口
+                        try:
+                            # 方法1：使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
+                            ctypes.windll.user32.SwitchToThisWindow(_device.hwnd, True)
+                            _device.logger.debug("SwitchToThisWindow激活窗口成功")
+                        except Exception as e1:
+                            _device.logger.debug(f"SwitchToThisWindow激活窗口失败: {e1}")
+                            try:
+                                # 方法2：使用SetForegroundWindow激活窗口
+                                win32gui.SetForegroundWindow(_device.hwnd)
+                                _device.logger.debug("SetForegroundWindow激活窗口成功")
+                            except Exception as e2:
+                                _device.logger.debug(f"SetForegroundWindow激活窗口失败: {e2}")
+                                try:
+                                    # 方法3：先显示窗口，再激活
+                                    win32gui.ShowWindow(_device.hwnd, win32con.SW_SHOW)
+                                    time.sleep(0.1)
+                                    win32gui.SetForegroundWindow(_device.hwnd)
+                                    _device.logger.debug("ShowWindow+SetForegroundWindow激活窗口成功")
+                                except Exception as e3:
+                                    _device.logger.debug(f"ShowWindow+SetForegroundWindow激活窗口失败: {e3}")
+                    # 增加更长的等待时间，确保窗口稳定在前台
+                    time.sleep(1.0)
+                    # 再次检查窗口是否在前台
+                    current_foreground = win32gui.GetForegroundWindow()
+                    if current_foreground != _device.hwnd:
+                        _device.logger.warning(f"窗口仍不在前台，当前前台句柄: {current_foreground}，目标句柄: {_device.hwnd}，继续等待...")
+                        continue
+                    
+                    # 所有条件都满足，返回True
+                    _device.logger.debug("窗口在前台且可见，继续执行任务")
+                    return True
             return True
         except Exception as e:
             _device.logger.error(f"检查窗口状态异常: {e}")
@@ -207,6 +248,10 @@ class OperationHandler:
         # 日志信息格式化
         roi_info = LogFormatter.format_roi(roi)
         self.logger.info(f"[文本点击] '{text}'{roi_info}，尝试: {_attempt + 1}")
+        
+        # 检查窗口状态
+        if not self._check_window_state(_device):
+            return AutoResult.fail_result(error_msg="窗口状态异常，无法执行文本点击")
 
         # 截图
         try:
