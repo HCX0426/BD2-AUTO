@@ -213,7 +213,7 @@ class VerifyHandler:
                 # 1. 检查窗口是否存在
                 if not win32gui.IsWindow(device.hwnd):
                     device.logger.debug(f"窗口不存在，句柄: {device.hwnd}")
-                    return True  # 窗口不存在时默认继续执行
+                    return False  # 窗口不存在时应该停止执行，避免无效等待
 
                 # 2. 检查窗口是否可见
                 if not win32gui.IsWindowVisible(device.hwnd):
