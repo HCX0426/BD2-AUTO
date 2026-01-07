@@ -59,13 +59,13 @@ class WindowsDevice(BaseDevice):
 
     截图模式：
     - printwindow：后台截图，无需窗口置顶
-    - bitblt：前台截图，需要窗口置顶
-    - dxcam：硬件加速截图，需要窗口置顶
+    - bitblt：前台截图，临时激活窗口
+    - dxcam：硬件加速截图，临时激活窗口
     - temp_foreground：临时激活窗口截图
 
     点击模式：
-    - foreground：点击时窗口保持永久置顶
-    - background：点击时临时置顶窗口，点击后恢复
+    - foreground：点击时窗口保持激活状态
+    - background：点击时临时激活窗口，点击后恢复
     """
 
     # 窗口操作延迟配置
@@ -100,7 +100,7 @@ class WindowsDevice(BaseDevice):
             coord_transformer: 坐标转换器实例，处理不同坐标体系转换
             display_context: 显示上下文实例，维护窗口动态信息
             stop_event: 线程停止事件，用于中断阻塞操作
-            settings_manager: 设置管理器实例，用于获取永久置顶等设置
+            settings_manager: 设置管理器实例（保留参数以兼容）
 
         Raises:
             ValueError: 任一必填参数为空或类型不匹配时触发
@@ -141,7 +141,7 @@ class WindowsDevice(BaseDevice):
         self._best_screenshot_strategy: Optional[str] = None  # printwindow/bitblt/dxcam/temp_foreground
         self._screenshot_mode: Optional[str] = None  # 截图模式：foreground/background 或具体方法名称
         self._click_mode: Optional[str] = None  # 点击模式：foreground/background
-        self._original_topmost_state: Optional[bool] = None  # 保存窗口原始置顶状态
+        self._original_topmost_state: Optional[bool] = None  # 保留以兼容现有代码
         self._available_screenshot_methods: List[str] = []  # 所有可用的截图方法列表
 
         # 临时置顶相关状态
@@ -160,107 +160,84 @@ class WindowsDevice(BaseDevice):
         # 启用DPI感知
         self._enable_dpi_awareness()
 
-    # -------------- 新增：foreground模式置顶检查核心方法 --------------
+    # -------------- 修改：简化foreground模式置顶检查方法 --------------
     def _check_topmost_status(self):
         """
-        foreground模式专用：后台线程持续检查窗口置顶状态，未置顶则记录日志，等待用户手动恢复。
+        foreground模式专用：后台线程持续检查窗口状态，未激活则记录日志。
         每3秒检查一次，直到stop_event触发或窗口断开。
         """
-        self.logger.info(f"foreground模式置顶检查线程启动 | 检查间隔: {self.TOPMOST_CHECK_INTERVAL}秒")
+        self.logger.info(f"foreground模式状态检查线程启动 | 检查间隔: {self.TOPMOST_CHECK_INTERVAL}秒")
+        # 新增：定义停止事件
+        self._topmost_check_stop = Event()
+        
         while not self.stop_event.is_set() and not self._topmost_check_stop.is_set():
             try:
                 if not self.hwnd or not win32gui.IsWindow(self.hwnd):
-                    self.logger.warning("窗口句柄无效，退出置顶检查线程")
+                    self.logger.warning("窗口句柄无效，退出状态检查线程")
                     break
 
-                # 获取当前置顶设置
-                permanent_topmost = False
-                if self.settings_manager:
-                    permanent_topmost = self.settings_manager.get_setting("permanent_topmost", False)
-
-                # 检查当前置顶状态
-                current_ex_style = win32gui.GetWindowLong(self.hwnd, win32con.GWL_EXSTYLE)
-                is_topmost = (current_ex_style & win32con.WS_EX_TOPMOST) != 0
-
-                if is_topmost:
-                    self.logger.debug("foreground模式窗口置顶状态正常")
+                # 检查当前窗口是否在前台
+                is_foreground = win32gui.GetForegroundWindow() == self.hwnd
+                
+                if is_foreground:
+                    self.logger.debug("foreground模式窗口激活状态正常")
                 else:
-                    if permanent_topmost:
-                        # 只有用户明确设置了永久置顶，才提示用户恢复
-                        self.logger.warning("foreground模式窗口丢失置顶状态，用户已设置永久置顶，请手动恢复！")
-                    else:
-                        # 用户未设置永久置顶，允许窗口被遮挡，只记录信息
-                        self.logger.info("foreground模式窗口未置顶（用户未设置永久置顶），允许窗口被遮挡")
+                    self.logger.info("foreground模式窗口不在前台，可能影响截图效果")
 
                 # 等待检查间隔（支持中断）
                 if self.stop_event.wait(timeout=self.TOPMOST_CHECK_INTERVAL):
                     break
             except Exception as e:
-                self.logger.error(f"foreground模式置顶检查异常: {e}", exc_info=True)
+                self.logger.error(f"foreground模式状态检查异常: {e}", exc_info=True)
                 # 异常后等待1秒再重试，避免频繁报错
                 time.sleep(1.0)
 
-        self.logger.info("foreground模式置顶检查线程退出")
+        self.logger.info("foreground模式状态检查线程退出")
 
-    def _set_permanent_topmost(self) -> bool:
+    # -------------- 新增：统一的临时激活窗口方法 --------------
+    def _temp_activate_window(self) -> Optional[int]:
         """
-        foreground模式专用：设置窗口永久置顶，保存原始置顶状态（断开时恢复）。
-
+        临时激活目标窗口，保存原始前台窗口句柄。
+        
         Returns:
-            bool: 设置成功返回True，失败返回False
+            Optional[int]: 原始前台窗口句柄，失败返回None
         """
         if not self.hwnd:
-            return False
-
+            return None
+            
         try:
-            # 保存原始置顶状态
-            current_ex_style = win32gui.GetWindowLong(self.hwnd, win32con.GWL_EXSTYLE)
-            self._original_topmost_state = (current_ex_style & win32con.WS_EX_TOPMOST) != 0
-
-            # 设置永久置顶
-            win32gui.SetWindowPos(
-                self.hwnd,
-                win32con.HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
-            )
-            self.logger.info(
-                f"foreground模式窗口设置永久置顶成功 | 句柄: {self.hwnd} | 原始置顶状态: {self._original_topmost_state}"
-            )
-            return True
+            # 保存原始前台窗口
+            original_foreground = win32gui.GetForegroundWindow()
+            
+            # 如果目标窗口已经在前台，直接返回
+            if original_foreground == self.hwnd:
+                return original_foreground
+                
+            # 激活目标窗口
+            if self.is_minimized():
+                win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
+                time.sleep(self.WINDOW_RESTORE_DELAY)
+                
+            # 使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
+            try:
+                ctypes.windll.user32.SwitchToThisWindow(self.hwnd, True)
+            except Exception:
+                win32gui.SetForegroundWindow(self.hwnd)
+                
+            # 等待窗口稳定
+            time.sleep(self.TEMP_FOREGROUND_DELAY)
+            
+            # 验证激活结果
+            if win32gui.GetForegroundWindow() == self.hwnd:
+                self.logger.debug(f"临时激活窗口成功 | 句柄: {self.hwnd}")
+                return original_foreground
+            else:
+                self.logger.warning(f"临时激活窗口失败 | 目标句柄: {self.hwnd}")
+                return None
+                
         except Exception as e:
-            self.logger.error(f"foreground模式设置永久置顶失败: {e}", exc_info=True)
-            return False
-
-    def _unset_permanent_topmost(self) -> bool:
-        """
-        取消窗口永久置顶状态，恢复原始状态。
-
-        Returns:
-            bool: 取消成功返回True，失败返回False
-        """
-        if not self.hwnd:
-            return False
-
-        try:
-            # 取消置顶
-            win32gui.SetWindowPos(
-                self.hwnd,
-                win32con.HWND_NOTOPMOST,
-                0,
-                0,
-                0,
-                0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
-            )
-            self.logger.info(f"foreground模式窗口取消永久置顶成功 | 句柄: {self.hwnd}")
-            return True
-        except Exception as e:
-            self.logger.error(f"foreground模式取消永久置顶失败: {e}", exc_info=True)
-            return False
+            self.logger.warning(f"临时激活窗口异常: {e}")
+            return None
 
     # -------------- 模式适配：临时置顶逻辑修改 --------------
     def _set_window_temp_topmost(self) -> bool:
@@ -437,6 +414,9 @@ class WindowsDevice(BaseDevice):
         # 检测2: BitBlt（foreground模式）
         def test_bitblt():
             try:
+                # 临时激活窗口
+                original_foreground = self._temp_activate_window()
+                
                 hwnd_dc = win32gui.GetWindowDC(self.hwnd)
                 mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
                 mem_dc = mfc_dc.CreateCompatibleDC()
@@ -456,6 +436,10 @@ class WindowsDevice(BaseDevice):
                 mfc_dc.DeleteDC()
                 win32gui.ReleaseDC(self.hwnd, hwnd_dc)
                 win32gui.DeleteObject(bitmap.GetHandle())
+                
+                # 恢复原始前台窗口
+                if original_foreground and original_foreground != self.hwnd:
+                    self._restore_foreground(original_foreground)
 
                 return mean_val > 10
             except Exception as e:
@@ -467,6 +451,9 @@ class WindowsDevice(BaseDevice):
             try:
                 import dxcam
 
+                # 临时激活窗口
+                original_foreground = self._temp_activate_window()
+                
                 camera = dxcam.create()
                 if not camera:
                     raise RuntimeError("DXCam无法创建摄像头实例")
@@ -480,6 +467,11 @@ class WindowsDevice(BaseDevice):
                     raise RuntimeError("DXCam返回空图像")
 
                 mean_val = np.mean(img_np)
+                
+                # 恢复原始前台窗口
+                if original_foreground and original_foreground != self.hwnd:
+                    self._restore_foreground(original_foreground)
+
                 return mean_val > 10
             except ImportError:
                 self.logger.debug("dxcam未安装，跳过硬件加速截图检测")
@@ -525,11 +517,11 @@ class WindowsDevice(BaseDevice):
         # 按性能排序：bitblt > dxcam > temp_foreground
         for method in ["bitblt", "dxcam", "temp_foreground"]:
             if method in available_methods:
-                self.logger.info(f"截图策略检测结果：{method}（foreground模式，需永久置顶）")
+                self.logger.info(f"截图策略检测结果：{method}（foreground模式）")
                 return method
 
         # 兜底
-        self.logger.info("截图策略检测结果：temp_foreground（foreground模式，需永久置顶）")
+        self.logger.info("截图策略检测结果：temp_foreground（foreground模式）")
         return "temp_foreground"
 
     # -------------- 原有工具方法（无修改） --------------
@@ -843,7 +835,6 @@ class WindowsDevice(BaseDevice):
         - 查找并验证目标窗口
         - 检测最优截图策略
         - 初始化截图模式和点击模式
-        - foreground模式下：设置永久置顶并启动置顶检查线程
         - 更新设备状态为已连接
 
         Args:
@@ -991,7 +982,7 @@ class WindowsDevice(BaseDevice):
 
         截图策略说明：
         - background模式：使用PrintWindow，后台截图，无需窗口置顶
-        - foreground模式：优先使用bitblt/dxcam，前台截图，需要窗口置顶，失败降级到temp_foreground
+        - foreground模式：优先使用bitblt/dxcam，前台截图，临时激活窗口，失败降级到temp_foreground
 
         截图方法优先级：
         1. 已设置的特定截图方法
@@ -1079,7 +1070,12 @@ class WindowsDevice(BaseDevice):
                 return None
 
         def try_bitblt():
+            """增强版bitblt：添加临时激活窗口逻辑"""
+            original_foreground = None
             try:
+                # 临时激活窗口
+                original_foreground = self._temp_activate_window()
+                
                 hwnd_dc = win32gui.GetDC(self.hwnd)
                 mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
                 mem_dc = mfc_dc.CreateCompatibleDC()
@@ -1101,16 +1097,26 @@ class WindowsDevice(BaseDevice):
 
                 if np.mean(img_np) < 10:
                     raise RuntimeError("BitBlt截图为黑屏")
+                    
                 self.logger.debug("使用BitBlt截图成功（仅客户区）")
                 return img_np
             except Exception as e:
                 self.logger.debug(f"BitBlt执行失败: {e}")
                 return None
+            finally:
+                # 恢复原始前台窗口
+                if original_foreground and original_foreground != self.hwnd:
+                    self._restore_foreground(original_foreground)
 
         def try_dxcam():
+            """增强版dxcam：添加临时激活窗口逻辑"""
+            original_foreground = None
             try:
                 import dxcam
 
+                # 临时激活窗口
+                original_foreground = self._temp_activate_window()
+                
                 camera = dxcam.create()
                 if not camera:
                     raise RuntimeError("DXCam无法初始化，无可用显卡")
@@ -1132,6 +1138,10 @@ class WindowsDevice(BaseDevice):
             except Exception as e:
                 self.logger.debug(f"DXCam执行失败: {e}")
                 return None
+            finally:
+                # 恢复原始前台窗口
+                if original_foreground and original_foreground != self.hwnd:
+                    self._restore_foreground(original_foreground)
 
         def try_temp_foreground_screenshot():
             self.logger.debug(
@@ -1277,6 +1287,7 @@ class WindowsDevice(BaseDevice):
                     phys_x, phys_y, phys_w, phys_h = screen_phys_rect
 
                     # 全屏/窗口模式区分处理
+                    ctx = self.display_context
                     if ctx.is_fullscreen:
                         # 全屏模式：截图直接对应屏幕物理坐标，无需考虑客户区原点
                         crop_x = max(0, phys_x)
@@ -1861,12 +1872,10 @@ class WindowsDevice(BaseDevice):
             if not win32gui.IsWindowVisible(self.hwnd):
                 return DeviceState.DISCONNECTED
 
-            # foreground截图模式额外检查：置顶状态（未置顶仅警告，不设为ERROR）
-            if self._screenshot_mode == "foreground":
-                current_ex_style = win32gui.GetWindowLong(self.hwnd, win32con.GWL_EXSTYLE)
-                if not (current_ex_style & win32con.WS_EX_TOPMOST):
-                    self.logger.warning("foreground截图模式窗口丢失置顶状态，请手动恢复")
-                    # 不设为ERROR，让用户手动处理
+            # 简化：仅检查窗口激活状态，不再检查置顶状态
+            is_foreground = win32gui.GetForegroundWindow() == self.hwnd
+            if self._screenshot_mode == "foreground" and not is_foreground:
+                self.logger.info("foreground截图模式窗口不在前台，可能影响截图效果")
 
             return self.state
         except Exception as e:
@@ -1917,7 +1926,7 @@ class WindowsDevice(BaseDevice):
     @click_mode.setter
     def click_mode(self, mode: str) -> None:
         """
-        设置点击模式，并根据模式联动调整截图模式和置顶状态。
+        设置点击模式，并根据模式联动调整截图模式。
 
         Args:
             mode: 点击模式，如foreground/background
@@ -1938,13 +1947,10 @@ class WindowsDevice(BaseDevice):
                 self._screenshot_mode = "temp_foreground"
                 self._best_screenshot_strategy = "temp_foreground"
 
-        # 同步置顶状态
-        self._sync_topmost_status()
-
     @screenshot_mode.setter
     def screenshot_mode(self, mode: str) -> None:
         """
-        设置截图模式，并根据点击模式联动调整和同步置顶状态。
+        设置截图模式，并根据点击模式联动调整。
 
         Args:
             mode: 截图模式，如printwindow/bitblt/dxcam/temp_foreground
@@ -1957,49 +1963,18 @@ class WindowsDevice(BaseDevice):
                     self.logger.info(f"点击模式为foreground，禁止使用printwindow，自动切换到{method}")
                     self._screenshot_mode = method
                     self._best_screenshot_strategy = method
-                    # 同步置顶状态
-                    self._sync_topmost_status()
                     return
             else:
                 # 兜底使用temp_foreground
                 self.logger.info(f"点击模式为foreground，禁止使用printwindow，自动切换到temp_foreground")
                 self._screenshot_mode = "temp_foreground"
                 self._best_screenshot_strategy = "temp_foreground"
-                # 同步置顶状态
-                self._sync_topmost_status()
                 return
 
         # 正常设置截图模式
         self._screenshot_mode = mode
         # 更新最佳截图策略
         self._best_screenshot_strategy = mode
-
-        # 同步置顶状态
-        self._sync_topmost_status()
-
-    def _sync_topmost_status(self):
-        """
-        同步窗口置顶状态与设置，确保置顶状态与用户设置一致。
-        """
-        if not self.hwnd:
-            return
-
-        # 获取当前永久置顶设置
-        permanent_topmost = False
-        if self.settings_manager:
-            permanent_topmost = self.settings_manager.get_setting("permanent_topmost", False)
-
-        # 检查当前置顶状态
-        current_ex_style = win32gui.GetWindowLong(self.hwnd, win32con.GWL_EXSTYLE)
-        is_topmost = (current_ex_style & win32con.WS_EX_TOPMOST) != 0
-
-        # 同步置顶状态
-        if permanent_topmost and not is_topmost:
-            # 设置了永久置顶但窗口未置顶，设置置顶
-            self._set_permanent_topmost()
-        elif not permanent_topmost and is_topmost:
-            # 未设置永久置顶但窗口已置顶，取消置顶
-            self._unset_permanent_topmost()
 
     @property
     def device_mode(self) -> Optional[str]:
