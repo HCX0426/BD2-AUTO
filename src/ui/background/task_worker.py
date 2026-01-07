@@ -43,7 +43,7 @@ class TaskWorker(QThread):
         success = True
 
         try:
-            # 设备添加和启动操作
+            # 设备添加和启动操作（每次都重新添加设备）
             self.log_updated.emit("开始添加设备...")
             signal_bus.emit_log("开始添加设备...")
             if not self.auto_instance.add_device():

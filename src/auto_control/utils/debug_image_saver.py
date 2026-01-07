@@ -351,15 +351,19 @@ class DebugImageSaver:
                 if self._is_valid_bbox(final_bbox_log):
                     bottom_texts.append(f"Matched(Log): {final_bbox_log}")
                 if template_orig_size and template_scaled_size:
-                    bottom_texts.append(
-                        f"Template Size: Orig({template_orig_size[0]},{template_orig_size[1]}) | "
-                        f"Scaled({template_scaled_size[0]},{template_scaled_size[1]})"
-                    )
+                    # 优化：将长文本拆分为两行，避免单行过长
+                    bottom_texts.append(f"Template: Orig({template_orig_size[0]},{template_orig_size[1]})")
+                    bottom_texts.append(f"Scaled: {template_scaled_size[0]}x{template_scaled_size[1]}")
 
-                y_offset = img_h - 30
-                for text in reversed(bottom_texts):
+                # 优化：计算底部文本所需的最小高度，确保有足够空间
+                max_lines = min(len(bottom_texts), 3)  # 最多显示3行底部文本
+                required_height = max_lines * 20  # 每行20像素
+                start_y = max(30 + len(top_texts) * 20, img_h - required_height - 10)  # 确保不与顶部文本重叠
+                
+                y_offset = start_y
+                for text in bottom_texts[:max_lines]:  # 只显示前3行
                     self._draw_text_wrap(debug_img, text, (10, y_offset), "text_info")
-                    y_offset -= 20
+                    y_offset += 20
 
             # 保存图片（增强异常处理，添加压缩参数避免黑块）
             try:

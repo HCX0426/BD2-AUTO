@@ -169,7 +169,7 @@ class WindowsDevice(BaseDevice):
         self.logger.info(f"foreground模式状态检查线程启动 | 检查间隔: {self.TOPMOST_CHECK_INTERVAL}秒")
         # 新增：定义停止事件
         self._topmost_check_stop = Event()
-        
+
         while not self.stop_event.is_set() and not self._topmost_check_stop.is_set():
             try:
                 if not self.hwnd or not win32gui.IsWindow(self.hwnd):
@@ -178,7 +178,7 @@ class WindowsDevice(BaseDevice):
 
                 # 检查当前窗口是否在前台
                 is_foreground = win32gui.GetForegroundWindow() == self.hwnd
-                
+
                 if is_foreground:
                     self.logger.debug("foreground模式窗口激活状态正常")
                 else:
@@ -194,47 +194,95 @@ class WindowsDevice(BaseDevice):
 
         self.logger.info("foreground模式状态检查线程退出")
 
-    # -------------- 新增：统一的临时激活窗口方法 --------------
+    # -------------- 新增：统一的窗口激活方法 --------------
+    def _activate_window(self, temp_activation: bool = False, max_attempts: int = 1) -> bool:
+        """
+        统一的窗口激活方法，支持临时激活和多次尝试。
+
+        Args:
+            temp_activation: 是否为临时激活（仅用于截图等操作）
+            max_attempts: 最大尝试次数
+
+        Returns:
+            bool: 激活成功返回True，否则返回False
+        """
+        if not self._is_window_ready():
+            self.logger.warning(f"窗口未就绪，无法激活 | 句柄: {self.hwnd}")
+            return False
+
+        # 检查窗口是否已经在前台
+        if win32gui.GetForegroundWindow() == self.hwnd:
+            self.logger.debug(f"窗口已在前台，无需激活 | 句柄: {self.hwnd}")
+            return True
+
+        # 优化激活策略：减少尝试次数，避免多次激活导致闪烁
+        # 对于临时激活，只尝试一次
+        if temp_activation:
+            max_attempts = 1
+
+        for attempt in range(max_attempts):
+            if self.stop_event.is_set():
+                self.logger.debug(f"激活操作被中断 | 句柄: {self.hwnd}")
+                return False
+
+            try:
+                # 如果窗口最小化，先恢复
+                if self.is_minimized():
+                    win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
+                    time.sleep(self.WINDOW_RESTORE_DELAY)
+
+                # 使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
+                # 这是最可靠的激活方法，避免多次尝试不同的激活方式导致闪烁
+                ctypes.windll.user32.SwitchToThisWindow(self.hwnd, True)
+
+                # 等待窗口稳定，减少延迟时间，避免闪烁
+                delay = self.TEMP_FOREGROUND_DELAY / 2 if temp_activation else self.WINDOW_ACTIVATE_DELAY / 2
+                time.sleep(delay)
+
+                # 验证激活结果
+                if win32gui.GetForegroundWindow() == self.hwnd:
+                    self.logger.debug(f"窗口激活成功 | 句柄: {self.hwnd} | 尝试次数: {attempt+1}")
+                    return True
+                else:
+                    self.logger.warning(f"窗口激活失败 | 句柄: {self.hwnd} | 尝试次数: {attempt+1}")
+                    # 只在最后一次尝试失败后才等待重试
+                    if attempt < max_attempts - 1:
+                        time.sleep(0.3)  # 减少等待时间，避免闪烁
+
+            except Exception as e:
+                self.logger.warning(f"窗口激活异常 | 句柄: {self.hwnd} | 尝试次数: {attempt+1} | 错误: {e}")
+                # 只在最后一次尝试失败后才等待重试
+                if attempt < max_attempts - 1:
+                    time.sleep(0.3)  # 减少等待时间，避免闪烁
+
+        self.logger.warning(f"窗口激活失败，已尝试{max_attempts}次 | 句柄: {self.hwnd}")
+        return False
+
+    # -------------- 临时激活窗口方法（基于统一激活方法） --------------
     def _temp_activate_window(self) -> Optional[int]:
         """
         临时激活目标窗口，保存原始前台窗口句柄。
-        
+
         Returns:
             Optional[int]: 原始前台窗口句柄，失败返回None
         """
         if not self.hwnd:
             return None
-            
+
         try:
             # 保存原始前台窗口
             original_foreground = win32gui.GetForegroundWindow()
-            
+
             # 如果目标窗口已经在前台，直接返回
             if original_foreground == self.hwnd:
                 return original_foreground
-                
-            # 激活目标窗口
-            if self.is_minimized():
-                win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
-                time.sleep(self.WINDOW_RESTORE_DELAY)
-                
-            # 使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
-            try:
-                ctypes.windll.user32.SwitchToThisWindow(self.hwnd, True)
-            except Exception:
-                win32gui.SetForegroundWindow(self.hwnd)
-                
-            # 等待窗口稳定
-            time.sleep(self.TEMP_FOREGROUND_DELAY)
-            
-            # 验证激活结果
-            if win32gui.GetForegroundWindow() == self.hwnd:
-                self.logger.debug(f"临时激活窗口成功 | 句柄: {self.hwnd}")
+
+            # 使用统一激活方法
+            if self._activate_window(temp_activation=True):
                 return original_foreground
             else:
-                self.logger.warning(f"临时激活窗口失败 | 目标句柄: {self.hwnd}")
                 return None
-                
+
         except Exception as e:
             self.logger.warning(f"临时激活窗口异常: {e}")
             return None
@@ -344,6 +392,25 @@ class WindowsDevice(BaseDevice):
                 self._is_temp_topmost = False
 
     # -------------- 截图策略检测 --------------
+    def _select_best_method(
+        self, method_priority: List[str], available_methods: List[str], default_method: str = None
+    ) -> str:
+        """
+        根据优先级列表选择最优可用方法。
+
+        Args:
+            method_priority: 方法优先级列表，按优先级从高到低排列
+            available_methods: 可用方法列表
+            default_method: 默认方法，当没有匹配方法时使用
+
+        Returns:
+            str: 最优可用方法
+        """
+        for method in method_priority:
+            if method in available_methods:
+                return method
+        return default_method or method_priority[-1]
+
     def _detect_best_screenshot_strategy(self) -> str:
         """
         检测并选择最优截图策略，初始化截图模式和可用方法列表。
@@ -367,7 +434,7 @@ class WindowsDevice(BaseDevice):
         Returns:
             str: 最优截图策略名称
         """
-        if not self.hwnd or self.is_minimized():
+        if not self._is_window_ready():
             self.logger.warning("窗口未就绪，默认使用temp_foreground（foreground模式）")
             self._screenshot_mode = "foreground"
             self._available_screenshot_methods = ["temp_foreground"]
@@ -414,9 +481,14 @@ class WindowsDevice(BaseDevice):
         # 检测2: BitBlt（foreground模式）
         def test_bitblt():
             try:
-                # 临时激活窗口
-                original_foreground = self._temp_activate_window()
-                
+                # 检查窗口是否已经在前台
+                is_already_foreground = win32gui.GetForegroundWindow() == self.hwnd
+                original_foreground = None
+
+                # 只有当窗口不在前台时，才临时激活窗口
+                if not is_already_foreground:
+                    original_foreground = self._temp_activate_window()
+
                 hwnd_dc = win32gui.GetWindowDC(self.hwnd)
                 mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
                 mem_dc = mfc_dc.CreateCompatibleDC()
@@ -436,9 +508,9 @@ class WindowsDevice(BaseDevice):
                 mfc_dc.DeleteDC()
                 win32gui.ReleaseDC(self.hwnd, hwnd_dc)
                 win32gui.DeleteObject(bitmap.GetHandle())
-                
-                # 恢复原始前台窗口
-                if original_foreground and original_foreground != self.hwnd:
+
+                # 只有当窗口不在前台时，才恢复原始前台窗口
+                if not is_already_foreground and original_foreground and original_foreground != self.hwnd:
                     self._restore_foreground(original_foreground)
 
                 return mean_val > 10
@@ -451,9 +523,14 @@ class WindowsDevice(BaseDevice):
             try:
                 import dxcam
 
-                # 临时激活窗口
-                original_foreground = self._temp_activate_window()
-                
+                # 检查窗口是否已经在前台
+                is_already_foreground = win32gui.GetForegroundWindow() == self.hwnd
+                original_foreground = None
+
+                # 只有当窗口不在前台时，才临时激活窗口
+                if not is_already_foreground:
+                    original_foreground = self._temp_activate_window()
+
                 camera = dxcam.create()
                 if not camera:
                     raise RuntimeError("DXCam无法创建摄像头实例")
@@ -467,9 +544,9 @@ class WindowsDevice(BaseDevice):
                     raise RuntimeError("DXCam返回空图像")
 
                 mean_val = np.mean(img_np)
-                
-                # 恢复原始前台窗口
-                if original_foreground and original_foreground != self.hwnd:
+
+                # 只有当窗口不在前台时，才恢复原始前台窗口
+                if not is_already_foreground and original_foreground and original_foreground != self.hwnd:
                     self._restore_foreground(original_foreground)
 
                 return mean_val > 10
@@ -482,12 +559,24 @@ class WindowsDevice(BaseDevice):
 
         # 检测所有截图方法并记录可用方法
         available_methods = []
-        if test_bitblt():
-            available_methods.append("bitblt")
-        if test_dxcam():
-            available_methods.append("dxcam")
+
+        # 优化：优先检测printwindow（后台截图，不激活窗口）
         if test_printwindow():
             available_methods.append("printwindow")
+
+        # 检查窗口是否已经在前台
+        is_already_foreground = win32gui.GetForegroundWindow() == self.hwnd
+
+        # 只有当窗口已经在前台时，才检测bitblt和dxcam（避免不必要的窗口激活）
+        if is_already_foreground:
+            if test_bitblt():
+                available_methods.append("bitblt")
+            if test_dxcam():
+                available_methods.append("dxcam")
+        else:
+            # 窗口不在前台，优先使用temp_foreground作为兜底，避免多次激活窗口
+            self.logger.debug("窗口不在前台，跳过bitblt和dxcam检测，优先使用temp_foreground")
+
         # temp_foreground 总是可用作为兜底
         available_methods.append("temp_foreground")
 
@@ -507,22 +596,16 @@ class WindowsDevice(BaseDevice):
                 return "printwindow"
             # 如果设置的是foreground模式，选择最优前台截图方法
             elif self._screenshot_mode == "foreground":
-                for method in ["bitblt", "dxcam", "temp_foreground"]:
-                    if method in available_methods:
-                        self.logger.info(f"使用已设置的foreground模式：{method}")
-                        return method
+                best_method = self._select_best_method(["bitblt", "dxcam", "temp_foreground"], available_methods)
+                self.logger.info(f"使用已设置的foreground模式：{best_method}")
+                return best_method
 
         # 未指定截图模式或指定模式不可用，自动选择最优模式
         # 默认优先使用foreground模式
         # 按性能排序：bitblt > dxcam > temp_foreground
-        for method in ["bitblt", "dxcam", "temp_foreground"]:
-            if method in available_methods:
-                self.logger.info(f"截图策略检测结果：{method}（foreground模式）")
-                return method
-
-        # 兜底
-        self.logger.info("截图策略检测结果：temp_foreground（foreground模式）")
-        return "temp_foreground"
+        best_method = self._select_best_method(["bitblt", "dxcam", "temp_foreground"], available_methods)
+        self.logger.info(f"截图策略检测结果：{best_method}（foreground模式）")
+        return best_method
 
     # -------------- 原有工具方法（无修改） --------------
     def _parse_uri(self, uri: str) -> Dict[str, str]:
@@ -646,24 +729,50 @@ class WindowsDevice(BaseDevice):
 
     def _enable_dpi_awareness(self) -> None:
         try:
+            # 定义DPI感知级别常量
+            PROCESS_DPI_UNAWARE = 0
+            PROCESS_SYSTEM_DPI_AWARE = 1
+            PROCESS_PER_MONITOR_DPI_AWARE = 2
+
             shcore = ctypes.windll.shcore
-            result = shcore.SetProcessDpiAwareness(2)
-            if result == 0:
-                self.logger.debug("已启用Per-Monitor DPI感知模式")
+
+            # 首先尝试获取当前DPI感知级别，避免重复设置
+            try:
+                current_awareness = ctypes.c_int()
+                result = shcore.GetProcessDpiAwareness(ctypes.byref(current_awareness))
+                if result == 0:
+                    self.logger.debug(f"当前DPI感知级别: {current_awareness.value}")
+                    if current_awareness.value > 0:
+                        # 已经设置了合适的DPI感知级别，无需再次设置
+                        return
+            except Exception:
+                # GetProcessDpiAwareness可能不可用，继续尝试设置
+                pass
+
+            # 尝试不同的DPI感知级别，从高到低
+            for awareness_level in [PROCESS_PER_MONITOR_DPI_AWARE, PROCESS_SYSTEM_DPI_AWARE]:
                 try:
-                    system_dpi = ctypes.windll.user32.GetDpiForSystem()
-                    self.logger.debug(f"系统DPI: {system_dpi}（标准DPI=96）")
+                    result = shcore.SetProcessDpiAwareness(awareness_level)
+                    if result == 0:
+                        self.logger.debug(f"已启用DPI感知模式，级别: {awareness_level}")
+                        try:
+                            system_dpi = ctypes.windll.user32.GetDpiForSystem()
+                            self.logger.debug(f"系统DPI: {system_dpi}（标准DPI=96）")
+                        except Exception:
+                            pass
+                        return
                 except Exception:
-                    pass
-            else:
-                self.logger.warning(f"SetProcessDpiAwareness调用失败，错误码: {result}")
-        except Exception as e:
-            self.logger.error(f"启用Per-Monitor DPI感知失败: {str(e)}", exc_info=True)
+                    # 尝试下一个级别
+                    continue
+
+            # 如果SetProcessDpiAwareness所有级别都失败，尝试旧版API
             try:
                 ctypes.windll.user32.SetProcessDPIAware()
-                self.logger.debug("已启用系统级DPI感知模式")
-            except Exception as e2:
-                self.logger.error(f"所有DPI感知模式启用失败：{str(e2)}，可能导致坐标偏移", exc_info=True)
+                self.logger.debug("已启用系统级DPI感知模式（旧版API）")
+            except Exception as e:
+                self.logger.error(f"所有DPI感知模式启用失败：{str(e)}，可能导致坐标偏移", exc_info=True)
+        except Exception as e:
+            self.logger.error(f"启用DPI感知失败: {str(e)}", exc_info=True)
 
     def _get_dpi_for_window(self) -> float:
         if not self.hwnd:
@@ -733,25 +842,28 @@ class WindowsDevice(BaseDevice):
             client_h_logic = max(600, client_h_logic)
 
             client_origin_x, client_origin_y = win32gui.ClientToScreen(self.hwnd, (0, 0))
-            is_fullscreen = self.coord_transformer.is_fullscreen
             screen_res = self._get_screen_hardware_res()
 
-            # 记录全屏状态变化
-            previous_fullscreen = self.display_context.is_fullscreen
-            if is_fullscreen != previous_fullscreen:
-                self.logger.info(
-                    f"窗口显示模式变化: {'全屏' if is_fullscreen else '窗口'} (之前: {'全屏' if previous_fullscreen else '窗口'})"
-                )
-
+            # 先更新display_context，包括hwnd，避免全屏判定时hwnd为None
             self.display_context.update_from_window(
                 hwnd=self.hwnd,
-                is_fullscreen=is_fullscreen,
+                is_fullscreen=False,  # 先设置默认值
                 dpi_scale=dpi_scale,
                 client_logical=(client_w_logic, client_h_logic),
                 client_physical=(client_w_phys, client_h_phys),
                 screen_physical=screen_res,
                 client_origin=(client_origin_x, client_origin_y),
             )
+
+            # 现在display_context已经有hwnd了，可以安全地获取is_fullscreen
+            is_fullscreen = self.coord_transformer.is_fullscreen
+            previous_fullscreen = self.display_context.is_fullscreen
+            if is_fullscreen != previous_fullscreen:
+                self.logger.info(
+                    f"窗口显示模式变化: {'全屏' if is_fullscreen else '窗口'} (之前: {'全屏' if previous_fullscreen else '窗口'})"
+                )
+                # 更新display_context的is_fullscreen属性
+                self.display_context.is_fullscreen = is_fullscreen
 
             self.logger.debug(
                 f"窗口动态信息更新完成 | "
@@ -776,55 +888,28 @@ class WindowsDevice(BaseDevice):
             self.logger.debug(
                 f"激活操作冷却中（剩余{self.ACTIVATE_RETRY_COOLDOWN - (current_time - self._last_activate_attempt):.1f}秒）"
             )
-            if foreground_hwnd == self.hwnd and not self.is_minimized():
+            if self._is_window_ready() and foreground_hwnd == self.hwnd:
                 return True
             return False
         self._last_activate_attempt = current_time
 
-        if foreground_hwnd == self.hwnd and not self.is_minimized():
+        if self._is_window_ready() and foreground_hwnd == self.hwnd:
             self._last_activate_time = current_time
             self.logger.debug(f"窗口已在前台（句柄: {self.hwnd}），无需激活")
-            self._update_dynamic_window_info()
+            # 窗口已在前台且状态就绪，无需更新动态信息
             return True
 
-        for attempt in range(max_attempts):
-            if self.stop_event.is_set():
-                self._record_error("_ensure_window_foreground", "窗口激活被停止信号中断")
-                self.logger.info(self.last_error)
-                return False
-
-            self.logger.info(f"激活窗口（第{attempt+1}/{max_attempts}次）| 句柄: {self.hwnd}")
-            try:
-                if self.is_minimized():
-                    win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
-                    time.sleep(self.WINDOW_RESTORE_DELAY)
-
-                win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-                win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-                time.sleep(0.1)
-
-                win32gui.ShowWindow(self.hwnd, win32con.SW_SHOW)
-                win32gui.SetForegroundWindow(self.hwnd)
-                time.sleep(self.WINDOW_ACTIVATE_DELAY)
-                final_foreground = win32gui.GetForegroundWindow()
-
-                if final_foreground == self.hwnd and not self.is_minimized():
-                    self._last_activate_time = current_time
-                    self.logger.info(f"窗口激活成功（第{attempt+1}次）| 句柄: {self.hwnd}")
-                    self._update_dynamic_window_info()
-                    return True
-                else:
-                    self.logger.warning(
-                        f"第{attempt+1}次激活失败 | 当前前台句柄: {final_foreground}（目标: {self.hwnd}）"
-                    )
-            except Exception as e:
-                self._record_error("_ensure_window_foreground", f"第{attempt+1}次激活异常：{str(e)}")
-                self.logger.error(self.last_error, exc_info=True)
-
-            time.sleep(0.5)
-
-        self.logger.warning(f"窗口激活失败（已尝试{max_attempts}次），可能被遮挡/权限不足")
-        return False
+        self.logger.info(f"开始激活窗口（最多{max_attempts}次尝试）| 句柄: {self.hwnd}")
+        if self._activate_window(temp_activation=False, max_attempts=max_attempts):
+            self._last_activate_time = current_time
+            self._update_dynamic_window_info()
+            return True
+        else:
+            self._record_error(
+                "_ensure_window_foreground", f"窗口激活失败（已尝试{max_attempts}次），可能被遮挡/权限不足"
+            )
+            self.logger.info(self.last_error)
+            return False
 
     # -------------- 核心方法：connect --------------
     def connect(self, timeout: float = 10.0) -> bool:
@@ -845,6 +930,9 @@ class WindowsDevice(BaseDevice):
         """
         self.clear_last_error()
         start_time = time.time()
+        last_find_time = 0
+        find_interval = 2.0  # 窗口查找间隔，避免频繁查找
+        found_once = False  # 标记是否已经找到过窗口
 
         while time.time() - start_time < timeout:
             if self.stop_event.is_set():
@@ -853,41 +941,49 @@ class WindowsDevice(BaseDevice):
                 self._update_state(DeviceState.DISCONNECTED)
                 return False
 
-            self.hwnd = self._get_window_handle()
-            if self.hwnd:
-                self.window_class = win32gui.GetClassName(self.hwnd)
-                _, self.process_id = win32process.GetWindowThreadProcessId(self.hwnd)
+            current_time = time.time()
 
-                # 直接调用 update_from_window 方法更新所有窗口信息
+            # 只有当距离上次查找超过指定间隔，或者还没有找到过窗口时，才进行查找
+            if current_time - last_find_time >= find_interval or not found_once:
+                self.hwnd = self._get_window_handle()
+                if self.hwnd:
+                    found_once = True
+                    last_find_time = current_time
+                    self.window_class = win32gui.GetClassName(self.hwnd)
+                    _, self.process_id = win32process.GetWindowThreadProcessId(self.hwnd)
+
+                    # 直接调用 update_from_window 方法更新所有窗口信息
+                    self._update_dynamic_window_info()
+
+                    # 检测截图策略
+                    self._best_screenshot_strategy = self._detect_best_screenshot_strategy()
+
+                    # 初始化点击模式（默认foreground）
+                    if not self._click_mode:
+                        self._click_mode = "foreground"
+
+                    # 初始化截图模式
+                    if not self._screenshot_mode:
+                        self._screenshot_mode = self._best_screenshot_strategy
+            elif self.hwnd:
+                # 已找到窗口，只更新窗口状态，不重新查找
                 self._update_dynamic_window_info()
 
-                # 检测截图策略
-                self._best_screenshot_strategy = self._detect_best_screenshot_strategy()
-
-                # 初始化点击模式（默认foreground）
-                if not self._click_mode:
-                    self._click_mode = "foreground"
-
-                # 初始化截图模式
-                if not self._screenshot_mode:
-                    self._screenshot_mode = self._best_screenshot_strategy
-
-                # 前台模式初始化：确保窗口被激活
+            if self.hwnd:
+                # 前台模式初始化：仅在窗口不在前台时激活
                 if self._best_screenshot_strategy in ["bitblt", "dxcam", "temp_foreground"]:
-                    # 首次连接时，确保窗口被激活
-                    try:
-                        # 使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
-                        ctypes.windll.user32.SwitchToThisWindow(self.hwnd, True)
-                        time.sleep(self.WINDOW_ACTIVATE_DELAY)
-                        self.logger.info("前台模式窗口首次激活成功")
-                    except Exception as e:
-                        self.logger.warning(f"前台模式窗口首次激活失败: {e}")
+                    # 检查窗口是否已经在前台
+                    if win32gui.GetForegroundWindow() != self.hwnd:
+                        # 首次连接时，确保窗口被激活
+                        if not self._activate_window(temp_activation=True):
+                            self.logger.warning("前台模式窗口首次激活失败")
+                        else:
+                            self.logger.info("前台模式窗口首次激活成功")
+                    else:
+                        self.logger.debug("窗口已在前台，无需首次激活")
 
                 # 检查窗口状态，只要窗口存在且未被最小化即可连接
-                is_window = win32gui.IsWindow(self.hwnd)
-                is_minimized = self.is_minimized()
-
-                if is_window and not is_minimized:
+                if self._is_window_ready():
                     self._update_state(DeviceState.CONNECTED)
                     self.logger.info(
                         f"Windows设备连接成功 | "
@@ -897,11 +993,8 @@ class WindowsDevice(BaseDevice):
                         f"点击模式: {self._click_mode}"
                     )
                     return True
-                else:
-                    is_visible = win32gui.IsWindowVisible(self.hwnd)
-                    self.logger.warning(
-                        f"窗口状态不满足连接条件: IsWindow={is_window}, IsWindowVisible={is_visible}, is_minimized={is_minimized}"
-                    )
+                elif current_time - last_find_time < 1.0:  # 只在刚找到窗口时记录一次警告
+                    self.logger.warning(f"窗口状态不满足连接条件，句柄: {self.hwnd}")
 
             time.sleep(0.5)
 
@@ -975,6 +1068,259 @@ class WindowsDevice(BaseDevice):
             self.logger.warning(f"检查窗口最小化状态失败: {e}")
             return False
 
+    def _is_window_ready(self) -> bool:
+        """
+        统一检查窗口是否就绪。
+
+        Returns:
+            bool: 窗口就绪返回True，否则返回False
+        """
+        return self.hwnd and win32gui.IsWindow(self.hwnd) and not self.is_minimized()
+
+    # -------------- 上下文管理器：用于资源管理 --------------
+    class _DCCtxManager:
+        """
+        DC资源上下文管理器，自动处理DC和位图资源的获取和释放。
+        """
+
+        def __init__(self, hwnd, width, height):
+            self.hwnd = hwnd
+            self.width = width
+            self.height = height
+            self.hwnd_dc = None
+            self.mfc_dc = None
+            self.mem_dc = None
+            self.bitmap = None
+
+        def __enter__(self):
+            """获取资源"""
+            self.hwnd_dc = win32gui.GetDC(self.hwnd)
+            self.mfc_dc = win32ui.CreateDCFromHandle(self.hwnd_dc)
+            self.mem_dc = self.mfc_dc.CreateCompatibleDC()
+            self.bitmap = win32ui.CreateBitmap()
+            self.bitmap.CreateCompatibleBitmap(self.mfc_dc, self.width, self.height)
+            self.mem_dc.SelectObject(self.bitmap)
+            return self.mem_dc, self.bitmap
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            """释放资源"""
+            if self.mem_dc:
+                self.mem_dc.DeleteDC()
+            if self.mfc_dc:
+                self.mfc_dc.DeleteDC()
+            if self.hwnd_dc:
+                win32gui.ReleaseDC(self.hwnd, self.hwnd_dc)
+            if self.bitmap:
+                win32gui.DeleteObject(self.bitmap.GetHandle())
+
+    # -------------- 截图策略实现方法 --------------
+    def _try_print_window(self, client_w_phys: int, client_h_phys: int) -> Optional[np.ndarray]:
+        """
+        使用PrintWindow方法进行后台截图。
+
+        Args:
+            client_w_phys: 客户区物理宽度
+            client_h_phys: 客户区物理高度
+
+        Returns:
+            Optional[np.ndarray]: 截图图像，失败返回None
+        """
+        try:
+            with self._DCCtxManager(self.hwnd, client_w_phys, client_h_phys) as (mem_dc, bitmap):
+                PW_CLIENTONLY = 1
+                PW_RENDERFULLCONTENT = 0x00000002
+                print_flags = PW_CLIENTONLY | PW_RENDERFULLCONTENT
+
+                result = ctypes.windll.user32.PrintWindow(self.hwnd, mem_dc.GetSafeHdc(), print_flags)
+                if not result:
+                    raise RuntimeError("PrintWindow调用返回失败")
+
+                bmp_str = bitmap.GetBitmapBits(True)
+                img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
+                img_np = np.array(img_pil)
+                img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+            if np.mean(img_np) < 10:
+                raise RuntimeError("PrintWindow截图为黑屏")
+            self.logger.debug("使用PrintWindow后台截图成功（仅客户区）")
+            return img_np
+        except Exception as e:
+            self.logger.debug(f"PrintWindow执行失败: {e}")
+            return None
+
+    def _try_bitblt(self, client_w_phys: int, client_h_phys: int) -> Optional[np.ndarray]:
+        """
+        使用BitBlt方法进行前台截图。
+
+        Args:
+            client_w_phys: 客户区物理宽度
+            client_h_phys: 客户区物理高度
+
+        Returns:
+            Optional[np.ndarray]: 截图图像，失败返回None
+        """
+        original_foreground = None
+        try:
+            # 临时激活窗口
+            original_foreground = self._temp_activate_window()
+
+            with self._DCCtxManager(self.hwnd, client_w_phys, client_h_phys) as (mem_dc, bitmap):
+                # 获取原始DC用于BitBlt操作
+                hwnd_dc = win32gui.GetDC(self.hwnd)
+                mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+
+                mem_dc.BitBlt((0, 0), (client_w_phys, client_h_phys), mfc_dc, (0, 0), win32con.SRCCOPY)
+
+                # 释放原始DC资源
+                win32gui.ReleaseDC(self.hwnd, hwnd_dc)
+                mfc_dc.DeleteDC()
+
+                bmp_str = bitmap.GetBitmapBits(True)
+                img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
+                img_np = np.array(img_pil)
+                img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+            if np.mean(img_np) < 10:
+                raise RuntimeError("BitBlt截图为黑屏")
+
+            self.logger.debug("使用BitBlt截图成功（仅客户区）")
+            return img_np
+        except Exception as e:
+            self.logger.debug(f"BitBlt执行失败: {e}")
+            return None
+        finally:
+            # 恢复原始前台窗口
+            if original_foreground and original_foreground != self.hwnd:
+                self._restore_foreground(original_foreground)
+
+    def _try_dxcam(self, client_w_phys: int, client_h_phys: int) -> Optional[np.ndarray]:
+        """
+        使用DXCam方法进行硬件加速截图。
+
+        Args:
+            client_w_phys: 客户区物理宽度
+            client_h_phys: 客户区物理高度
+
+        Returns:
+            Optional[np.ndarray]: 截图图像，失败返回None
+        """
+        original_foreground = None
+        try:
+            import dxcam
+
+            # 临时激活窗口
+            original_foreground = self._temp_activate_window()
+
+            camera = dxcam.create()
+            if not camera:
+                raise RuntimeError("DXCam无法初始化，无可用显卡")
+
+            client_origin_x, client_origin_y = win32gui.ClientToScreen(self.hwnd, (0, 0))
+            client_end_x = client_origin_x + client_w_phys
+            client_end_y = client_origin_y + client_h_phys
+
+            img_np = camera.grab(region=(client_origin_x, client_origin_y, client_end_x, client_end_y))
+            if img_np is None:
+                raise RuntimeError("DXCam截图返回空图像")
+
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+            self.logger.debug("使用DXCam硬件加速截图成功（仅客户区）")
+            return img_np
+        except ImportError:
+            self.logger.debug("dxcam未安装，跳过硬件加速截图")
+            return None
+        except Exception as e:
+            self.logger.debug(f"DXCam执行失败: {e}")
+            return None
+        finally:
+            # 恢复原始前台窗口
+            if original_foreground and original_foreground != self.hwnd:
+                self._restore_foreground(original_foreground)
+
+    def _try_temp_foreground_screenshot(self, client_w_phys: int, client_h_phys: int) -> Optional[np.ndarray]:
+        """
+        使用临时置顶窗口方法进行截图。
+
+        Args:
+            client_w_phys: 客户区物理宽度
+            client_h_phys: 客户区物理高度
+
+        Returns:
+            Optional[np.ndarray]: 截图图像，失败返回None
+        """
+        self.logger.debug(f"开始temp_foreground截图 | 窗口句柄: {self.hwnd} | 尺寸: {client_w_phys}x{client_h_phys}")
+        original_foreground = self._get_original_foreground()
+        try:
+            # 使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
+            try:
+                ctypes.windll.user32.SwitchToThisWindow(self.hwnd, True)
+                self.logger.debug("SwitchToThisWindow成功")
+            except Exception as e1:
+                self.logger.debug(f"SwitchToThisWindow失败: {e1}")
+                try:
+                    win32gui.SetForegroundWindow(self.hwnd)
+                    self.logger.debug("SetForegroundWindow成功")
+                except Exception as e2:
+                    self.logger.debug(f"SetForegroundWindow失败: {e2}")
+
+            # 等待窗口置顶，确保截图成功
+            time.sleep(self.TEMP_FOREGROUND_DELAY)
+
+            # 确保窗口是当前前台窗口
+            if win32gui.GetForegroundWindow() != self.hwnd:
+                self.logger.warning(
+                    f"窗口未成功置顶，当前前台句柄: {win32gui.GetForegroundWindow()}，目标句柄: {self.hwnd}"
+                )
+                # 再次尝试激活
+                try:
+                    win32gui.SetForegroundWindow(self.hwnd)
+                    time.sleep(self.TEMP_FOREGROUND_DELAY)
+                except Exception:
+                    pass
+
+            client_origin_x, client_origin_y = win32gui.ClientToScreen(self.hwnd, (0, 0))
+            client_end_x = client_origin_x + client_w_phys
+            client_end_y = client_origin_y + client_h_phys
+            self.logger.debug(f"客户区屏幕坐标: ({client_origin_x}, {client_origin_y})")
+
+            hdc_screen = win32gui.GetDC(0)
+            mfc_dc = win32ui.CreateDCFromHandle(hdc_screen)
+            mem_dc = mfc_dc.CreateCompatibleDC()
+            bitmap = win32ui.CreateBitmap()
+            bitmap.CreateCompatibleBitmap(mfc_dc, client_w_phys, client_h_phys)
+            mem_dc.SelectObject(bitmap)
+
+            result = mem_dc.BitBlt(
+                (0, 0),
+                (client_w_phys, client_h_phys),
+                mfc_dc,
+                (client_origin_x, client_origin_y),
+                win32con.SRCCOPY,
+            )
+            self.logger.debug(f"BitBlt结果: {result}")
+
+            bmp_str = bitmap.GetBitmapBits(True)
+            img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
+            img_np = np.array(img_pil)
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+            mem_dc.DeleteDC()
+            mfc_dc.DeleteDC()
+            win32gui.ReleaseDC(0, hdc_screen)
+            win32gui.DeleteObject(bitmap.GetHandle())
+
+            self._restore_foreground(original_foreground)
+            self.logger.debug("使用临时置顶屏幕截图成功（仅客户区，终极兜底）")
+            return img_np
+        except Exception as e:
+            self.logger.debug(f"临时置顶屏幕截图失败: {e}")
+            if original_foreground:
+                try:
+                    self._restore_foreground(original_foreground)
+                except Exception:
+                    pass
+            return None
+
     # -------------- 核心方法：capture_screen --------------
     def capture_screen(self, roi: Optional[Tuple[int, int, int, int]] = None) -> Optional[np.ndarray]:
         """
@@ -996,7 +1342,7 @@ class WindowsDevice(BaseDevice):
             Optional[np.ndarray]: 截图图像（BGR格式），失败返回None
         """
         self.clear_last_error()
-        if not self.hwnd or self.is_minimized():
+        if not self._is_window_ready():
             self._record_error("capture_screen", "窗口未连接/最小化，无法截图")
             self.logger.error(self.last_error)
             return None
@@ -1036,30 +1382,19 @@ class WindowsDevice(BaseDevice):
         # -------------------------- 各策略实现 --------------------------
         def try_print_window():
             try:
-                hwnd_dc = win32gui.GetDC(self.hwnd)
-                mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
-                mem_dc = mfc_dc.CreateCompatibleDC()
-                bitmap = win32ui.CreateBitmap()
-                bitmap.CreateCompatibleBitmap(mfc_dc, client_w_phys, client_h_phys)
-                mem_dc.SelectObject(bitmap)
+                with self._DCCtxManager(self.hwnd, client_w_phys, client_h_phys) as (mem_dc, bitmap):
+                    PW_CLIENTONLY = 1
+                    PW_RENDERFULLCONTENT = 0x00000002
+                    print_flags = PW_CLIENTONLY | PW_RENDERFULLCONTENT
 
-                PW_CLIENTONLY = 1
-                PW_RENDERFULLCONTENT = 0x00000002
-                print_flags = PW_CLIENTONLY | PW_RENDERFULLCONTENT
+                    result = ctypes.windll.user32.PrintWindow(self.hwnd, mem_dc.GetSafeHdc(), print_flags)
+                    if not result:
+                        raise RuntimeError("PrintWindow调用返回失败")
 
-                result = ctypes.windll.user32.PrintWindow(self.hwnd, mem_dc.GetSafeHdc(), print_flags)
-                if not result:
-                    raise RuntimeError("PrintWindow调用返回失败")
-
-                bmp_str = bitmap.GetBitmapBits(True)
-                img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
-                img_np = np.array(img_pil)
-                img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-
-                mem_dc.DeleteDC()
-                mfc_dc.DeleteDC()
-                win32gui.ReleaseDC(self.hwnd, hwnd_dc)
-                win32gui.DeleteObject(bitmap.GetHandle())
+                    bmp_str = bitmap.GetBitmapBits(True)
+                    img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
+                    img_np = np.array(img_pil)
+                    img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
                 if np.mean(img_np) < 10:
                     raise RuntimeError("PrintWindow截图为黑屏")
@@ -1075,29 +1410,26 @@ class WindowsDevice(BaseDevice):
             try:
                 # 临时激活窗口
                 original_foreground = self._temp_activate_window()
-                
-                hwnd_dc = win32gui.GetDC(self.hwnd)
-                mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
-                mem_dc = mfc_dc.CreateCompatibleDC()
-                bitmap = win32ui.CreateBitmap()
-                bitmap.CreateCompatibleBitmap(mfc_dc, client_w_phys, client_h_phys)
-                mem_dc.SelectObject(bitmap)
 
-                mem_dc.BitBlt((0, 0), (client_w_phys, client_h_phys), mfc_dc, (0, 0), win32con.SRCCOPY)
+                with self._DCCtxManager(self.hwnd, client_w_phys, client_h_phys) as (mem_dc, bitmap):
+                    # 获取原始DC用于BitBlt操作
+                    hwnd_dc = win32gui.GetDC(self.hwnd)
+                    mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
 
-                bmp_str = bitmap.GetBitmapBits(True)
-                img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
-                img_np = np.array(img_pil)
-                img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+                    mem_dc.BitBlt((0, 0), (client_w_phys, client_h_phys), mfc_dc, (0, 0), win32con.SRCCOPY)
 
-                mem_dc.DeleteDC()
-                mfc_dc.DeleteDC()
-                win32gui.ReleaseDC(self.hwnd, hwnd_dc)
-                win32gui.DeleteObject(bitmap.GetHandle())
+                    # 释放原始DC资源
+                    win32gui.ReleaseDC(self.hwnd, hwnd_dc)
+                    mfc_dc.DeleteDC()
+
+                    bmp_str = bitmap.GetBitmapBits(True)
+                    img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
+                    img_np = np.array(img_pil)
+                    img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
                 if np.mean(img_np) < 10:
                     raise RuntimeError("BitBlt截图为黑屏")
-                    
+
                 self.logger.debug("使用BitBlt截图成功（仅客户区）")
                 return img_np
             except Exception as e:
@@ -1116,7 +1448,7 @@ class WindowsDevice(BaseDevice):
 
                 # 临时激活窗口
                 original_foreground = self._temp_activate_window()
-                
+
                 camera = dxcam.create()
                 if not camera:
                     raise RuntimeError("DXCam无法初始化，无可用显卡")
@@ -1225,10 +1557,15 @@ class WindowsDevice(BaseDevice):
         # 检查窗口是否在前台
         is_foreground = win32gui.GetForegroundWindow() == self.hwnd
 
-        # 无论设置了什么截图方法，只要窗口在前台，优先使用temp_foreground，确保获取到正确的窗口内容
+        # 窗口在前台时，优先使用更稳定的截图方法，避免temp_foreground导致的闪烁
         if is_foreground:
-            self.logger.debug("窗口在前台，优先使用temp_foreground确保获取到正确的窗口内容")
-            img_np = try_temp_foreground_screenshot()
+            self.logger.debug("窗口在前台，优先使用更稳定的截图方法")
+            # 优先使用bitblt或dxcam，失败再尝试printwindow
+            img_np = self._try_bitblt(client_w_phys, client_h_phys)
+            if img_np is None:
+                img_np = self._try_dxcam(client_w_phys, client_h_phys)
+            if img_np is None:
+                img_np = self._try_print_window(client_w_phys, client_h_phys)
 
         # 如果temp_foreground失败或者窗口不在前台，再尝试其他截图方法
         if img_np is None:
@@ -1236,37 +1573,49 @@ class WindowsDevice(BaseDevice):
             if self._screenshot_mode in ["temp_foreground", "bitblt", "dxcam", "printwindow"]:
                 self.logger.debug(f"使用已设置的截图方法: {self._screenshot_mode}")
                 if self._screenshot_mode == "temp_foreground":
-                    img_np = try_temp_foreground_screenshot()
+                    img_np = self._try_temp_foreground_screenshot(client_w_phys, client_h_phys)
                 elif self._screenshot_mode == "bitblt":
-                    img_np = try_bitblt()
+                    img_np = self._try_bitblt(client_w_phys, client_h_phys)
                 elif self._screenshot_mode == "dxcam":
-                    img_np = try_dxcam()
+                    img_np = self._try_dxcam(client_w_phys, client_h_phys)
                 elif self._screenshot_mode == "printwindow":
-                    img_np = try_print_window()
+                    img_np = self._try_print_window(client_w_phys, client_h_phys)
             # background截图模式：强制使用PrintWindow，失败则降级
             elif self._screenshot_mode == "background":
-                img_np = try_print_window()
-            # foreground截图模式：使用temp_foreground优先，确保获取到正确的窗口内容
+                img_np = self._try_print_window(client_w_phys, client_h_phys)
+            # foreground截图模式：优先使用更稳定的截图方法，避免temp_foreground导致的闪烁
             elif self._screenshot_mode == "foreground":
-                # 优先使用temp_foreground，确保获取到正确的窗口内容
-                self.logger.debug("foreground截图模式优先使用temp_foreground，确保获取到正确的窗口内容")
-                img_np = try_temp_foreground_screenshot()
+                self.logger.debug("foreground截图模式优先使用更稳定的截图方法")
+                # 优先使用bitblt或dxcam，失败再尝试printwindow，最后才使用temp_foreground
+                img_np = self._try_bitblt(client_w_phys, client_h_phys)
+                if img_np is None:
+                    img_np = self._try_dxcam(client_w_phys, client_h_phys)
+                if img_np is None:
+                    img_np = self._try_print_window(client_w_phys, client_h_phys)
+                if img_np is None:
+                    img_np = self._try_temp_foreground_screenshot(client_w_phys, client_h_phys)
             else:
-                # 兜底：使用temp_foreground
-                self.logger.warning(f"未知截图模式: {self._screenshot_mode}，使用temp_foreground兜底")
-                img_np = try_temp_foreground_screenshot()
+                # 兜底：优先使用更稳定的截图方法，避免temp_foreground导致的闪烁
+                self.logger.warning(f"未知截图模式: {self._screenshot_mode}，使用更稳定的截图方法兜底")
+                img_np = self._try_print_window(client_w_phys, client_h_phys)
+                if img_np is None:
+                    img_np = self._try_bitblt(client_w_phys, client_h_phys)
+                if img_np is None:
+                    img_np = self._try_dxcam(client_w_phys, client_h_phys)
+                if img_np is None:
+                    img_np = self._try_temp_foreground_screenshot(client_w_phys, client_h_phys)
 
             # 如果指定的截图方法失败，执行降级流程
             if img_np is None:
                 self.logger.debug(f"指定截图方法 {self._screenshot_mode} 失败，执行降级流程")
                 # 尝试所有其他可用方法，按优先级排序
-                img_np = try_temp_foreground_screenshot()
+                img_np = self._try_temp_foreground_screenshot(client_w_phys, client_h_phys)
                 if img_np is None:
-                    img_np = try_bitblt()
+                    img_np = self._try_bitblt(client_w_phys, client_h_phys)
                 if img_np is None:
-                    img_np = try_dxcam()
+                    img_np = self._try_dxcam(client_w_phys, client_h_phys)
                 if img_np is None:
-                    img_np = try_print_window()
+                    img_np = self._try_print_window(client_w_phys, client_h_phys)
 
         # 所有策略均失败
         if img_np is None:
@@ -1345,14 +1694,17 @@ class WindowsDevice(BaseDevice):
         coord_type: CoordType = CoordType.LOGICAL,
         roi: Optional[Tuple[int, int, int, int]] = None,
     ) -> bool:
-        # 记录原始前台窗口句柄
-        original_foreground_hwnd = self._get_original_foreground()
-        self.logger.debug(f"记录原前台窗口句柄: {original_foreground_hwnd}")
+        # 记录原始前台窗口，仅在background模式下恢复
+        original_foreground_hwnd = None
+        if self._click_mode == "background":
+            original_foreground_hwnd = self._get_original_foreground()
 
+        # 激活目标窗口
         activate_success = self._ensure_window_foreground(max_attempts=3)
         if not activate_success:
             self._record_error("click", "无法激活窗口至前台（所有尝试失败）")
             self.logger.error(self.last_error)
+            # background模式下恢复原始前台窗口
             if original_foreground_hwnd and win32gui.IsWindow(original_foreground_hwnd):
                 self._restore_foreground(original_foreground_hwnd)
             return False
@@ -1372,7 +1724,6 @@ class WindowsDevice(BaseDevice):
                 self._record_error("click", "截图失败，无法执行模板匹配")
                 self.logger.error(self.last_error)
                 self._restore_window_original_topmost()
-                self._restore_foreground(original_foreground_hwnd)
                 return False
 
             processed_roi = roi
@@ -1400,7 +1751,6 @@ class WindowsDevice(BaseDevice):
                 self._record_error("click", f"所有模板匹配失败: {templates}")
                 self.logger.error(self.last_error)
                 self._restore_window_original_topmost()
-                self._restore_foreground(original_foreground_hwnd)
                 return False
 
             match_rect = self.coord_transformer._convert_numpy_to_tuple(match_result)
@@ -1409,7 +1759,6 @@ class WindowsDevice(BaseDevice):
                 self._record_error("click", f"模板匹配结果无效: {err_msg} | 模板: {matched_template}")
                 self.logger.error(self.last_error)
                 self._restore_window_original_topmost()
-                self._restore_foreground(original_foreground_hwnd)
                 return False
             target_pos = self.coord_transformer.get_rect_center(match_rect)
             self.logger.debug(
@@ -1422,14 +1771,12 @@ class WindowsDevice(BaseDevice):
                 self._record_error("click", f"点击坐标格式无效（需2元组）: {pos}")
                 self.logger.error(self.last_error)
                 self._restore_window_original_topmost()
-                self._restore_foreground(original_foreground_hwnd)
                 return False
             x, y = target_pos
             if x < 0 or y < 0:
                 self._record_error("click", f"点击坐标无效（非负）: ({x},{y})")
                 self.logger.error(self.last_error)
                 self._restore_window_original_topmost()
-                self._restore_foreground(original_foreground_hwnd)
                 return False
 
         x_target, y_target = target_pos
@@ -1489,19 +1836,21 @@ class WindowsDevice(BaseDevice):
             # 模式适配：恢复置顶状态（仅background点击模式生效）
             self._restore_window_original_topmost()
 
-            if (
-                original_foreground_hwnd
-                and win32gui.IsWindow(original_foreground_hwnd)
-                and win32gui.GetForegroundWindow() == self.hwnd
-            ):
-                self._restore_foreground(original_foreground_hwnd)
-
         if click_success:
             click_type = "右键" if right_click else "左键"
             self.logger.info(
                 f"点击成功 | 类型: {click_type} | 次数: {click_time} | 按住时长: {duration}s | "
                 f"屏幕坐标: ({screen_x},{screen_y}) | 模式: {'全屏' if ctx.is_fullscreen else '窗口'} | 来源: {click_source}"
             )
+
+            # 仅在background模式下且操作成功时恢复原始前台窗口
+            if (
+                self._click_mode == "background"
+                and original_foreground_hwnd
+                and win32gui.IsWindow(original_foreground_hwnd)
+            ):
+                self._restore_foreground(original_foreground_hwnd)
+            # foreground模式下保持目标窗口在前台
         return click_success
 
     @BaseDevice.require_operable
@@ -1515,18 +1864,22 @@ class WindowsDevice(BaseDevice):
         steps: int = 10,
         coord_type: CoordType = CoordType.LOGICAL,
     ) -> bool:
-        original_foreground_hwnd = self._get_original_foreground()
-        self.logger.debug(f"记录原前台窗口句柄: {original_foreground_hwnd}")
+        # 记录原始前台窗口，仅在background模式下恢复
+        original_foreground_hwnd = None
+        if self._click_mode == "background":
+            original_foreground_hwnd = self._get_original_foreground()
 
+        # 激活目标窗口
         activate_success = self._ensure_window_foreground(max_attempts=3)
         if not activate_success:
             self._record_error("swipe", "无法激活窗口至前台（所有尝试失败）")
             self.logger.error(self.last_error)
+            # background模式下恢复原始前台窗口
             if original_foreground_hwnd and win32gui.IsWindow(original_foreground_hwnd):
                 self._restore_foreground(original_foreground_hwnd)
             return False
 
-        # 模式适配：临时置顶
+        # 模式适配：临时置顶（background点击模式生效，foreground点击模式跳过）
         temp_topmost_success = self._set_window_temp_topmost()
 
         time.sleep(0.1)
@@ -1568,33 +1921,34 @@ class WindowsDevice(BaseDevice):
             # 模式适配：恢复置顶状态
             self._restore_window_original_topmost()
 
-            if (
-                original_foreground_hwnd
-                and win32gui.IsWindow(original_foreground_hwnd)
-                and win32gui.GetForegroundWindow() == self.hwnd
-            ):
-                self._restore_foreground(original_foreground_hwnd)
-
         if swipe_success:
             self.logger.info(f"滑动成功 | 逻辑坐标: {start_pos} → {end_pos} | 时长: {duration}s | 步数: {steps}")
+
+            # 仅在background模式下且操作成功时恢复原始前台窗口
+            if (
+                self._click_mode == "background"
+                and original_foreground_hwnd
+                and win32gui.IsWindow(original_foreground_hwnd)
+            ):
+                self._restore_foreground(original_foreground_hwnd)
+            # foreground模式下保持目标窗口在前台
         return swipe_success
 
     @BaseDevice.require_operable
     def key_press(self, key: str, duration: float = 0.1) -> bool:
-        original_foreground_hwnd = self._get_original_foreground()
+        # 记录原始前台窗口，仅在background模式下恢复
+        original_foreground_hwnd = None
+        if self._click_mode == "background":
+            original_foreground_hwnd = self._get_original_foreground()
 
+        # 激活目标窗口
         activate_success = self._ensure_window_foreground(max_attempts=3)
         if not activate_success:
             self._record_error("key_press", "无法激活窗口至前台")
             self.logger.error(self.last_error)
+            # background模式下恢复原始前台窗口
             if original_foreground_hwnd and win32gui.IsWindow(original_foreground_hwnd):
-                try:
-                    win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-                    win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-                    time.sleep(0.1)
-                    win32gui.SetForegroundWindow(original_foreground_hwnd)
-                except Exception as e:
-                    self.logger.warning(f"恢复原前台窗口失败: {e}")
+                self._restore_foreground(original_foreground_hwnd)
             return False
 
         # 模式适配：临时置顶
@@ -1618,22 +1972,18 @@ class WindowsDevice(BaseDevice):
         finally:
             # 模式适配：恢复置顶状态（仅background点击模式生效）
             self._restore_window_original_topmost()
-            if (
-                original_foreground_hwnd
-                and win32gui.IsWindow(original_foreground_hwnd)
-                and win32gui.GetForegroundWindow() == self.hwnd
-            ):
-                try:
-                    win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-                    win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-                    time.sleep(0.1)
-                    win32gui.SetForegroundWindow(original_foreground_hwnd)
-                    self.logger.debug(f"按键完成，恢复原前台窗口（句柄: {original_foreground_hwnd}）")
-                except Exception as e:
-                    self.logger.warning(f"恢复原前台窗口失败: {e}")
 
         if press_success:
             self.logger.info(f"按键成功 | 按键: {key} | 按住时长: {duration}s")
+
+            # 仅在background模式下且操作成功时恢复原始前台窗口
+            if (
+                self._click_mode == "background"
+                and original_foreground_hwnd
+                and win32gui.IsWindow(original_foreground_hwnd)
+            ):
+                self._restore_foreground(original_foreground_hwnd)
+            # foreground模式下保持目标窗口在前台
         return press_success
 
     @BaseDevice.require_operable
@@ -1651,23 +2001,19 @@ class WindowsDevice(BaseDevice):
         Notes:
             长文本粘贴依赖pyperclip库（pip install pyperclip）
         """
-        # 记录原始前台窗口句柄
-        original_foreground_hwnd = self._get_original_foreground()
+        # 记录原始前台窗口，仅在background模式下恢复
+        original_foreground_hwnd = None
+        if self._click_mode == "background":
+            original_foreground_hwnd = self._get_original_foreground()
 
-        # 尝试激活窗口
+        # 激活目标窗口
         activate_success = self._ensure_window_foreground(max_attempts=3)
         if not activate_success:
             self._record_error("text_input", "无法激活窗口至前台")
             self.logger.error(self.last_error)
-            # 恢复原前台窗口
+            # background模式下恢复原始前台窗口
             if original_foreground_hwnd and win32gui.IsWindow(original_foreground_hwnd):
-                try:
-                    win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-                    win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-                    time.sleep(0.1)
-                    win32gui.SetForegroundWindow(original_foreground_hwnd)
-                except Exception as e:
-                    self.logger.warning(f"恢复原前台窗口失败: {e}")
+                self._restore_foreground(original_foreground_hwnd)
             return False
 
         # 模式适配：临时置顶（background点击模式生效，foreground点击模式跳过）
@@ -1724,20 +2070,16 @@ class WindowsDevice(BaseDevice):
         finally:
             # 模式适配：恢复置顶状态（仅background点击模式生效）
             self._restore_window_original_topmost()
-            if (
-                original_foreground_hwnd
-                and win32gui.IsWindow(original_foreground_hwnd)
-                and win32gui.GetForegroundWindow() == self.hwnd
-            ):
-                try:
-                    win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-                    win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-                    time.sleep(0.1)
-                    win32gui.SetForegroundWindow(original_foreground_hwnd)
-                    self.logger.debug(f"文本输入完成，恢复原前台窗口（句柄: {original_foreground_hwnd}）")
-                except Exception as e:
-                    self.logger.warning(f"恢复原前台窗口失败: {e}")
 
+        if input_success:
+            # 仅在background模式下且操作成功时恢复原始前台窗口
+            if (
+                self._click_mode == "background"
+                and original_foreground_hwnd
+                and win32gui.IsWindow(original_foreground_hwnd)
+            ):
+                self._restore_foreground(original_foreground_hwnd)
+            # foreground模式下保持目标窗口在前台
         return input_success
 
     def exists(
