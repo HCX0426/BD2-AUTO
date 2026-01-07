@@ -14,7 +14,18 @@ def with_retry_and_check(func: Callable) -> Callable:
     def wrapper(self, *args, **kwargs) -> AutoResult:
         # 提取通用参数（兼容原有调用）
         config: AutoConfig = self.config
-        retry = kwargs.get("retry", config.DEFAULT_OPERATION_RETRY)
+        
+        # 获取重试次数：优先从kwargs获取，否则从settings_manager获取，最后使用默认值
+        retry = kwargs.get("retry")
+        
+        # 检查是否有settings_manager，并且支持获取重试次数
+        if retry is None and hasattr(self, "auto") and hasattr(self.auto, "settings_manager"):
+            retry = self.auto.settings_manager.get_setting("retry_count", config.DEFAULT_OPERATION_RETRY)
+        
+        # 使用默认值作为最后的回退
+        if retry is None:
+            retry = config.DEFAULT_OPERATION_RETRY
+        
         delay = kwargs.get("delay", config.CLICK_DELAY)
         device_uri = kwargs.get("device_uri")
         verify = kwargs.get("verify")

@@ -65,6 +65,10 @@ class Auto:
 
         # 配置初始化
         self.config = config or AutoConfig()
+        
+        # 保存settings_manager引用，用于装饰器中获取重试次数
+        self.settings_manager = settings_manager
+        
         original_base_res = original_base_res or self.config.BASE_RESOLUTION
         ocr_engine = ocr_engine or self.config.DEFAULT_OCR_ENGINE
         self.test_mode: bool = config_manager.config.get("debug", False)

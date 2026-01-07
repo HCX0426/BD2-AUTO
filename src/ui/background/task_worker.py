@@ -88,6 +88,15 @@ class TaskWorker(QThread):
                 task_func = task_info.get("function")
                 if task_func:
                     try:
+                        # 从任务配置中获取重试次数，如果有则更新全局配置
+                        task_retry = task_params.get("retry")
+                        original_retry = self.auto_instance.config.DEFAULT_OPERATION_RETRY
+                        if task_retry is not None:
+                            self.auto_instance.config.DEFAULT_OPERATION_RETRY = task_retry
+                            log_msg = f"任务 {task_info['name']} 重试次数已设置为: {task_retry}"
+                            self.log_updated.emit(log_msg)
+                            signal_bus.emit_log(log_msg)
+
                         # 只传递函数定义中声明的参数（auto和有效参数）
                         sig = inspect.signature(task_func)
                         valid_params = {k: v for k, v in task_params.items() if k in sig.parameters}
@@ -97,6 +106,10 @@ class TaskWorker(QThread):
                             valid_params["check_stop"] = self.check_stop
 
                         task_func(self.auto_instance, **valid_params)
+                        
+                        # 恢复原始重试次数
+                        if task_retry is not None:
+                            self.auto_instance.config.DEFAULT_OPERATION_RETRY = original_retry
 
                         # 任务函数执行完成后立即检查是否需要停止
                         if self.check_stop():
