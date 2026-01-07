@@ -73,9 +73,7 @@ class WindowsDevice(BaseDevice):
     WINDOW_ACTIVATE_DELAY = 0.1
     ACTIVATE_COOLDOWN = 5.0
     FOREGROUND_CHECK_INTERVAL = 5.0
-    # 新增：临时置顶截图延迟（视觉无感知）
     TEMP_FOREGROUND_DELAY = 0.1
-    # 新增：临时置顶生效延迟（确保窗口稳定置顶）
     TEMP_TOPMOST_DELAY = 0.05
     # 置顶检查间隔（秒）
     TOPMOST_CHECK_INTERVAL = 3.0
@@ -167,7 +165,6 @@ class WindowsDevice(BaseDevice):
         每3秒检查一次，直到stop_event触发或窗口断开。
         """
         self.logger.info(f"foreground模式状态检查线程启动 | 检查间隔: {self.TOPMOST_CHECK_INTERVAL}秒")
-        # 新增：定义停止事件
         self._topmost_check_stop = Event()
 
         while not self.stop_event.is_set() and not self._topmost_check_stop.is_set():

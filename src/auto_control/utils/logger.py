@@ -171,7 +171,6 @@ class Logger:
         # 基础配置参数（关键修复：base_log_dir 用默认配置兜底）
         self.base_log_dir = base_log_dir or self.DEFAULT_LOG_CONFIG["BASE_LOG_DIR"]
         self.log_file_prefix = log_file_prefix or self.DEFAULT_LOG_CONFIG["LOG_FILE_PREFIX"]
-        # 修正：传入默认配置的字符串级别，确保 _get_log_level 接收正确类型
         self.file_log_level = self._get_log_level(
             file_log_level if file_log_level is not None else self.DEFAULT_LOG_CONFIG["FILE_LOG_LEVEL"]
         )
@@ -274,9 +273,8 @@ class Logger:
                 # 以写模式打开文件并立即关闭，快速清空内容
                 with open(self.log_file_path, "w", encoding="utf-8") as f:
                     f.write("")
-                logging.warning(f"[测试模式] 已清空日志文件: {self.log_file_path}")
         except Exception as e:
-            logging.warning(f"[测试模式] 清空日志文件失败: {self.log_file_path}, 错误: {str(e)}")
+            pass
 
     def _init_logger_core(self) -> logging.Logger:
         """
@@ -361,11 +359,11 @@ class Logger:
         """
         return Logger(
             name=task_name,
-            base_log_dir=self.base_log_dir,  # 关键修复：继承父日志器的基础日志目录
+            base_log_dir=self.base_log_dir,
             console_log_level=logging.INFO,
             async_logging=self.async_logging,
             is_task_logger=True,
-            test_mode=self.test_mode,  # 继承测试模式
+            test_mode=self.test_mode,
         )
 
     def debug(self, message: str) -> None:

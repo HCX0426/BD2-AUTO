@@ -2,7 +2,11 @@ import inspect
 import os
 import sys
 
+from src.auto_control.utils.logger import Logger
 from .path_manager import path_manager
+
+# 初始化日志器
+logger = Logger(name="TaskLoader")
 
 
 def load_task_modules():
@@ -10,10 +14,9 @@ def load_task_modules():
     task_mapping = {}
     task_dir = path_manager.get("task_path")
 
-    # 新增：检查任务目录是否存在
     if not os.path.exists(task_dir):
-        print(f"任务目录不存在: {task_dir}")
-        return task_mapping  # 返回空字典而非报错
+        logger.error(f"任务目录不存在: {task_dir}")
+        return task_mapping
 
     # 将任务目录添加到sys.path，让__import__能找到模块
     if task_dir not in sys.path:
@@ -50,5 +53,5 @@ def load_task_modules():
                         "parameters": params,
                     }
             except Exception as e:
-                print(f"加载任务模块 {module_name} 失败: {str(e)}")  # 调试用
+                logger.error(f"加载任务模块 {module_name} 失败: {str(e)}")  # 记录加载失败的模块
     return task_mapping

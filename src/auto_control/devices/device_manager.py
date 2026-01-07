@@ -114,7 +114,6 @@ class DeviceManager:
         Returns:
             重连成功返回True，失败返回False
         """
-        # 新增：前置空值校验
         if not device_uri or str(device_uri).strip() == "":
             self.logger.error("设备重连失败：device_uri 不能为空")
             return False
@@ -123,14 +122,14 @@ class DeviceManager:
             self.logger.debug(f"自动重连已禁用，跳过设备{device_uri}的重连")
             return False
 
-        lower_uri = device_uri.strip().lower()  # 新增：标准化URI
+        lower_uri = device_uri.strip().lower()
         device = self.devices.get(lower_uri)
 
         if not device:
-            self.logger.debug(f"设备{device_uri}不存在（标准化URI: {lower_uri}），无法重连")
+            self.logger.debug(f"设备{device_uri}不存在，无法重连")
             return False
 
-        self.logger.debug(f"开始尝试重连设备：{device_uri}（标准化URI: {lower_uri}）")
+        self.logger.debug(f"开始尝试重连设备：{device_uri}")
 
         # 尝试多次重连（原有逻辑不变）
         for attempt in range(self.max_reconnect_attempts):
@@ -177,7 +176,7 @@ class DeviceManager:
             self.logger.error("获取设备失败：device_uri 不能为空（None/空字符串/全空白均不允许）")
             return None
 
-        lower_uri = device_uri.strip().lower()  # 新增：去除空白字符后再转小写
+        lower_uri = device_uri.strip().lower()
         device = self.devices.get(lower_uri)
 
         if device:
@@ -192,9 +191,7 @@ class DeviceManager:
             else:
                 self.logger.debug(f"获取设备成功: {device_uri}（状态: {device.get_state().name}）")
         else:
-            self.logger.debug(
-                f"未找到设备: {device_uri}（URI已标准化为: {lower_uri}）"
-            )  # 新增：打印标准化URI，方便排查
+            self.logger.debug(f"未找到设备: {device_uri}")
         return device
 
     def get_active_device(self) -> Optional[BaseDevice]:
@@ -204,13 +201,12 @@ class DeviceManager:
         Returns:
             活动设备实例（无/无效返回None）
         """
-        if not self.active_device or str(self.active_device).strip() == "":  # 新增：校验active_device是否为有效字符串
+        if not self.active_device or str(self.active_device).strip() == "":
             self.logger.debug("无活动设备（active_device为空/无效）")
             return None
 
-        # 新增：提前校验active_device格式，避免传递空/无效URI给get_device
         active_device_str = str(self.active_device).strip()
-        device = self.get_device(active_device_str)  # 新增：去除空白字符
+        device = self.get_device(active_device_str)
         if not device:
             self.logger.warning(f"活动设备{self.active_device}不存在/无效，已重置active_device")
             self.active_device = None

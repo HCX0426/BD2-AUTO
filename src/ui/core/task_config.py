@@ -1,7 +1,11 @@
 import json
 import os
 
+from src.auto_control.utils.logger import Logger
 from src.core.path_manager import path_manager
+
+# 初始化日志器
+logger = Logger(name="TaskConfigManager")
 
 
 class TaskConfigManager:
@@ -17,7 +21,7 @@ class TaskConfigManager:
                 with open(self.config_file, "r", encoding="utf-8") as f:
                     return json.load(f)
         except Exception as e:
-            print(f"加载配置文件失败: {str(e)}")
+            logger.error(f"加载配置文件失败: {str(e)}")
         return {"task_order": [], "task_states": {}, "task_configs": {}}
 
     def save_configs(self):
@@ -26,7 +30,7 @@ class TaskConfigManager:
                 json.dump(self.configs, f, ensure_ascii=False, indent=4)
             return True
         except Exception as e:
-            print(f"保存配置文件失败: {str(e)}")
+            logger.error(f"保存配置文件失败: {str(e)}")
             return False
 
     def get_task_config(self, task_id):

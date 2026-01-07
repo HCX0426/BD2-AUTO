@@ -471,7 +471,9 @@ class MainInterface(QWidget):
                 f.write(f"[{full_timestamp}] {message}\n")
         except Exception as e:
             # 记录日志保存失败的信息，但不影响程序运行
-            print(f"保存GUI日志失败: {str(e)}")
+            from src.auto_control.utils.logger import Logger
+            logger = Logger(name="MainInterface")
+            logger.error(f"保存GUI日志失败: {str(e)}")
 
     def update_progress(self, value):
         """

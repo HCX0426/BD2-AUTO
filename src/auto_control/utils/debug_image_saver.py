@@ -44,8 +44,8 @@ class DebugImageSaver:
         os.makedirs(self.debug_dir, exist_ok=True)
 
         # 测试模式：清空历史调试图
-        if self.test_mode:
-            self._clear_debug_dir()
+        # 清理逻辑已移至统一资源管理器，此处不再清理
+        pass
 
         # ========== 核心样式修改 ==========
         self.style = {

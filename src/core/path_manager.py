@@ -5,10 +5,9 @@ import sys
 
 class PathManager:
     def __init__(self):
-        self.env = self._get_env()  # 自动判断 dev/prod
-        self._init_base_paths()  # 初始化基础路径（static_base/dynamic_base）
-        self._init_all_paths()  # 初始化所有具体路径（包括 task_path）
-        self._print_path_info()  # 最后打印路径信息（确保所有属性已定义）
+        self.env = self._get_env()
+        self._init_base_paths()
+        self._init_all_paths()
 
     def _get_env(self) -> str:
         """自动判断环境：打包后=prod，开发环境=dev"""

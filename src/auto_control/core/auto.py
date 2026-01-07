@@ -19,6 +19,8 @@ from src.core import config_manager
 from src.core.path_manager import PathManager
 from src.core.path_manager import path_manager as global_path_manager
 
+from ..utils.resource_manager import ResourceManager
+
 # 内部模块导入
 from .auto_base import AutoBaseError, AutoConfig, AutoResult
 from .auto_chain import ChainManager
@@ -65,10 +67,10 @@ class Auto:
 
         # 配置初始化
         self.config = config or AutoConfig()
-        
+
         # 保存settings_manager引用，用于装饰器中获取重试次数
         self.settings_manager = settings_manager
-        
+
         original_base_res = original_base_res or self.config.BASE_RESOLUTION
         ocr_engine = ocr_engine or self.config.DEFAULT_OCR_ENGINE
         self.test_mode: bool = config_manager.config.get("debug", False)
@@ -167,6 +169,14 @@ class Auto:
         self.device_handler = DeviceHandler(self, self.config)
         self.operation_handler = OperationHandler(self, self.config)
         self.verify_handler = VerifyHandler(self, self.config)
+
+        # 初始化资源管理器
+        self.resource_manager = ResourceManager(
+            logger=self.logger, test_mode=self.test_mode, path_manager=global_path_manager
+        )
+
+        # 系统启动时的资源清理
+        self.resource_manager.cleanup_on_start()
 
         # 计算总初始化时间
         total_init_time = round(time.time() - total_init_start, 3)
@@ -272,6 +282,9 @@ class Auto:
 
                 # 释放设备资源
                 self.device_manager.disconnect_all()
+
+                # 使用统一资源管理器清理资源
+                self.resource_manager.cleanup_on_stop()
 
                 # 清理图像处理器缓存
                 self.image_processor.clear_screenshot_cache()

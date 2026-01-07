@@ -342,7 +342,6 @@ class OCRProcessor:
                 )
         elif self.engine_type == "paddleocr":
             # 直接使用PaddleOCRWrapper的detect_text方法
-            # 注意：这里已经在detect_text方法中处理了语言切换和异常捕获
             raw_results = self.engine.detect_text(cropped_image, target_lang)
 
             # 检查是否需要停止

@@ -1,7 +1,11 @@
 import json
 import os
 
+from src.auto_control.utils.logger import Logger
 from src.core.path_manager import path_manager
+
+# 初始化日志器
+logger = Logger(name="AppSettingsManager")
 
 
 class AppSettingsManager:
@@ -26,7 +30,7 @@ class AppSettingsManager:
                 with open(self.settings_file, "r", encoding="utf-8") as f:
                     return {**default_settings, **json.load(f)}
         except Exception as e:
-            print(f"加载应用设置失败: {str(e)}")
+            logger.error(f"加载应用设置失败: {str(e)}")
         return default_settings
 
     def save_settings(self):
@@ -35,7 +39,7 @@ class AppSettingsManager:
                 json.dump(self.settings, f, ensure_ascii=False, indent=4)
             return True
         except Exception as e:
-            print(f"保存应用设置失败: {str(e)}")
+            logger.error(f"保存应用设置失败: {str(e)}")
             return False
 
     def get_setting(self, key, default=None):

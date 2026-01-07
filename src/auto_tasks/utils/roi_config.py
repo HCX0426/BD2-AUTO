@@ -8,7 +8,11 @@ import json
 import os
 from typing import Any, Dict, Optional, Tuple
 
+from src.auto_control.utils.logger import Logger
 from src.core.path_manager import path_manager
+
+# 初始化日志器
+logger = Logger(name="ROIConfig")
 
 
 class ROIConfig:
@@ -76,17 +80,17 @@ class ROIConfig:
         roi_config_path = path_manager.get("rois_config")
 
         if not os.path.exists(roi_config_path):
-            print(f"[ROIConfig] 警告：ROI配置文件不存在 {roi_config_path}，使用默认配置")
+            logger.warning(f"ROI配置文件不存在 {roi_config_path}，使用默认配置")
             return {"public": {}, "tasks": {}}
 
         try:
             with open(roi_config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError:
-            print(f"[ROIConfig] 错误：ROI配置文件 {roi_config_path} 格式错误，使用默认配置")
+            logger.error(f"ROI配置文件 {roi_config_path} 格式错误，使用默认配置")
             return {"public": {}, "tasks": {}}
         except Exception as e:
-            print(f"[ROIConfig] 错误：加载ROI配置文件失败 {e}，使用默认配置")
+            logger.error(f"加载ROI配置文件失败 {e}，使用默认配置")
             return {"public": {}, "tasks": {}}
 
     def get_roi(

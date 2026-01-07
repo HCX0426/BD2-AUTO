@@ -1,7 +1,11 @@
 import json
 import os
 
+from src.auto_control.utils.logger import Logger
 from .path_manager import path_manager
+
+# 初始化日志器
+logger = Logger(name="ConfigLoader", is_system_logger=True)
 
 
 class ConfigLoader:
@@ -25,15 +29,15 @@ class ConfigLoader:
             if "app_settings" in config_path:
                 with open(config_path, "w", encoding="utf-8") as f:
                     json.dump({}, f, indent=2)
-                print(f"[ConfigLoader] 已创建UI用户配置文件: {config_path}")
+                logger.info(f"已创建UI用户配置文件: {config_path}")
             else:
-                print(f"[ConfigLoader] 警告：配置文件不存在 {config_path}，使用默认值")
+                logger.warning(f"配置文件不存在 {config_path}，使用默认值")
             return default
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError:
-            print(f"[ConfigLoader] 错误：配置文件 {config_path} 格式错误，使用默认值")
+            logger.error(f"配置文件 {config_path} 格式错误，使用默认值")
             return default
 
     def _merge_configs(self, base: dict, override: dict) -> dict:
@@ -70,10 +74,10 @@ class ConfigLoader:
             # 保存后更新内存中的配置
             self.ui_app_settings = ui_config
             self.final_settings = self._merge_configs(self.backend_settings, self.ui_app_settings)
-            print(f"[ConfigLoader] 已保存UI配置到: {path_manager.get('ui_app_settings')}")
+            logger.info(f"已保存UI配置到: {path_manager.get('ui_app_settings')}")
             return True
         except Exception as e:
-            print(f"[ConfigLoader] 保存UI配置失败: {str(e)}")
+            logger.error(f"保存UI配置失败: {str(e)}")
             return False
 
     def _get_nested_value(self, data: dict, key_path: str, default):

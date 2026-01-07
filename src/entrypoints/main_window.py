@@ -9,7 +9,6 @@ project_root = os.path.abspath(os.path.join(current_file, "..", "..", ".."))
 # 添加项目根目录到sys.path
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-    print(f"项目根目录已添加到sys.path: {project_root}")
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QCloseEvent
@@ -80,7 +79,6 @@ class MainWindow(QMainWindow):
 
         # 连接信号
         self.connect_signals()
-        # 注意：自动初始化线程不在__init__中启动，而是在QApplication创建完成后启动
 
         # 初始化时设置开始按钮为"初始化中..."
         self.main_interface.enable_task_controls(start_enabled=True, stop_enabled=False, start_text="初始化中...")
@@ -618,39 +616,26 @@ def main():
 
     # 3. 启动GUI，Auto实例将在后台线程中初始化
     try:
-        print("[DEBUG] 创建QApplication实例...")
         app = QApplication(sys.argv)
         app.setApplicationName("BD2-AUTO")
-        print("[DEBUG] QApplication实例创建成功")
 
         # 初始化信号总线（必须在QApplication创建后）
-        print("[DEBUG] 初始化信号总线...")
         from src.ui.core.signals import get_signal_bus_instance, init_signal_bus
 
         bus_instance = init_signal_bus()
 
         # 确保全局signal_bus变量已经初始化
         global_signal_bus = get_signal_bus_instance()
-        print(f"[DEBUG] 信号总线初始化结果: {bus_instance}")
-        print(f"[DEBUG] 全局signal_bus变量: {global_signal_bus}")
-        print("[DEBUG] 信号总线初始化完成")
 
-        print("[DEBUG] 创建MainWindow实例...")
+        # 创建并显示主窗口
         window = MainWindow(settings_manager=settings_manager, config_manager=config_manager, task_mapping=task_mapping)
-        print("[DEBUG] MainWindow实例创建成功")
-
-        print("[DEBUG] 调用window.show()...")
         window.show()
-        print("[DEBUG] window.show()调用成功")
 
         # 在QApplication完全初始化后启动自动初始化线程
-        print("[DEBUG] 启动自动初始化线程...")
         window.start_auto_init_thread()
-        print("[DEBUG] 自动初始化线程启动成功")
 
-        print("[DEBUG] 启动事件循环...")
+        # 启动事件循环
         result = app.exec()
-        print(f"[DEBUG] 事件循环退出，退出码: {result}")
         sys.exit(result)
     except Exception as e:
         print(f"[ERROR] GUI启动过程中发生异常: {type(e).__name__}: {str(e)}")
