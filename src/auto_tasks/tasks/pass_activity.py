@@ -44,9 +44,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                         (1700, 480),
                         click_time=2,
                         coord_type="BASE",
-                        verify={"type": "text", "target": "挑战战斗", "timeout": 5},
-                        retry=2,
-                        delay=1
+                        verify={"type": "text", "target": "挑战战斗"},
                     ):
                         logger.info("进入活动关卡")
                     auto.sleep(2)
@@ -58,9 +56,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                 if auto.text_click(
                     "挑战战斗",
                     click_time=3,
-                    verify={"type": "exist", "target": f"pass_activity/{level_name}", "timeout": 5},
-                    retry=2,
-                    delay=1
+                    verify={"type": "exist", "target": f"pass_activity/{level_name}"},
                 ):
                     logger.info("进入挑战战斗界面")
                     state = "challenge_selected"
@@ -79,8 +75,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
 
                 if auto.template_click(
                     f"pass_activity/{level_name}",
-                    verify={"type": "text", "target": "快速战斗", "timeout": 5},
-                    retry=2
+                    verify={"type": "text", "target": "快速战斗"},
                 ):
                     logger.info(f"选择{level_name}")
                     auto.sleep(1)
@@ -88,8 +83,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                     if auto.text_click(
                         "快速战斗",
                         coord_type="PHYSICAL",
-                        verify={"type": "text", "target": "MAX", "timeout": 5},
-                        retry=1
+                        verify={"type": "text", "target": "MAX"},
                     ):
                         logger.info("进入快速战斗界面")
                         state = "quick_battle"
@@ -108,8 +102,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                     if auto.template_click(
                         "pass_activity/战斗",
                         click_time=2,
-                        verify={"type": "exist", "target": "public/返回键1", "timeout": 10},
-                        retry=1
+                        verify={"type": "exist", "target": "public/返回键1"},
                     ):
                         logger.info("开始战斗")
                         auto.sleep(3)
@@ -119,8 +112,7 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                     if auto.text_click(
                         "取消", 
                         click_time=2,
-                        verify={"type": "exist", "target": "pass_activity/挑战战斗", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "pass_activity/挑战战斗"},
                     ):
                         logger.info("取消补充AP")
                         state = "battle_confirmed"
@@ -142,15 +134,13 @@ def pass_activity(auto: Auto, timeout: int = 600, level_name: str = "第15关") 
                 if auto.text_click(
                     "魔物追踪者",
                     click_time=2,
-                    verify={"type": "text", "target": "快速战斗", "timeout": 5},
-                    retry=1
+                    verify={"type": "text", "target": "快速战斗"},
                 ):
                     logger.info("进入魔物追踪者界面")
                     auto.sleep(2)
                 if auto.text_click(
                     "快速战斗",
-                    verify={"type": "text", "target": "确认", "timeout": 5},
-                    retry=1
+                    verify={"type": "text", "target": "确认"},
                 ):
                     logger.info("点击快速战斗")
                     auto.sleep(1)

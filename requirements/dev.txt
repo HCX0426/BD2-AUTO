@@ -9,3 +9,8 @@ PyDirectInput==1.0.4
 easyocr==1.7.2
 PyQt6==6.10.1
 opencv-contrib-python==4.12.0.88
+scikit-image==0.25.2
+pylint==4.0.4
+astroid==4.0.2
+isort==7.0.0
+dxcam==0.0.5

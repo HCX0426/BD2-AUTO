@@ -40,12 +40,10 @@ def login(auto: Auto, timeout: int = 300) -> bool:
             if state == "init":
                 logger.info("检查是否有确认按钮")
                 auto.text_click(
-                    "确认", 
-                    roi=roi_config.get_roi("login_confirm_button", "login"),
-                    verify={"type": "exist", "target": "login/开始游戏", "timeout": 5, "roi": roi_config.get_roi("login_start_button", "login")},
-                    retry=1,
-                    delay=1
-                )
+                "确认", 
+                roi=roi_config.get_roi("login_confirm_button", "login"),
+                verify={"type": "exist", "target": "login/开始游戏", "roi": roi_config.get_roi("login_start_button", "login")},
+            )
                 auto.sleep(2)
                 state = "confirm_checked"
                 continue
@@ -58,11 +56,8 @@ def login(auto: Auto, timeout: int = 300) -> bool:
                     roi=roi_config.get_roi("login_start_button", "login"),
                     verify={
                         "type": "exist",
-                        "target": "main_ui/主界面",
-                        "timeout": 20
+                        "target": "main_ui/主界面"
                     },
-                    retry=2,
-                    delay=1
                 ):
                     auto.sleep(3)
                     state = "game_started"

@@ -2,6 +2,7 @@
 
 包含邮件的检查和奖励领取功能
 """
+
 import time
 
 from src.auto_control.core.auto import Auto
@@ -52,10 +53,8 @@ def get_email(auto: Auto, timeout: int = 300) -> bool:
                     verify={
                         "type": "text",
                         "target": "普通邮箱",
-                        "timeout": 5,
                         "roi": roi_config.get_roi("regular_email", "get_email"),
                     },
-                    retry=2,
                 ):
                     state = "email_entered"
                 continue
@@ -79,10 +78,8 @@ def get_email(auto: Auto, timeout: int = 300) -> bool:
                     verify={
                         "type": "exist",
                         "target": "get_email/空邮箱标识",
-                        "timeout": 10,
                         "roi": roi_config.get_roi("empty_email", "get_email"),
                     },
-                    retry=2,
                 )
                 state = "emails_received"
                 continue

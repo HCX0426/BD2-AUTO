@@ -41,7 +41,7 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7) -> bool:
             if first:
                 if back_to_main(auto, remaining_timeout):
                     if auto.text_click(
-                        "抽抽乐", verify={"type": "text", "target": "免费1次", "timeout": 5}, retry=2, delay=1
+                        "抽抽乐", verify={"type": "text", "target": "免费1次"}
                     ):
                         logger.info("进入抽抽乐")
                     auto.sleep(3)
@@ -49,7 +49,7 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7) -> bool:
 
             if not first:
                 # 尝试点击免费1次
-                if auto.text_click("免费1次", verify={"type": "exist", "target": "public/跳过", "timeout": 5}, retry=1):
+                if auto.text_click("免费1次", verify={"type": "exist", "target": "public/跳过"}):
                     logger.info("检测到免费1次")
                     auto.sleep(2)
                 else:
@@ -71,14 +71,14 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7) -> bool:
                         logger.info("点击抽抽乐")
 
                 if auto.text_click(
-                    "购买", click_time=2, verify={"type": "exist", "target": "public/跳过", "timeout": 5}, retry=1
+                    "购买", click_time=2, verify={"type": "exist", "target": "public/跳过"}
                 ):
                     logger.info("点击购买")
                     auto.sleep(2)
 
                 # 跳过动画
                 if auto.template_click(
-                    "public/跳过", verify={"type": "exist", "target": "lucky_draw/抽完标识", "timeout": 5}, retry=1
+                    "public/跳过", verify={"type": "exist", "target": "lucky_draw/抽完标识"}
                 ):
                     logger.info("点击跳过")
                     auto.sleep(1)

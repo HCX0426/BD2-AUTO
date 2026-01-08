@@ -46,11 +46,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                         verify={
                             "type": "text",
                             "target": "进入竞技场",
-                            "timeout": 5,
                             "roi": roi_config.get_roi("enter_arena", "get_pvp"),
                         },
-                        retry=2,
-                        delay=1,
                     ):
                         logger.info("进入PVP地图, next: arena_entered")
                         auto.sleep(2)
@@ -78,11 +75,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     verify={
                         "type": "text",
                         "target": "自动战斗",
-                        "timeout": 5,
                         "roi": roi_config.get_roi("auto_battle", "get_pvp"),
                     },
-                    retry=2,
-                    delay=1,
                 ):
                     logger.info("进入竞技场")
                     auto.sleep(5)
@@ -94,10 +88,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     verify={
                         "type": "text",
                         "target": "MAX",
-                        "timeout": 5,
                         "roi": roi_config.get_roi("max_battle_count", "get_pvp"),
                     },
-                    retry=1,
                 ):
                     logger.info("点击确认弹窗")
                     auto.sleep(1)
@@ -109,10 +101,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     verify={
                         "type": "text",
                         "target": "MAX",
-                        "timeout": 5,
                         "roi": roi_config.get_roi("max_battle_count", "get_pvp"),
                     },
-                    retry=1,
                 ):
                     logger.info("进去自动战斗设置界面")
                     auto.sleep(1)
@@ -158,10 +148,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                         verify={
                             "type": "text",
                             "target": "离开",
-                            "timeout": 5,
                             "roi": roi_config.get_roi("leave_battle", "get_pvp"),
                         },
-                        retry=1,
                     ):
                         logger.info("关闭战斗结果")
                         auto.sleep(1)
@@ -175,11 +163,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     verify={
                         "type": "text",
                         "target": "确认",
-                        "timeout": 5,
                         "roi": roi_config.get_roi("confirm_button_pvp"),
                     },
-                    retry=2,
-                    delay=1,
                 ):
                     logger.info("离开战斗界面, next: battle_completed")
                     auto.sleep(3)
@@ -201,8 +186,7 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     if auto.text_click(
                         "确认",
                         roi=roi_config.get_roi("confirm_button_pvp"),
-                        verify={"type": "exist", "target": "public/主界面", "timeout": 5},
-                        retry=1,
+                        verify={"type": "exist", "target": "public/主界面"},
                     ):
                         logger.info("点击确认弹窗（战斗结束）")
                         auto.sleep(2)

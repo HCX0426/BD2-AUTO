@@ -47,9 +47,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                             "背包", 
                             click_time=2, 
                             roi=roi_config.get_roi("backpack_button", "intensive_decomposition"),
-                            verify={"type": "exist", "target": "intensive_decomposition/装备标识", "timeout": 5},
-                            retry=2,
-                            delay=1
+                            verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
                         ):
                             logger.info("打开背包")
                             auto.sleep(3)
@@ -61,8 +59,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         "intensive_decomposition/装备标识",
                         roi=roi_config.get_roi("equipment_icon", "intensive_decomposition"),
                         click_time=2,
-                        verify={"type": "exist", "target": "intensive_decomposition/筛选标识", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "intensive_decomposition/筛选标识"},
                     ):
                         logger.info("进入装备界面")
                         state = "filter_set"
@@ -72,23 +69,20 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if auto.template_click(
                         "intensive_decomposition/筛选标识",
                         roi=roi_config.get_roi("filter_icon", "intensive_decomposition"),
-                        verify={"type": "exist", "target": "intensive_decomposition/R", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "intensive_decomposition/R"},
                     ):
                         logger.info("打开筛选界面")
                         auto.sleep(2)
                         if auto.template_click(
                             "intensive_decomposition/R",
-                            verify={"type": "text", "target": "确认", "timeout": 5},
-                            retry=1
+                            verify={"type": "text", "target": "确认"},
                         ):
                             logger.info("选择R装备")
                             auto.sleep(2)
                             if auto.text_click(
                                 "确认", 
                                 click_time=3,
-                                verify={"type": "text", "target": "一键分解", "timeout": 5},
-                                retry=1
+                                verify={"type": "text", "target": "一键分解"},
                             ):
                                 logger.info("确认筛选条件")
                                 auto.sleep(3)
@@ -102,8 +96,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if auto.text_click(
                         "一键分解", 
                         roi=roi_config.get_roi("one_click_decompose", "intensive_decomposition"),
-                        verify={"type": "exist", "target": "intensive_decomposition/确认", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "intensive_decomposition/确认"},
                     ):
                         logger.info("执行一键分解")
                         auto.sleep(2)
@@ -112,15 +105,13 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if auto.template_click(
                         "intensive_decomposition/确认",
                         roi=roi_config.get_roi("confirm_button", "intensive_decomposition"),
-                        verify={"type": "exist", "target": "intensive_decomposition/分解按钮", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "intensive_decomposition/分解按钮"},
                     ):
                         auto.sleep(2)
                         if auto.template_click(
                             "intensive_decomposition/分解按钮",
                             roi=roi_config.get_roi("decompose_button", "intensive_decomposition"),
-                            verify={"type": "exist", "target": "intensive_decomposition/装备标识", "timeout": 5},
-                            retry=1
+                            verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
                         ):
                             logger.info("确认分解")
                             auto.sleep(3)
@@ -138,9 +129,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                             "背包", 
                             click_time=2, 
                             roi=roi_config.get_roi("backpack_button", "intensive_decomposition"),
-                            verify={"type": "exist", "target": "intensive_decomposition/装备标识", "timeout": 5},
-                            retry=2,
-                            delay=1
+                            verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
                         ):
                             logger.info("打开背包")
                             auto.sleep(3)
@@ -152,8 +141,7 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         "intensive_decomposition/装备标识",
                         roi=roi_config.get_roi("equipment_icon", "intensive_decomposition"),
                         click_time=2,
-                        verify={"type": "exist", "target": "intensive_decomposition/筛选标识", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "intensive_decomposition/筛选标识"},
                     ):
                         logger.info("进入装备界面")
                         state = "filter_set"
@@ -166,28 +154,24 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                     if auto.template_click(
                         "intensive_decomposition/筛选标识",
                         roi=roi_config.get_roi("filter_icon", "intensive_decomposition"),
-                        verify={"type": "exist", "target": "intensive_decomposition/18加", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "intensive_decomposition/18加"},
                     ):
                         logger.info("打开筛选界面")
                         auto.sleep(1)
                         if auto.template_click(
                             "intensive_decomposition/18加",
-                            verify={"type": "exist", "target": "intensive_decomposition/制作", "timeout": 5},
-                            retry=1
+                            verify={"type": "exist", "target": "intensive_decomposition/制作"},
                         ):
                             auto.sleep(1)
                             if auto.template_click(
                                 "intensive_decomposition/制作",
-                                verify={"type": "text", "target": "确认", "timeout": 5},
-                                retry=1
+                                verify={"type": "text", "target": "确认"},
                             ):
                                 auto.sleep(1)
                                 if auto.text_click(
                                     "确认", 
                                     click_time=3,
-                                    verify={"type": "text", "target": "精炼", "timeout": 5},
-                                    retry=1
+                                    verify={"type": "text", "target": "精炼"},
                                 ):
                                     auto.sleep(1)
                                     state = "confirm"
@@ -200,15 +184,13 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         if auto.text_click(
                             "精炼", 
                             click_time=3,
-                            verify={"type": "text", "target": "连续精炼", "timeout": 5},
-                            retry=1
+                            verify={"type": "text", "target": "连续精炼"},
                         ):
                             logger.info("进入精炼界面")
                             auto.sleep(2)
                     if auto.text_click(
                         "连续精炼",
-                        verify={"type": "exist", "target": "intensive_decomposition/加十", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "intensive_decomposition/加十"},
                     ):
                         logger.info("进入连续精炼界面")
                         state = "execute"
@@ -220,22 +202,19 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
                         auto.sleep(3)
                         if auto.template_click(
                             "intensive_decomposition/加十",
-                            verify={"type": "exist", "target": "intensive_decomposition/精炼", "timeout": 5},
-                            retry=1
+                            verify={"type": "exist", "target": "intensive_decomposition/精炼"},
                         ):
                             auto.sleep(1)
                             if auto.template_click(
                                 "intensive_decomposition/精炼",
                                 click_time=2,
-                                verify={"type": "exist", "target": "public/跳过", "timeout": 5},
-                                retry=1
+                                verify={"type": "exist", "target": "public/跳过"},
                             ):
                                 auto.sleep(1)
                         if auto.template_click(
                             "public/跳过",
                             click_time=2,
-                            verify={"type": "text", "target": "确认", "timeout": 5},
-                            retry=1
+                            verify={"type": "text", "target": "确认"},
                         ):
                             auto.sleep(5)
                     if auto.text_click("确认", click=False):

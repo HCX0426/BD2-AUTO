@@ -46,8 +46,6 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                             "target": "获得",
                             "roi": roi_config.get_roi("obtain_restaurant_reward", "get_restaurant"),
                         },
-                        retry=2,
-                        delay=1,
                     ):
                         logger.info("点击经营管理, next: second")
                         state = "second"
@@ -57,8 +55,6 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                 if auto.text_click(
                     "获得",
                     roi=roi_config.get_roi("obtain_restaurant_reward", "get_restaurant"),
-                    retry=2,
-                    delay=1,
                 ):
                     logger.info("点击获得, next: third")
                     remaining_timeout = calculate_remaining_timeout(timeout, start_time)
@@ -81,8 +77,6 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                         "target": "常客",
                         "roi": roi_config.get_roi("frequent_visitor", "get_restaurant"),
                     },
-                    retry=2,
-                    delay=1,
                 ):
                     logger.info("点击立刻前往, next: fourth")
                     state = "fourth"
@@ -96,8 +90,7 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                         if auto.template_click(
                             "get_restaurant/下一阶段",
                             click_time=2,
-                            verify={"type": "exist", "target": "get_restaurant/下一阶段", "timeout": 3},
-                            retry=1,
+                            verify={"type": "exist", "target": "get_restaurant/下一阶段"},
                         ):
                             logger.info("点击下一阶段")
                             continue
@@ -105,8 +98,7 @@ def get_restaurant(auto: Auto, timeout: int = 600, is_upgrade: bool = False) -> 
                         if auto.template_click(
                             "get_restaurant/升级",
                             click_time=2,
-                            verify={"type": "exist", "target": "get_restaurant/升级", "timeout": 3},
-                            retry=1,
+                            verify={"type": "exist", "target": "get_restaurant/升级"},
                         ):
                             logger.info("点击升级")
                             continue

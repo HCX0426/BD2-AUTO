@@ -55,14 +55,12 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
                 # 尝试找到第七章地图
                 if auto.template_click(
                     "map_collection/第七章1",
-                    verify={"type": "exist", "target": "map_collection/探寻", "timeout": 5},
-                    retry=1
+                    verify={"type": "exist", "target": "map_collection/探寻"},
                 ):
                     logger.info("进入第七章1")
                 elif auto.template_click(
                     "map_collection/第七章2",
-                    verify={"type": "exist", "target": "map_collection/探寻", "timeout": 5},
-                    retry=1
+                    verify={"type": "exist", "target": "map_collection/探寻"},
                 ):
                     logger.info("进入第七章2")
                 else:
@@ -81,8 +79,7 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
                 if auto.template_click(
                     "map_collection/探寻",
                     click_time=2,
-                    verify={"type": "exist", "target": "map_collection/材料吸收", "timeout": 10},
-                    retry=1
+                    verify={"type": "exist", "target": "map_collection/材料吸收"},
                 ):
                     logger.info("开始探寻")
                     state = "exploring"
@@ -95,8 +92,7 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
                     if auto.template_click(
                         "map_collection/材料吸收",
                         click_time=2,
-                        verify={"type": "exist", "target": "map_collection/吸收材料完成", "timeout": 5},
-                        retry=2
+                        verify={"type": "exist", "target": "map_collection/吸收材料完成"},
                     ):
                         logger.info("收集材料")
                         collect_attempts += 1
@@ -108,8 +104,7 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
                     if auto.template_click(
                         "map_collection/金币吸收",
                         click_time=2,
-                        verify={"type": "exist", "target": "map_collection/金币吸收完成", "timeout": 5},
-                        retry=2
+                        verify={"type": "exist", "target": "map_collection/金币吸收完成"},
                     ):
                         logger.info("收集金币")
                         collect_attempts += 1

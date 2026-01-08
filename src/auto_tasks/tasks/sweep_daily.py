@@ -59,9 +59,7 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
                     roi=(1713, 278, 100, 44),
                     click_time=3,
                     coord_type="PHYSICAL",
-                    verify={"type": "text", "target": "野猪洞穴", "timeout": 5},
-                    retry=2,
-                    delay=1
+                    verify={"type": "text", "target": "野猪洞穴"},
                 ):
                     logger.info("检测到快速狩猎标识")
                     state["sweep_entered"] = True
@@ -72,14 +70,12 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
                 if not state["onigiri_selected"]:
                     if auto.template_click(
                         f"sweep_daily/{onigiri}",
-                        verify={"type": "exist", "target": f"sweep_daily/{onigiri}产出", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": f"sweep_daily/{onigiri}产出"},
                     ):
                         logger.info("检测到%s", onigiri)
                         if auto.template_click(
                             "sweep_daily/快速狩猎",
-                            verify={"type": "text", "target": "MAX", "timeout": 5},
-                            retry=1
+                            verify={"type": "text", "target": "MAX"},
                         ):
                             logger.info("点击快速狩猎")
                             state["onigiri_selected"] = True
@@ -90,8 +86,7 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
                         auto.sleep(1)
                         if auto.template_click(
                             "sweep_daily/狩猎按钮",
-                            verify={"type": "exist", "target": "public/返回键1", "timeout": 10},
-                            retry=1
+                            verify={"type": "exist", "target": "public/返回键1"},
                         ):
                             logger.info("点击狩猎按钮")
                             remaining_timeout = calculate_remaining_timeout(timeout, start_time)
@@ -107,19 +102,16 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
             if not state["torch_selected"]:
                 if auto.template_click(
                     "sweep_daily/天赋本",
-                    verify={"type": "text", "target": torch, "timeout": 5},
-                    retry=1
+                    verify={"type": "text", "target": torch},
                 ):
                     logger.info("点击天赋本")
                     if auto.text_click(
                         f"{torch}",
-                        verify={"type": "text", "target": "快速狩猎", "timeout": 5},
-                        retry=1
+                        verify={"type": "text", "target": "快速狩猎"},
                     ):
                         if auto.template_click(
                             "sweep_daily/快速狩猎",
-                            verify={"type": "text", "target": "MAX", "timeout": 5},
-                            retry=1
+                            verify={"type": "text", "target": "MAX"},
                         ):
                             logger.info(f"点击快速狩猎")
                             state["torch_selected"] = True
@@ -130,8 +122,7 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
                 auto.click(pos, click_time=3)
                 if auto.template_click(
                     "sweep_daily/狩猎按钮",
-                    verify={"type": "exist", "target": "public/返回键1", "timeout": 10},
-                    retry=1
+                    verify={"type": "exist", "target": "public/返回键1"},
                 ):
                     logger.info("点击狩猎按钮")
                     auto.sleep(3)

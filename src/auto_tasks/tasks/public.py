@@ -53,8 +53,7 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
         if auto.template_click(
             ["public/返回键1", "public/返回键2"],
             roi=roi_config.get_roi("back_button"),
-            verify={"type": "exist", "target": "public/主界面", "timeout": 5, "roi": roi_config.get_roi("main_menu")},
-            retry=3,
+            verify={"type": "exist", "target": "public/主界面", "roi": roi_config.get_roi("main_menu")},
         ):
             return True
 
@@ -165,10 +164,8 @@ def click_back(auto: Auto, timeout: int = 30) -> bool:
             verify={
                 "type": "disappear",
                 "target": "点击画面即可返回",
-                "timeout": 5,
                 "roi": roi_config.get_roi("back_image_text"),
             },
-            retry=3,
         ):
             logger.debug("点击画面返回成功")
             return True
@@ -214,10 +211,8 @@ def enter_map_select(auto: Auto, timeout: int = 30, swipe_duration: int = 6, is_
             verify={
                 "type": "text",
                 "target": "游戏卡珍藏集",
-                "timeout": 5,
                 "roi": roi_config.get_roi("game_collection_text"),
             },
-            retry=3,
         ):
             if is_swipe:
                 logger.debug("执行滑动操作")

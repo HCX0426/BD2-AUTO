@@ -55,9 +55,7 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                 if back_to_main(auto, remaining_timeout):
                     if auto.template_click(
                         "pass_rewards/通行证标识",
-                        verify={"type": "text", "target": "基础", "timeout": 5, "roi": (1235, 300, 69, 37)},
-                        retry=2,
-                        delay=1
+                        verify={"type": "text", "target": "基础", "roi": (1235, 300, 69, 37)},
                     ):
                         logger.info("进入通行证界面")
                         state = "entered"
@@ -73,8 +71,7 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                         (x, y),
                         click_time=2,
                         coord_type="BASE",
-                        verify={"type": "exist", "target": "public/返回键1", "timeout": 5},
-                        retry=1
+                        verify={"type": "exist", "target": "public/返回键1"},
                     ):
                         logger.info(f"点击第{current_reward+1}个奖励")
                         auto.sleep(1.5)
@@ -83,14 +80,12 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
                             (1590, 680),
                             click_time=2,
                             coord_type="BASE",
-                            verify={"type": "text", "target": "全部获得", "timeout": 5, "roi": (1390, 750, 100, 30)},
-                            retry=1
+                            verify={"type": "text", "target": "全部获得", "roi": (1390, 750, 100, 30)},
                         ):
                             if auto.text_click(
                                 "全部获得",
                                 roi=(1390, 750, 100, 30),
-                                verify={"type": "exist", "target": "pass_rewards/通行证标识", "timeout": 5},
-                                retry=1
+                                verify={"type": "exist", "target": "pass_rewards/通行证标识"},
                             ):
                                 logger.info(f"领取第{current_reward+1}个奖励")
                                 current_reward += 1

@@ -49,10 +49,8 @@ def daily_missions(auto: Auto, timeout: int = 300) -> bool:
                 if auto.text_click(
                     "任务",
                     roi=roi_config.get_roi("daily_missions_text", "daily_missions"),
-                    verify={"type": "text", "target": "每日任务", "timeout": 5, "roi": roi_config.get_roi("daily_tasks", "daily_missions")},
-                    retry=2,
-                    click_time=2,
-                    delay=1
+                    verify={"type": "text", "target": "每日任务", "roi": roi_config.get_roi("daily_tasks", "daily_missions")},
+                    click_time=2
                 ):
                     state = "tasks_entered"
                 continue
@@ -64,8 +62,7 @@ def daily_missions(auto: Auto, timeout: int = 300) -> bool:
                     "全部获得", 
                     click=False, 
                     roi=roi_config.get_roi("receive", "daily_missions"),
-                    verify={"type": "exist", "target": "每日任务", "timeout": 5, "roi": roi_config.get_roi("daily_tasks", "daily_missions")},
-                    retry=1
+                    verify={"type": "exist", "target": "每日任务", "roi": roi_config.get_roi("daily_tasks", "daily_missions")}
                 )
                 if pos:
                     logger.info("点击全部获得按钮")
@@ -87,16 +84,14 @@ def daily_missions(auto: Auto, timeout: int = 300) -> bool:
                     "每周任务", 
                     click_time=2, 
                     roi=roi_config.get_roi("weekly_missions_text", "daily_missions"),
-                    verify={"type": "text", "target": "每周任务", "timeout": 5},
-                    retry=1
+                    verify={"type": "text", "target": "每周任务"}
                 ):
                     logger.info("进入每周任务界面")
                     if auto.text_click(
                         "全部获得", 
                         click_time=2, 
                         roi=roi_config.get_roi("receive", "daily_missions"),
-                        verify={"type": "text", "target": "每周任务", "timeout": 5},
-                        retry=1
+                        verify={"type": "text", "target": "每周任务"}
                     ):
                         logger.info("成功领取每周任务奖励")
                         auto.sleep(2)
