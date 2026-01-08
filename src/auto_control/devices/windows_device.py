@@ -1,7 +1,7 @@
 import ctypes
 import time
 from enum import Enum, auto
-from threading import Event, Lock, Thread
+from threading import Event, Lock
 from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
@@ -1094,7 +1094,7 @@ class WindowsDevice(BaseDevice):
             self.logger.debug(f"前台模式，等待用户手动激活窗口 | 句柄: {self.hwnd}")
             # 前台模式下，只要窗口未最小化且存在，就返回True
             return self._is_window_ready()
-        
+
         # 后台模式：执行正常激活逻辑
         if current_time - self._last_activate_attempt < self.ACTIVATE_RETRY_COOLDOWN:
             self.logger.debug(

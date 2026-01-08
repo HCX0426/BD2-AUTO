@@ -3,9 +3,8 @@
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Tuple
 
-from src.auto_control.devices.base_device import BaseDevice
 from src.auto_control.devices.device_manager import DeviceManager
 from src.auto_control.image.image_processor import ImageProcessor
 from src.auto_control.ocr.ocr_processor import OCRProcessor
@@ -25,7 +24,7 @@ from .auto_base import AutoBaseError, AutoConfig, AutoResult
 from .auto_chain import ChainManager
 from .auto_devices import DeviceHandler
 from .auto_operations import OperationHandler
-from .auto_utils import DelayManager, LockManager, LogFormatter
+from .auto_utils import DelayManager, LockManager
 from .auto_verify import VerifyHandler
 
 
