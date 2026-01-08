@@ -90,7 +90,6 @@ class VerifyHandler:
         """统一的屏幕验证方法"""
         timeout = timeout or self.config.DEFAULT_WAIT_TIMEOUT
         start_time = time.time()
-        self.logger.info(f"[验证] {verify_type} - {target}，超时: {timeout}秒")
 
         # 使用提取的独立方法作为条件
         def condition() -> bool:
@@ -207,7 +206,7 @@ class VerifyHandler:
             import win32con
             import win32gui
 
-            from src.auto_control.devices.windows_device import WindowsDevice
+            from src.auto_control.devices.windows import WindowsDevice
 
             if isinstance(device, WindowsDevice):
                 # 1. 检查窗口是否存在

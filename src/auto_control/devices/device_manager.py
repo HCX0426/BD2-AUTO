@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 from src.auto_control.devices.adb_device import ADBDevice
 from src.auto_control.devices.base_device import BaseDevice, DeviceState
-from src.auto_control.devices.windows_device import WindowsDevice
+from src.auto_control.devices.windows import WindowsDevice
 from src.auto_control.image.image_processor import ImageProcessor
 from src.auto_control.utils.coordinate_transformer import CoordinateTransformer
 from src.auto_control.utils.display_context import RuntimeDisplayContext

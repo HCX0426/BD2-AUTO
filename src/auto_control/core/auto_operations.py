@@ -101,10 +101,11 @@ class OperationHandler:
     def _check_window_state(self, _device) -> bool:
         """检查窗口状态，无限等待直到窗口在前台且可见"""
         try:
+            import ctypes
             import win32con
             import win32gui
             import time
-            from src.auto_control.devices.windows_device import WindowsDevice
+            from src.auto_control.devices.windows import WindowsDevice
             
             if isinstance(_device, WindowsDevice):
                 while True:
@@ -114,61 +115,80 @@ class OperationHandler:
                         return False
                     
                     # 1. 检查窗口是否存在
-                    if not win32gui.IsWindow(_device.hwnd):
-                        _device.logger.debug(f"窗口不存在，句柄: {_device.hwnd}")
+                    # 优先使用window_manager中的hwnd，因为device.hwnd可能没有同步
+                    hwnd = _device.hwnd
+                    if hasattr(_device, 'window_manager') and _device.window_manager:
+                        hwnd = _device.window_manager.hwnd
+                    
+                    if not win32gui.IsWindow(hwnd):
+                        _device.logger.debug(f"窗口不存在，句柄: {hwnd}")
                         return True  # 窗口不存在时默认继续执行
                     
                     # 2. 检查窗口是否可见
-                    if not win32gui.IsWindowVisible(_device.hwnd):
+                    if not win32gui.IsWindowVisible(hwnd):
                         _device.logger.warning("窗口不可见，等待窗口可见...")
                         time.sleep(1)  # 等待1秒后重试
                         continue
                     
                     # 3. 检查窗口是否最小化
-                    if win32gui.IsIconic(_device.hwnd):
+                    if win32gui.IsIconic(hwnd):
                         _device.logger.warning("窗口被最小化，尝试恢复窗口...")
-                        win32gui.ShowWindow(_device.hwnd, win32con.SW_RESTORE)
+                        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                         time.sleep(0.5)  # 等待恢复
                         continue
                     
                     # 4. 检查窗口是否在前台
                     current_foreground = win32gui.GetForegroundWindow()
-                    if current_foreground != _device.hwnd:
-                        _device.logger.warning(f"窗口不在前台，当前前台句柄: {current_foreground}，目标句柄: {_device.hwnd}，等待窗口到前台...")
-                        # 获取当前前台窗口标题，方便调试
-                        try:
-                            foreground_title = win32gui.GetWindowText(current_foreground)
-                            _device.logger.debug(f"当前前台窗口标题: {foreground_title}")
-                        except Exception as e:
-                            _device.logger.debug(f"获取前台窗口标题失败: {e}")
-                        # 尝试多种方式激活窗口
-                        try:
-                            # 方法1：使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
-                            ctypes.windll.user32.SwitchToThisWindow(_device.hwnd, True)
-                            _device.logger.debug("SwitchToThisWindow激活窗口成功")
-                        except Exception as e1:
-                            _device.logger.debug(f"SwitchToThisWindow激活窗口失败: {e1}")
+                    if current_foreground != hwnd:
+                        # 检查设备的截图策略，判断是前台模式还是后台模式
+                        # 获取截图策略，优先从screenshot_manager获取
+                        screenshot_strategy = getattr(_device, '_best_screenshot_strategy', None)
+                        if hasattr(_device, 'screenshot_manager') and _device.screenshot_manager:
+                            screenshot_strategy = _device.screenshot_manager._best_screenshot_strategy
+                        
+                        if screenshot_strategy and screenshot_strategy != "printwindow":
+                            # 前台模式：不自动激活，等待用户手动操作
+                            _device.logger.warning(f"前台模式：窗口不在前台，当前前台句柄: {current_foreground}，目标句柄: {hwnd}，等待用户手动激活...")
+                            # 只记录日志，不自动激活，继续等待
+                            time.sleep(1.0)
+                            continue
+                        else:
+                            # 后台模式：尝试自动激活窗口
+                            _device.logger.warning(f"后台模式：窗口不在前台，当前前台句柄: {current_foreground}，目标句柄: {hwnd}，尝试自动激活...")
+                            # 获取当前前台窗口标题，方便调试
                             try:
-                                # 方法2：使用SetForegroundWindow激活窗口
-                                win32gui.SetForegroundWindow(_device.hwnd)
-                                _device.logger.debug("SetForegroundWindow激活窗口成功")
-                            except Exception as e2:
-                                _device.logger.debug(f"SetForegroundWindow激活窗口失败: {e2}")
+                                foreground_title = win32gui.GetWindowText(current_foreground)
+                                _device.logger.debug(f"当前前台窗口标题: {foreground_title}")
+                            except Exception as e:
+                                _device.logger.debug(f"获取前台窗口标题失败: {e}")
+                            # 尝试多种方式激活窗口
+                            try:
+                                # 方法1：使用SwitchToThisWindow激活窗口（绕过SetForegroundWindow限制）
+                                ctypes.windll.user32.SwitchToThisWindow(hwnd, True)
+                                _device.logger.debug("SwitchToThisWindow激活窗口成功")
+                            except Exception as e1:
+                                _device.logger.debug(f"SwitchToThisWindow激活窗口失败: {e1}")
                                 try:
-                                    # 方法3：先显示窗口，再激活
-                                    win32gui.ShowWindow(_device.hwnd, win32con.SW_SHOW)
-                                    time.sleep(0.1)
-                                    win32gui.SetForegroundWindow(_device.hwnd)
-                                    _device.logger.debug("ShowWindow+SetForegroundWindow激活窗口成功")
-                                except Exception as e3:
-                                    _device.logger.debug(f"ShowWindow+SetForegroundWindow激活窗口失败: {e3}")
-                    # 增加更长的等待时间，确保窗口稳定在前台
-                    time.sleep(1.0)
-                    # 再次检查窗口是否在前台
-                    current_foreground = win32gui.GetForegroundWindow()
-                    if current_foreground != _device.hwnd:
-                        _device.logger.warning(f"窗口仍不在前台，当前前台句柄: {current_foreground}，目标句柄: {_device.hwnd}，继续等待...")
-                        continue
+                                    # 方法2：使用SetForegroundWindow激活窗口
+                                    win32gui.SetForegroundWindow(hwnd)
+                                    _device.logger.debug("SetForegroundWindow激活窗口成功")
+                                except Exception as e2:
+                                    _device.logger.debug(f"SetForegroundWindow激活窗口失败: {e2}")
+                                    try:
+                                        # 方法3：先显示窗口，再激活
+                                        win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                                        time.sleep(0.1)
+                                        win32gui.SetForegroundWindow(hwnd)
+                                        _device.logger.debug("ShowWindow+SetForegroundWindow激活窗口成功")
+                                    except Exception as e3:
+                                        _device.logger.debug(f"ShowWindow+SetForegroundWindow激活窗口失败: {e3}")
+                        # 增加更长的等待时间，确保窗口稳定在前台
+                        time.sleep(1.0)
+                        # 再次检查窗口是否在前台
+                        current_foreground = win32gui.GetForegroundWindow()
+                        if current_foreground != hwnd:
+                            _device.logger.warning(f"窗口仍不在前台，当前前台句柄: {current_foreground}，目标句柄: {hwnd}，继续等待...")
+                            continue
                     
                     # 所有条件都满足，返回True
                     _device.logger.debug("窗口在前台且可见，继续执行任务")

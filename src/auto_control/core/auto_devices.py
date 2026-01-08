@@ -31,7 +31,7 @@ class DeviceHandler:
 
     def get_coord_type_enum(self, coord_type: str) -> Any:
         """通用坐标类型转枚举方法（消除重复）"""
-        from src.auto_control.devices.windows_device import CoordType
+        from src.auto_control.devices.windows.constants import CoordType
 
         valid_types = {"LOGICAL", "PHYSICAL", "BASE"}
         coord_type_upper = coord_type.upper()
