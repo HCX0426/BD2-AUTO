@@ -3,7 +3,6 @@
 import logging
 import threading
 import time
-
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from src.auto_control.devices.base_device import BaseDevice
@@ -221,10 +220,10 @@ class Auto:
             current_state = self.stop_event.is_set()
             if value and not current_state:
                 self.stop_event.set()
-                self.logger.warning("任务中断标志已设置为True")
+                self.logger.info("任务停止完成")
             elif not value and current_state:
                 self.stop_event.clear()
-                self.logger.info("任务中断标志已重置为False")
+                self.logger.info("任务已恢复运行")
 
     def start(self) -> AutoResult:
         """

@@ -1395,8 +1395,9 @@ class WindowsDevice(BaseDevice):
             bitmap.CreateCompatibleBitmap(mfc_dc, client_w_phys, client_h_phys)
             mem_dc.SelectObject(bitmap)
 
-            # 使用BitBlt复制图像，添加CAPTUREBLT标志确保获取最新内容
-            mem_dc.BitBlt((0, 0), (client_w_phys, client_h_phys), mfc_dc, (0, 0), win32con.SRCCOPY | win32con.CAPTUREBLT)
+            # 使用BitBlt复制图像，直接使用CAPTUREBLT常量值确保获取最新内容
+            CAPTUREBLT = 0x40000000  # win32con中没有这个常量，直接使用值
+            mem_dc.BitBlt((0, 0), (client_w_phys, client_h_phys), mfc_dc, (0, 0), win32con.SRCCOPY | CAPTUREBLT)
 
             # 获取图像数据
             bmp_str = bitmap.GetBitmapBits(True)
