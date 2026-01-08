@@ -19,7 +19,7 @@ def with_retry_and_check(func: Callable) -> Callable:
         retry = kwargs.get("retry")
         
         # 检查是否有settings_manager，并且支持获取重试次数
-        if retry is None and hasattr(self, "auto") and hasattr(self.auto, "settings_manager"):
+        if retry is None and hasattr(self, "auto") and hasattr(self.auto, "settings_manager") and self.auto.settings_manager is not None:
             retry = self.auto.settings_manager.get_setting("retry_count", config.DEFAULT_OPERATION_RETRY)
         
         # 使用默认值作为最后的回退

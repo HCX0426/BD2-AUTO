@@ -389,6 +389,38 @@ class WindowsDevice(BaseDevice):
                 self._is_temp_topmost = False
 
     # -------------- 截图策略检测 --------------
+    def _calculate_similarity(self, img1: np.ndarray, img2: np.ndarray) -> float:
+        """
+        计算两张截图的相似度（使用SSIM算法）。
+
+        Args:
+            img1: 第一张截图
+            img2: 第二张截图
+
+        Returns:
+            float: 相似度值（0.0-1.0）
+        """
+        try:
+            if img1 is None or img2 is None:
+                return 0.0
+
+            if img1.shape != img2.shape:
+                img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
+
+            gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+            gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+
+            from skimage.metrics import structural_similarity as ssim
+
+            similarity = ssim(gray1, gray2)
+            return float(similarity)
+        except ImportError:
+            self.logger.debug("scikit-image未安装，无法计算截图相似度")
+            return 0.95
+        except Exception as e:
+            self.logger.debug(f"截图相似度计算失败: {e}")
+            return 0.0
+
     def _select_best_method(
         self, method_priority: List[str], available_methods: List[str], default_method: str = None
     ) -> str:
@@ -410,23 +442,198 @@ class WindowsDevice(BaseDevice):
 
     def _detect_best_screenshot_strategy(self) -> str:
         """
-        检测并选择最优截图策略，初始化截图模式和可用方法列表。
+        检测并选择最优截图策略，使用截图相似度比较和性能评估。
 
         核心功能：
-        - 检测所有可用截图方法
-        - 更新可用截图方法列表
-        - 根据截图模式选择最优方法
-        - 处理窗口未就绪情况
+        - 根据截图模式执行不同的测试逻辑
+        - 前台模式：确保窗口在前台，只测试bitblt、dxcam、temp_foreground
+        - 后台模式：不要求窗口在前台，只测试printwindow
+        - 测试所有可用截图方法并计算相似度
+        - 评估每个方法的性能（执行时间）
+        - 综合相似度和性能选择最优策略
+        - 记录详细的检测日志
 
         检测流程：
         1. 检查窗口状态，未就绪则默认使用temp_foreground
-        2. 更新窗口动态信息
-        3. 依次检测printwindow、bitblt、dxcam截图方法
-        4. 始终将temp_foreground作为兜底方法
-        5. 根据已设置的截图模式或自动选择最优方法
+        2. 根据截图模式选择测试方法
+        3. 前台模式：激活窗口到前台
+        4. 执行对应模式的截图方法测试
+        5. 计算每个方法与参考图的相似度和执行耗时
+        6. 筛选相似度阈值以上的方法
+        7. 综合相似度和性能选择最优策略
 
-        方法优先级（foreground模式）：
-        - bitblt > dxcam > temp_foreground
+        Returns:
+            str: 最优截图策略名称
+        """
+        SIMILARITY_THRESHOLD = 0.85
+
+        if not self._is_window_ready():
+            self.logger.warning("窗口未就绪，默认使用temp_foreground（foreground模式）")
+            self._screenshot_mode = "foreground"
+            self._available_screenshot_methods = ["temp_foreground"]
+            return "temp_foreground"
+
+        self._update_dynamic_window_info()
+        client_w_phys, client_h_phys = self.display_context.client_physical_res
+        if client_w_phys <= 0 or client_h_phys <= 0:
+            self.logger.warning("窗口尺寸无效，默认使用temp_foreground（foreground模式）")
+            self._screenshot_mode = "foreground"
+            self._available_screenshot_methods = ["temp_foreground"]
+            return "temp_foreground"
+
+        try:
+            from skimage.metrics import structural_similarity as ssim
+
+            has_ssim_support = True
+        except ImportError:
+            has_ssim_support = False
+            self.logger.warning("scikit-image未安装，将使用原有检测逻辑")
+
+        if not has_ssim_support:
+            return self._detect_best_screenshot_strategy_fallback()
+
+        # 1. 根据截图模式选择测试方法
+        is_background_mode = self._screenshot_mode == "background"
+        is_foreground_mode = self._screenshot_mode == "foreground" or not self._screenshot_mode
+
+        method_results = {}
+        reference_img = None
+
+        if is_background_mode:
+            # 后台模式：只测试printwindow
+            self.logger.info("后台模式，只测试printwindow方法")
+
+            # 测试printwindow
+            try:
+                start_time = time.time()
+                screenshot = self._try_print_window(client_w_phys, client_h_phys)
+                elapsed_time = time.time() - start_time
+
+                if screenshot is not None:
+                    # 后台模式使用自身作为参考
+                    similarity = 1.0
+                    method_results["printwindow"] = {
+                        "screenshot": screenshot,
+                        "similarity": similarity,
+                        "time": elapsed_time,
+                    }
+                    self.logger.info(f"printwindow截图成功 | 耗时: {elapsed_time*1000:.1f}ms")
+            except Exception as e:
+                self.logger.info(f"printwindow测试失败: {e}")
+
+            # 后台模式总是添加printwindow作为可用方法
+            if "printwindow" not in method_results:
+                method_results["printwindow"] = {"screenshot": None, "similarity": 0.0, "time": 0.0}
+
+        else:  # 前台模式
+            self.logger.info("前台模式，测试bitblt、dxcam、temp_foreground方法")
+
+            # 2. 前台模式：确保窗口在前台
+            if not win32gui.GetForegroundWindow() == self.hwnd:
+                self.logger.info("前台模式，测试前激活窗口到前台")
+                if not self._activate_window(temp_activation=False, max_attempts=2):
+                    self.logger.warning("窗口激活失败，部分截图方法可能无法正常测试")
+                else:
+                    # 添加窗口激活后的延迟，确保窗口有足够时间渲染和稳定
+                    time.sleep(0.3)  # 增加到300ms延迟，确保窗口状态完全稳定
+                    self.logger.info("窗口激活成功并已稳定")
+
+            # 3. 先获取参考截图（temp_foreground），确保基础功能正常
+            # temp_foreground是最可靠的兜底方法，先确认它能成功，再测试其他方法
+            reference_img = self._try_temp_foreground_screenshot(client_w_phys, client_h_phys)
+            if reference_img is None:
+                self.logger.warning("temp_foreground截图失败，无法进行相似度比较，使用原有检测逻辑")
+                return self._detect_best_screenshot_strategy_fallback()
+            else:
+                self.logger.info("temp_foreground截图成功，窗口状态稳定，开始测试其他方法")
+
+            # 4. 测试前台适用的方法
+            test_methods = [
+                ("bitblt", self._try_bitblt),
+                ("dxcam", self._try_dxcam),
+            ]
+
+            # 初始化所有测试方法的结果
+            for method_name, _ in test_methods:
+                method_results[method_name] = {"screenshot": None, "similarity": 0.0, "time": 0.0}
+
+            for method_name, method_func in test_methods:
+                try:
+                    # 在每个方法测试前添加短暂延迟，确保窗口状态稳定
+                    time.sleep(0.1)  # 100ms延迟
+
+                    start_time = time.time()
+                    screenshot = method_func(client_w_phys, client_h_phys)
+                    elapsed_time = time.time() - start_time
+
+                    if screenshot is not None:
+                        similarity = self._calculate_similarity(screenshot, reference_img)
+                        method_results[method_name] = {
+                            "screenshot": screenshot,
+                            "similarity": similarity,
+                            "time": elapsed_time,
+                        }
+                        self.logger.info(
+                            f"{method_name}截图成功 | 相似度: {similarity:.3f} | 耗时: {elapsed_time*1000:.1f}ms"
+                        )
+                    else:
+                        # 提高日志级别，确保能在日志中看到
+                        self.logger.info(f"{method_name}截图返回空结果")
+                except Exception as e:
+                    # 提高日志级别，确保能在日志中看到
+                    self.logger.info(f"{method_name}测试失败: {e}")
+
+            # 添加temp_foreground到结果
+            method_results["temp_foreground"] = {"screenshot": reference_img, "similarity": 1.0, "time": 0.0}
+
+        reliable_methods = []
+        unreliable_methods = []
+
+        for method, data in method_results.items():
+            if data["similarity"] >= SIMILARITY_THRESHOLD:
+                reliable_methods.append((method, data))
+                self.logger.info(
+                    f"方法[{method}]通过相似度检测 | 相似度: {data['similarity']:.3f} >= {SIMILARITY_THRESHOLD}"
+                )
+            else:
+                unreliable_methods.append((method, data))
+                self.logger.warning(
+                    f"方法[{method}]相似度较低 | 相似度: {data['similarity']:.3f} < {SIMILARITY_THRESHOLD}，可能存在截图异常"
+                )
+
+        # 6. 选择最优方法
+        if is_background_mode:
+            # 后台模式：只能选择printwindow
+            best_method = "printwindow"
+            available_methods = ["printwindow"]
+            self._screenshot_mode = "background"
+        else:
+            # 前台模式：根据相似度和性能选择
+            if not reliable_methods:
+                self.logger.warning("所有截图方法相似度均低于阈值，使用temp_foreground作为兜底")
+                best_method = "temp_foreground"
+                available_methods = ["temp_foreground"]
+            else:
+                reliable_methods.sort(key=lambda x: (1 - x[1]["similarity"], x[1]["time"]))
+                best_method = reliable_methods[0][0]
+                available_methods = [m[0] for m in reliable_methods]
+
+                # 确保temp_foreground始终在可用方法列表中作为兜底
+                if "temp_foreground" not in available_methods:
+                    available_methods.append("temp_foreground")
+
+            self._screenshot_mode = "foreground"
+
+        self._available_screenshot_methods = available_methods
+        self.logger.info(
+            f"截图策略检测完成 | 最优方法: {best_method} | 可靠方法数: {len(reliable_methods)}/{len(method_results)} | 所有可用方法: {available_methods}"
+        )
+
+        return best_method
+
+    def _detect_best_screenshot_strategy_fallback(self) -> str:
+        """
+        降级检测逻辑：当无法使用相似度比较时使用原有检测逻辑。
 
         Returns:
             str: 最优截图策略名称
@@ -445,7 +652,6 @@ class WindowsDevice(BaseDevice):
             self._available_screenshot_methods = ["temp_foreground"]
             return "temp_foreground"
 
-        # 检测1: PrintWindow（background模式）
         def test_printwindow():
             try:
                 hwnd_dc = win32gui.GetWindowDC(self.hwnd)
@@ -464,7 +670,6 @@ class WindowsDevice(BaseDevice):
                 img_np = np.array(img_pil)
                 mean_val = np.mean(img_np)
 
-                # 释放资源
                 mem_dc.DeleteDC()
                 mfc_dc.DeleteDC()
                 win32gui.ReleaseDC(self.hwnd, hwnd_dc)
@@ -475,14 +680,11 @@ class WindowsDevice(BaseDevice):
                 self.logger.debug(f"PrintWindow检测失败: {e}")
                 return False
 
-        # 检测2: BitBlt（foreground模式）
         def test_bitblt():
             try:
-                # 检查窗口是否已经在前台
                 is_already_foreground = win32gui.GetForegroundWindow() == self.hwnd
                 original_foreground = None
 
-                # 只有当窗口不在前台时，才临时激活窗口
                 if not is_already_foreground:
                     original_foreground = self._temp_activate_window()
 
@@ -500,13 +702,11 @@ class WindowsDevice(BaseDevice):
                 img_np = np.array(img_pil)
                 mean_val = np.mean(img_np)
 
-                # 释放资源
                 mem_dc.DeleteDC()
                 mfc_dc.DeleteDC()
                 win32gui.ReleaseDC(self.hwnd, hwnd_dc)
                 win32gui.DeleteObject(bitmap.GetHandle())
 
-                # 只有当窗口不在前台时，才恢复原始前台窗口
                 if not is_already_foreground and original_foreground and original_foreground != self.hwnd:
                     self._restore_foreground(original_foreground)
 
@@ -515,16 +715,13 @@ class WindowsDevice(BaseDevice):
                 self.logger.debug(f"BitBlt检测失败: {e}")
                 return False
 
-        # 检测3: DXCam（foreground模式）
         def test_dxcam():
             try:
                 import dxcam
 
-                # 检查窗口是否已经在前台
                 is_already_foreground = win32gui.GetForegroundWindow() == self.hwnd
                 original_foreground = None
 
-                # 只有当窗口不在前台时，才临时激活窗口
                 if not is_already_foreground:
                     original_foreground = self._temp_activate_window()
 
@@ -542,7 +739,6 @@ class WindowsDevice(BaseDevice):
 
                 mean_val = np.mean(img_np)
 
-                # 只有当窗口不在前台时，才恢复原始前台窗口
                 if not is_already_foreground and original_foreground and original_foreground != self.hwnd:
                     self._restore_foreground(original_foreground)
 
@@ -554,54 +750,59 @@ class WindowsDevice(BaseDevice):
                 self.logger.debug(f"DXCam检测失败: {e}")
                 return False
 
-        # 检测所有截图方法并记录可用方法
+        # 根据截图模式选择测试方法
+        is_background_mode = self._screenshot_mode == "background"
+        is_foreground_mode = self._screenshot_mode == "foreground" or not self._screenshot_mode
+
         available_methods = []
 
-        # 优化：优先检测printwindow（后台截图，不激活窗口）
-        if test_printwindow():
-            available_methods.append("printwindow")
+        if is_background_mode:
+            # 后台模式：只测试printwindow
+            self.logger.info("后台模式（降级），只测试printwindow方法")
+            if test_printwindow():
+                available_methods.append("printwindow")
+            else:
+                # 后台模式下printwindow失败，使用temp_foreground作为兜底
+                available_methods.append("temp_foreground")
 
-        # 检查窗口是否已经在前台
-        is_already_foreground = win32gui.GetForegroundWindow() == self.hwnd
+        else:  # 前台模式
+            self.logger.info("前台模式（降级），测试bitblt、dxcam、temp_foreground方法")
 
-        # 只有当窗口已经在前台时，才检测bitblt和dxcam（避免不必要的窗口激活）
-        if is_already_foreground:
-            if test_bitblt():
-                available_methods.append("bitblt")
-            if test_dxcam():
-                available_methods.append("dxcam")
-        else:
-            # 窗口不在前台，优先使用temp_foreground作为兜底，避免多次激活窗口
-            self.logger.debug("窗口不在前台，跳过bitblt和dxcam检测，优先使用temp_foreground")
+            # 前台模式：确保窗口在前台
+            if not win32gui.GetForegroundWindow() == self.hwnd:
+                self.logger.info("前台模式（降级），测试前激活窗口到前台")
+                if not self._activate_window(temp_activation=True):
+                    self.logger.warning("窗口激活失败，部分截图方法可能无法正常测试")
 
-        # temp_foreground 总是可用作为兜底
-        available_methods.append("temp_foreground")
+            is_already_foreground = win32gui.GetForegroundWindow() == self.hwnd
+
+            if is_already_foreground or self._screenshot_mode == "foreground":
+                if test_bitblt():
+                    available_methods.append("bitblt")
+                if test_dxcam():
+                    available_methods.append("dxcam")
+            else:
+                self.logger.debug("窗口不在前台，跳过bitblt和dxcam检测，优先使用temp_foreground")
+
+            available_methods.append("temp_foreground")
 
         self._available_screenshot_methods = available_methods
-        self.logger.info(f"检测到可用的截图方法: {available_methods}")
+        self.logger.info(f"检测到可用的截图方法（降级模式）: {available_methods}")
 
-        # 执行检测流程并判定截图模式
-        # 优先使用已经设置的截图模式
-        if self._screenshot_mode:
-            # 如果已经设置了具体的截图方法，直接使用
-            if self._screenshot_mode in available_methods:
-                self.logger.info(f"使用已设置的截图模式：{self._screenshot_mode}")
-                return self._screenshot_mode
-            # 如果设置的是background模式，使用printwindow
-            elif self._screenshot_mode == "background" and "printwindow" in available_methods:
-                self.logger.info("使用已设置的background模式：PrintWindow")
-                return "printwindow"
-            # 如果设置的是foreground模式，选择最优前台截图方法
-            elif self._screenshot_mode == "foreground":
+        if is_background_mode:
+            # 后台模式：只能选择printwindow
+            best_method = "printwindow" if "printwindow" in available_methods else "temp_foreground"
+            self._screenshot_mode = "background"
+        else:
+            # 前台模式：根据优先级选择
+            if self._screenshot_mode == "foreground":
                 best_method = self._select_best_method(["bitblt", "dxcam", "temp_foreground"], available_methods)
-                self.logger.info(f"使用已设置的foreground模式：{best_method}")
-                return best_method
+            else:
+                best_method = self._select_best_method(["bitblt", "dxcam", "temp_foreground"], available_methods)
 
-        # 未指定截图模式或指定模式不可用，自动选择最优模式
-        # 默认优先使用foreground模式
-        # 按性能排序：bitblt > dxcam > temp_foreground
-        best_method = self._select_best_method(["bitblt", "dxcam", "temp_foreground"], available_methods)
-        self.logger.info(f"截图策略检测结果：{best_method}（foreground模式）")
+            self._screenshot_mode = "foreground"
+
+        self.logger.info(f"截图策略检测结果（降级模式）：{best_method}（{self._screenshot_mode}模式）")
         return best_method
 
     # -------------- 原有工具方法（无修改） --------------
@@ -881,20 +1082,26 @@ class WindowsDevice(BaseDevice):
         current_time = time.time()
         foreground_hwnd = win32gui.GetForegroundWindow()
 
-        if current_time - self._last_activate_attempt < self.ACTIVATE_RETRY_COOLDOWN:
-            self.logger.debug(
-                f"激活操作冷却中（剩余{self.ACTIVATE_RETRY_COOLDOWN - (current_time - self._last_activate_attempt):.1f}秒）"
-            )
-            if self._is_window_ready() and foreground_hwnd == self.hwnd:
-                return True
-            return False
-        self._last_activate_attempt = current_time
-
+        # 检查窗口是否已在前台
         if self._is_window_ready() and foreground_hwnd == self.hwnd:
             self._last_activate_time = current_time
             self.logger.debug(f"窗口已在前台（句柄: {self.hwnd}），无需激活")
             # 窗口已在前台且状态就绪，无需更新动态信息
             return True
+
+        # 前台模式：不自动激活，等待用户手动操作
+        if self._best_screenshot_strategy != "printwindow":
+            self.logger.debug(f"前台模式，等待用户手动激活窗口 | 句柄: {self.hwnd}")
+            # 前台模式下，只要窗口未最小化且存在，就返回True
+            return self._is_window_ready()
+        
+        # 后台模式：执行正常激活逻辑
+        if current_time - self._last_activate_attempt < self.ACTIVATE_RETRY_COOLDOWN:
+            self.logger.debug(
+                f"激活操作冷却中（剩余{self.ACTIVATE_RETRY_COOLDOWN - (current_time - self._last_activate_attempt):.1f}秒）"
+            )
+            return False
+        self._last_activate_attempt = current_time
 
         self.logger.info(f"开始激活窗口（最多{max_attempts}次尝试）| 句柄: {self.hwnd}")
         if self._activate_window(temp_activation=False, max_attempts=max_attempts):
@@ -967,20 +1174,30 @@ class WindowsDevice(BaseDevice):
                 self._update_dynamic_window_info()
 
             if self.hwnd:
-                # 前台模式初始化：仅在窗口不在前台时激活
-                if self._best_screenshot_strategy in ["bitblt", "dxcam", "temp_foreground"]:
-                    # 检查窗口是否已经在前台
-                    if win32gui.GetForegroundWindow() != self.hwnd:
-                        # 首次连接时，确保窗口被激活
-                        if not self._activate_window(temp_activation=True):
-                            self.logger.warning("前台模式窗口首次激活失败")
-                        else:
-                            self.logger.info("前台模式窗口首次激活成功")
-                    else:
-                        self.logger.debug("窗口已在前台，无需首次激活")
+                # 如果窗口最小化，尝试恢复
+                if self.is_minimized():
+                    self.logger.info(f"窗口处于最小化状态，尝试恢复 | 句柄: {self.hwnd}")
+                    win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
+                    time.sleep(self.WINDOW_RESTORE_DELAY)
 
-                # 检查窗口状态，只要窗口存在且未被最小化即可连接
-                if self._is_window_ready():
+                # 检查窗口是否已经在前台
+                if win32gui.GetForegroundWindow() != self.hwnd:
+                    # 根据模式处理激活逻辑
+                    if self._best_screenshot_strategy == "printwindow":
+                        # 后台模式：自动激活
+                        self.logger.info("后台模式，自动激活窗口")
+                        if not self._activate_window(temp_activation=True):
+                            self.logger.warning("后台模式窗口激活失败")
+                        else:
+                            self.logger.info("后台模式窗口激活成功")
+                    else:
+                        # 前台模式：首次连接时不自动激活，等待用户手动激活
+                        self.logger.info("前台模式，窗口已恢复，等待用户手动激活到前台")
+                else:
+                    self.logger.debug("窗口已在前台，无需激活")
+
+                # 检查窗口状态，只要窗口存在即可连接（如果最小化已尝试恢复）
+                if win32gui.IsWindow(self.hwnd):
                     self._update_state(DeviceState.CONNECTED)
                     self.logger.info(
                         f"Windows设备连接成功 | "
@@ -1158,32 +1375,49 @@ class WindowsDevice(BaseDevice):
         """
         original_foreground = None
         try:
-            # 临时激活窗口
-            original_foreground = self._temp_activate_window()
+            # 确保窗口在前台
+            if win32gui.GetForegroundWindow() != self.hwnd:
+                original_foreground = self._temp_activate_window()
+                # 等待窗口稳定
+                time.sleep(self.TEMP_FOREGROUND_DELAY)
 
-            with self._DCCtxManager(self.hwnd, client_w_phys, client_h_phys) as (mem_dc, bitmap):
-                # 获取原始DC用于BitBlt操作
-                hwnd_dc = win32gui.GetDC(self.hwnd)
-                mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+            # 发送WM_PAINT消息强制窗口重绘，避免获取缓存图像
+            win32gui.InvalidateRect(self.hwnd, None, True)
+            win32gui.UpdateWindow(self.hwnd)
+            # 短暂延迟确保窗口重绘完成
+            time.sleep(0.05)
 
-                mem_dc.BitBlt((0, 0), (client_w_phys, client_h_phys), mfc_dc, (0, 0), win32con.SRCCOPY)
+            # 直接使用设备上下文进行截图，不嵌套使用DCCtxManager
+            hwnd_dc = win32gui.GetDC(self.hwnd)
+            mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+            mem_dc = mfc_dc.CreateCompatibleDC()
+            bitmap = win32ui.CreateBitmap()
+            bitmap.CreateCompatibleBitmap(mfc_dc, client_w_phys, client_h_phys)
+            mem_dc.SelectObject(bitmap)
 
-                # 释放原始DC资源
-                win32gui.ReleaseDC(self.hwnd, hwnd_dc)
-                mfc_dc.DeleteDC()
+            # 使用BitBlt复制图像，添加CAPTUREBLT标志确保获取最新内容
+            mem_dc.BitBlt((0, 0), (client_w_phys, client_h_phys), mfc_dc, (0, 0), win32con.SRCCOPY | win32con.CAPTUREBLT)
 
-                bmp_str = bitmap.GetBitmapBits(True)
-                img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
-                img_np = np.array(img_pil)
-                img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+            # 获取图像数据
+            bmp_str = bitmap.GetBitmapBits(True)
+            img_pil = Image.frombuffer("RGB", (client_w_phys, client_h_phys), bmp_str, "raw", "BGRX", 0, 1)
+            img_np = np.array(img_pil)
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+            # 释放资源
+            mem_dc.DeleteDC()
+            mfc_dc.DeleteDC()
+            win32gui.ReleaseDC(self.hwnd, hwnd_dc)
+            win32gui.DeleteObject(bitmap.GetHandle())
 
             if np.mean(img_np) < 10:
-                raise RuntimeError("BitBlt截图为黑屏")
+                self.logger.debug("BitBlt截图为黑屏")
+                return None
 
             self.logger.debug("使用BitBlt截图成功（仅客户区）")
             return img_np
         except Exception as e:
-            self.logger.debug(f"BitBlt执行失败: {e}")
+            self.logger.info(f"BitBlt执行失败: {e}")
             return None
         finally:
             # 恢复原始前台窗口
@@ -1205,29 +1439,60 @@ class WindowsDevice(BaseDevice):
         try:
             import dxcam
 
-            # 临时激活窗口
-            original_foreground = self._temp_activate_window()
+            # 确保窗口在前台
+            if win32gui.GetForegroundWindow() != self.hwnd:
+                original_foreground = self._temp_activate_window()
+                # 等待窗口稳定
+                time.sleep(self.TEMP_FOREGROUND_DELAY)
 
+            # 创建DXCam相机实例
             camera = dxcam.create()
             if not camera:
-                raise RuntimeError("DXCam无法初始化，无可用显卡")
+                self.logger.info("DXCam无法初始化，无可用显卡")
+                return None
 
+            # 获取客户区的屏幕坐标
             client_origin_x, client_origin_y = win32gui.ClientToScreen(self.hwnd, (0, 0))
             client_end_x = client_origin_x + client_w_phys
             client_end_y = client_origin_y + client_h_phys
 
-            img_np = camera.grab(region=(client_origin_x, client_origin_y, client_end_x, client_end_y))
-            if img_np is None:
-                raise RuntimeError("DXCam截图返回空图像")
+            # 验证坐标是否有效
+            if (
+                client_origin_x < 0
+                or client_origin_y < 0
+                or client_end_x <= client_origin_x
+                or client_end_y <= client_origin_y
+            ):
+                self.logger.info(
+                    f"DXCam截图区域无效: ({client_origin_x}, {client_origin_y}, {client_end_x}, {client_end_y})"
+                )
+                return None
 
+            # 尝试多次截图，提高成功率
+            for attempt in range(3):
+                img_np = camera.grab(region=(client_origin_x, client_origin_y, client_end_x, client_end_y))
+                if img_np is not None:
+                    break
+                # 每次尝试后短暂延迟
+                time.sleep(0.05)
+
+            if img_np is None:
+                self.logger.info("DXCam多次尝试截图均返回空图像")
+                return None
+
+            # 转换颜色空间并验证截图
             img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+            if np.mean(img_np) < 10:
+                self.logger.info("DXCam截图为黑屏")
+                return None
+
             self.logger.debug("使用DXCam硬件加速截图成功（仅客户区）")
             return img_np
         except ImportError:
-            self.logger.debug("dxcam未安装，跳过硬件加速截图")
+            self.logger.info("dxcam未安装，跳过硬件加速截图")
             return None
         except Exception as e:
-            self.logger.debug(f"DXCam执行失败: {e}")
+            self.logger.info(f"DXCam执行失败: {e}")
             return None
         finally:
             # 恢复原始前台窗口
@@ -1554,13 +1819,16 @@ class WindowsDevice(BaseDevice):
         # 检查窗口是否在前台
         is_foreground = win32gui.GetForegroundWindow() == self.hwnd
 
-        # 窗口在前台时，优先使用更稳定的截图方法，避免temp_foreground导致的闪烁
+        # 窗口在前台时，优先使用更可靠的截图方法，避免BitBlt缓存问题
         if is_foreground:
-            self.logger.debug("窗口在前台，优先使用更稳定的截图方法")
-            # 优先使用bitblt或dxcam，失败再尝试printwindow
-            img_np = self._try_bitblt(client_w_phys, client_h_phys)
+            self.logger.debug("窗口在前台，优先使用更可靠的截图方法")
+            # 优先使用dxcam（硬件加速，无缓存问题），失败再尝试bitblt，最后尝试printwindow
+            img_np = self._try_dxcam(client_w_phys, client_h_phys)
             if img_np is None:
-                img_np = self._try_dxcam(client_w_phys, client_h_phys)
+                img_np = self._try_bitblt(client_w_phys, client_h_phys)
+                # BitBlt可能有缓存问题，添加验证
+                if img_np is not None:
+                    self.logger.debug("BitBlt截图完成，注意：可能存在缓存问题")
             if img_np is None:
                 img_np = self._try_print_window(client_w_phys, client_h_phys)
 
@@ -1580,13 +1848,16 @@ class WindowsDevice(BaseDevice):
             # background截图模式：强制使用PrintWindow，失败则降级
             elif self._screenshot_mode == "background":
                 img_np = self._try_print_window(client_w_phys, client_h_phys)
-            # foreground截图模式：优先使用更稳定的截图方法，避免temp_foreground导致的闪烁
+            # foreground截图模式：优先使用更可靠的截图方法，避免BitBlt缓存问题
             elif self._screenshot_mode == "foreground":
-                self.logger.debug("foreground截图模式优先使用更稳定的截图方法")
-                # 优先使用bitblt或dxcam，失败再尝试printwindow，最后才使用temp_foreground
-                img_np = self._try_bitblt(client_w_phys, client_h_phys)
+                self.logger.debug("foreground截图模式优先使用更可靠的截图方法")
+                # 优先使用dxcam（硬件加速，无缓存问题），失败再尝试bitblt，最后尝试printwindow和temp_foreground
+                img_np = self._try_dxcam(client_w_phys, client_h_phys)
                 if img_np is None:
-                    img_np = self._try_dxcam(client_w_phys, client_h_phys)
+                    img_np = self._try_bitblt(client_w_phys, client_h_phys)
+                    # BitBlt可能有缓存问题，添加验证
+                    if img_np is not None:
+                        self.logger.debug("BitBlt截图完成，注意：可能存在缓存问题")
                 if img_np is None:
                     img_np = self._try_print_window(client_w_phys, client_h_phys)
                 if img_np is None:
