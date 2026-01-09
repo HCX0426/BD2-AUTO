@@ -25,126 +25,107 @@ def sweep_daily(auto: Auto, timeout: int = 600, onigiri: str = "第九关", torc
     logger.info("开始每日扫荡")
 
     start_time = time.time()
-    state = {
-        "main_checked": False,
-        "sweep_entered": False,
-        "onigiri_selected": False,
-        "onigiri_completed": False,
-        "torch_selected": False,
-    }
 
-    try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.error("任务执行超时")
-                return False
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
+    # 使用任务链替代状态机
+    chain = auto.chain()
+    chain.set_total_timeout(timeout)
+
+    # 1. 返回主界面
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
+
+    # 2. 进入扫荡界面
+    chain.then().text_click(
+        "快速狩猎",
+        roi=(1713, 278, 100, 44),
+        click_time=3,
+        coord_type="PHYSICAL",
+        verify={"type": "text", "target": "野猪洞穴"},
+    )
+
+    # 3. 饭团扫荡 - 选择关卡
+    chain.then().template_click(
+        f"sweep_daily/{onigiri}",
+        verify={"type": "exist", "target": f"sweep_daily/{onigiri}产出"},
+    )
+
+    # 4. 饭团扫荡 - 点击快速狩猎
+    chain.then().template_click(
+        "sweep_daily/快速狩猎",
+        verify={"type": "text", "target": "MAX"},
+    )
+
+    # 5. 饭团扫荡 - 设置MAX次数并开始狩猎
+    def onigiri_hunt_step() -> bool:
+        """饭团扫荡的自定义步骤"""
+        if pos := auto.text_click("MAX", click=False):
+            logger.info("点击MAX")
+            auto.click(pos, click_time=3)
+            auto.sleep(1)
+            if auto.template_click(
+                "sweep_daily/狩猎按钮",
+                verify={"type": "exist", "target": "public/返回键1"},
+            ):
+                logger.info("点击狩猎按钮")
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if not click_back(auto, remaining_timeout):
+                    auto.text_click("取消")
+                    logger.info("米饭已用完")
                 return True
+        return False
+    chain.then().custom_step(onigiri_hunt_step)
 
-            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-            
-            # 检查主界面
-            if not state["main_checked"]:
-                if back_to_main(auto, remaining_timeout):
-                    logger.info("成功返回主界面")
-                    state["main_checked"] = True
-                continue
+    # 6. 火把扫荡 - 点击天赋本
+    chain.then().template_click(
+        "sweep_daily/天赋本",
+        verify={"type": "text", "target": torch},
+    )
 
-            # 进入扫荡界面
-            if not state["sweep_entered"]:
-                logger.info("开始检测扫荡标识")
-                if auto.text_click(
-                    "快速狩猎",
-                    roi=(1713, 278, 100, 44),
-                    click_time=3,
-                    coord_type="PHYSICAL",
-                    verify={"type": "text", "target": "野猪洞穴"},
-                ):
-                    logger.info("检测到快速狩猎标识")
-                    state["sweep_entered"] = True
-                continue
+    # 7. 火把扫荡 - 选择火把关卡
+    chain.then().text_click(
+        f"{torch}",
+        verify={"type": "text", "target": "快速狩猎"},
+    )
 
-            # 处理饭团扫荡
-            if not state["onigiri_completed"]:
-                if not state["onigiri_selected"]:
-                    if auto.template_click(
-                        f"sweep_daily/{onigiri}",
-                        verify={"type": "exist", "target": f"sweep_daily/{onigiri}产出"},
-                    ):
-                        logger.info("检测到%s", onigiri)
-                        if auto.template_click(
-                            "sweep_daily/快速狩猎",
-                            verify={"type": "text", "target": "MAX"},
-                        ):
-                            logger.info("点击快速狩猎")
-                            state["onigiri_selected"] = True
-                else:
-                    if pos := auto.text_click("MAX", click=False):
-                        logger.info("点击MAX")
-                        auto.click(pos, click_time=3)
-                        auto.sleep(1)
-                        if auto.template_click(
-                            "sweep_daily/狩猎按钮",
-                            verify={"type": "exist", "target": "public/返回键1"},
-                        ):
-                            logger.info("点击狩猎按钮")
-                            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-                            if not click_back(auto, remaining_timeout):
-                                auto.text_click("取消")
-                                logger.info("米饭已用完")
-                            state["onigiri_completed"] = True
-                    else:
-                        state["onigiri_selected"] = False
-                continue
+    # 8. 火把扫荡 - 点击快速狩猎
+    chain.then().template_click(
+        "sweep_daily/快速狩猎",
+        verify={"type": "text", "target": "MAX"},
+    )
 
-            # 处理火把扫荡
-            if not state["torch_selected"]:
-                if auto.template_click(
-                    "sweep_daily/天赋本",
-                    verify={"type": "text", "target": torch},
-                ):
-                    logger.info("点击天赋本")
-                    if auto.text_click(
-                        f"{torch}",
-                        verify={"type": "text", "target": "快速狩猎"},
-                    ):
-                        if auto.template_click(
-                            "sweep_daily/快速狩猎",
-                            verify={"type": "text", "target": "MAX"},
-                        ):
-                            logger.info(f"点击快速狩猎")
-                            state["torch_selected"] = True
-                continue
+    # 9. 火把扫荡 - 设置MAX次数并开始狩猎
+    def torch_hunt_step() -> bool:
+        """火把扫荡的自定义步骤"""
+        if pos := auto.text_click("MAX", click=False):
+            logger.info("点击MAX")
+            auto.click(pos, click_time=3)
+            if auto.template_click(
+                "sweep_daily/狩猎按钮",
+                verify={"type": "exist", "target": "public/返回键1"},
+            ):
+                logger.info("点击狩猎按钮")
+                auto.sleep(3)
+                remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+                if not click_back(auto, remaining_timeout):
+                    auto.text_click("取消")
+                    logger.info("火把已用完")
+                return True
+        return False
+    chain.then().custom_step(torch_hunt_step)
 
-            if pos := auto.text_click("MAX", click=False):
-                logger.info("点击MAX")
-                auto.click(pos, click_time=3)
-                if auto.template_click(
-                    "sweep_daily/狩猎按钮",
-                    verify={"type": "exist", "target": "public/返回键1"},
-                ):
-                    logger.info("点击狩猎按钮")
-                    auto.sleep(3)
-                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-                    if not click_back(auto, remaining_timeout):
-                        auto.text_click("取消")
-                        logger.info("火把已用完")
+    # 10. 返回主界面
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
 
-                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-                    if back_to_main(auto, remaining_timeout):
-                        total_time = round(time.time() - start_time, 2)
-                        minutes = int(total_time // 60)
-                        seconds = round(total_time % 60, 2)
-                        logger.info(f"每日扫荡完成，用时：{minutes}分{seconds}秒")
-                        return True
-                    logger.info("未返回主界面")
-                    return False
-            else:
-                state["torch_selected"] = False
+    # 执行任务链
+    result = chain.execute()
 
-            auto.sleep(0.5)
-
-    except Exception as e:
-        logger.error(f"扫荡过程中出错: {e}")
+    if result.success:
+        total_time = round(result.elapsed_time, 2)
+        minutes = int(total_time // 60)
+        seconds = round(total_time % 60, 2)
+        logger.info(f"每日扫荡完成，用时：{minutes}分{seconds}秒")
+        return True
+    else:
+        logger.error(f"每日扫荡失败: {result.error_msg}")
         return False

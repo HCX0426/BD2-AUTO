@@ -23,102 +23,82 @@ def daily_missions(auto: Auto, timeout: int = 300) -> bool:
     logger.info("开始领取每日任务")
 
     start_time = time.time()
-    state = "init"  # 状态机: init -> main_checked -> tasks_entered -> daily_received -> weekly_received -> completed
 
-    try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.error("任务执行超时")
-                return False
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
-                return True
+    # 使用任务链替代状态机
+    chain = auto.chain()
+    chain.set_total_timeout(timeout)
 
-            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-            
-            # 1. 返回主界面
-            if state == "init":
-                logger.info("返回主界面")
-                if back_to_main(auto, remaining_timeout):
-                    state = "main_checked"
-                continue
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
 
-            # 2. 进入任务界面
-            if state == "main_checked":
-                logger.info("进入任务界面")
-                if auto.text_click(
-                    "任务",
-                    roi=roi_config.get_roi("daily_missions_text", "daily_missions"),
-                    verify={"type": "text", "target": "每日任务", "roi": roi_config.get_roi("daily_tasks", "daily_missions")},
-                    click_time=2
-                ):
-                    state = "tasks_entered"
-                continue
+    # 1. 返回主界面
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
 
-            # 3. 领取每日任务奖励
-            if state == "tasks_entered":
-                logger.info("领取每日任务奖励")
-                pos = auto.text_click(
-                    "全部获得", 
-                    click=False, 
-                    roi=roi_config.get_roi("receive", "daily_missions"),
-                    verify={"type": "exist", "target": "每日任务", "roi": roi_config.get_roi("daily_tasks", "daily_missions")}
-                )
-                if pos:
-                    logger.info("点击全部获得按钮")
-                    for _ in range(2):
-                        auto.click(pos, click_time=2, coord_type="LOGICAL")
-                        auto.sleep(1)
-                    
-                    click_back(auto, remaining_timeout)
-                    logger.info("每日任务奖励领取成功")
-                else:
-                    logger.warning("无每日任务奖励可以领取")
-                state = "daily_received"
-                continue
+    # 2. 进入任务界面
+    chain.then().text_click(
+        "任务",
+        roi=roi_config.get_roi("daily_missions_text", "daily_missions"),
+        verify={"type": "text", "target": "每日任务", "roi": roi_config.get_roi("daily_tasks", "daily_missions")},
+        click_time=2
+    )
 
-            # 4. 领取每周任务奖励
-            if state == "daily_received":
-                logger.info("领取每周任务奖励")
-                if auto.text_click(
-                    "每周任务", 
-                    click_time=2, 
-                    roi=roi_config.get_roi("weekly_missions_text", "daily_missions"),
-                    verify={"type": "text", "target": "每周任务"}
-                ):
-                    logger.info("进入每周任务界面")
-                    if auto.text_click(
-                        "全部获得", 
-                        click_time=2, 
-                        roi=roi_config.get_roi("receive", "daily_missions"),
-                        verify={"type": "text", "target": "每周任务"}
-                    ):
-                        logger.info("成功领取每周任务奖励")
-                        auto.sleep(2)
-                    else:
-                        logger.warning("无每周任务奖励可以领取")
-                    
-                    click_back(auto, remaining_timeout)
-                else:
-                    logger.warning("无法进入每周任务界面")
-                state = "weekly_received"
-                continue
-
-            # 5. 返回主界面
-            if state == "weekly_received":
-                logger.info("返回主界面")
-                auto.key_press("esc")
+    # 3. 领取每日任务奖励
+    def receive_daily_rewards_step() -> bool:
+        """领取每日任务奖励的自定义步骤"""
+        pos = auto.text_click(
+            "全部获得", 
+            click=False, 
+            roi=roi_config.get_roi("receive", "daily_missions"),
+            verify={"type": "exist", "target": "每日任务", "roi": roi_config.get_roi("daily_tasks", "daily_missions")}
+        )
+        if pos:
+            logger.info("点击全部获得按钮")
+            for _ in range(2):
+                auto.click(pos, click_time=2, coord_type="LOGICAL")
                 auto.sleep(1)
-                if back_to_main(auto, remaining_timeout):
-                    total_time = round(time.time() - start_time, 2)
-                    minutes = int(total_time // 60)
-                    seconds = round(total_time % 60, 2)
-                    logger.info(f"每日任务领取完成，用时：{minutes}分{seconds}秒")
-                    return True
-                else:
-                    logger.warning("返回主界面失败")
-                    return False
+            
+            click_back(auto, remaining_timeout)
+            logger.info("每日任务奖励领取成功")
+        else:
+            logger.warning("无每日任务奖励可以领取")
+        return True
+    chain.then().custom_step(receive_daily_rewards_step)
 
-    except Exception as e:
-        logger.error(f"领取每日任务过程中出错: {e}")
+    # 4. 进入每周任务界面
+    chain.then().text_click(
+        "每周任务", 
+        click_time=2, 
+        roi=roi_config.get_roi("weekly_missions_text", "daily_missions"),
+        verify={"type": "text", "target": "每周任务"}
+    )
+
+    # 5. 领取每周任务奖励
+    chain.then().text_click(
+        "全部获得", 
+        click_time=2, 
+        roi=roi_config.get_roi("receive", "daily_missions"),
+        verify={"type": "text", "target": "每周任务"}
+    )
+
+    # 6. 返回主界面
+    chain.then().custom_step(
+        lambda: (
+            click_back(auto, remaining_timeout) or True,  # 确保返回True，继续执行
+            auto.key_press("esc"),
+            auto.sleep(1),
+            back_to_main(auto, remaining_timeout)
+        )[3],  # 返回back_to_main的结果
+        timeout=remaining_timeout
+    )
+
+    # 执行任务链
+    result = chain.execute()
+
+    if result.success:
+        total_time = round(result.elapsed_time, 2)
+        minutes = int(total_time // 60)
+        seconds = round(total_time % 60, 2)
+        logger.info(f"每日任务领取完成，用时：{minutes}分{seconds}秒")
+        return True
+    else:
+        logger.error(f"每日任务领取失败: {result.error_msg}")
         return False

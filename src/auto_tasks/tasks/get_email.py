@@ -23,87 +23,65 @@ def get_email(auto: Auto, timeout: int = 300) -> bool:
     logger = auto.get_task_logger("get_email")
     logger.info("开始领取邮件")
 
+    # 记录任务开始时间，用于计算剩余超时
     start_time = time.time()
-    state = "init"  # 状态机: init -> main_checked -> email_entered -> emails_checked -> emails_received -> completed
 
-    try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.error("任务执行超时")
-                return False
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
-                return True
+    # 使用任务链替代状态机
+    chain = auto.chain()
+    chain.set_total_timeout(timeout)
 
-            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    # 1. 返回主界面
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
 
-            # 1. 返回主界面
-            if state == "init":
-                logger.info("返回主界面")
-                if back_to_main(auto, remaining_timeout):
-                    state = "main_checked"
-                continue
+    # 2. 进入邮箱界面
+    chain.then().template_click(
+        "get_email/邮箱",
+        roi=roi_config.get_roi("email_box", "get_email"),
+        verify={
+            "type": "text",
+            "target": "普通邮箱",
+            "roi": roi_config.get_roi("regular_email", "get_email"),
+        }
+    )
 
-            # 2. 进入邮箱界面
-            if state == "main_checked":
-                logger.info("尝试进入邮箱界面")
-                if auto.template_click(
-                    "get_email/邮箱",
-                    roi=roi_config.get_roi("email_box", "get_email"),
-                    verify={
-                        "type": "text",
-                        "target": "普通邮箱",
-                        "roi": roi_config.get_roi("regular_email", "get_email"),
-                    },
-                ):
-                    state = "email_entered"
-                continue
+    # 3. 领取邮件（包含检查邮箱是否为空的逻辑）
+    def claim_email_step() -> bool:
+        """领取邮件的自定义步骤，处理邮箱为空的情况"""
+        # 检查邮箱是否为空
+        if auto.wait_element("get_email/空邮箱标识", roi=roi_config.get_roi("empty_email", "get_email"), wait_timeout=0):
+            logger.info("邮箱为空，无需领取")
+            return True
+        # 领取邮件
+        logger.info("邮箱有内容，尝试领取")
+        return auto.text_click(
+            "全部领取",
+            roi=roi_config.get_roi("claim_all", "get_email"),
+            verify={
+                "type": "exist",
+                "target": "get_email/空邮箱标识",
+                "roi": roi_config.get_roi("empty_email", "get_email"),
+            }
+        )
+    chain.then().custom_step(claim_email_step)
 
-            # 3. 检查邮箱是否为空
-            if state == "email_entered":
-                logger.info("检查邮箱是否为空")
-                if auto.wait_element("get_email/空邮箱标识", roi=roi_config.get_roi("empty_email", "get_email"), wait_timeout=0):
-                    logger.info("邮箱为空，无需领取")
-                    state = "emails_received"
-                else:
-                    state = "emails_checked"
-                continue
+    # 4. 从邮箱界面返回
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: click_back(auto, remaining_timeout), timeout=remaining_timeout)
 
-            # 4. 领取邮件
-            if state == "emails_checked":
-                logger.info("邮箱有内容，尝试领取")
-                auto.text_click(
-                    "全部领取",
-                    roi=roi_config.get_roi("claim_all", "get_email"),
-                    verify={
-                        "type": "exist",
-                        "target": "get_email/空邮箱标识",
-                        "roi": roi_config.get_roi("empty_email", "get_email"),
-                    },
-                )
-                state = "emails_received"
-                continue
+    # 5. 最终返回主界面确认
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, min(10, remaining_timeout)), timeout=min(10, remaining_timeout))
 
-            # 5. 返回主界面
-            if state == "emails_received":
-                logger.info("从邮箱界面返回")
-                click_back(auto, remaining_timeout)
-                logger.info("从邮箱界面返回成功")
-                state = "completed"
-                continue
+    # 执行任务链
+    result = chain.execute()
 
-            # 6. 返回主界面，完成任务
-            if state == "completed":
-                if back_to_main(auto, remaining_timeout):
-                    total_time = round(time.time() - start_time, 2)
-                    minutes = int(total_time // 60)
-                    seconds = round(total_time % 60, 2)
-                    logger.info(f"邮件领取完成，用时：{minutes}分{seconds}秒")
-                    return True
-                else:
-                    logger.error("返回主界面失败")
-                    return False
-
-    except Exception as e:
-        logger.error(f"领取邮件过程中出错: {e}")
+    if result.success:
+        total_time = round(result.elapsed_time, 2)
+        minutes = int(total_time // 60)
+        seconds = round(total_time % 60, 2)
+        logger.info(f"邮件领取完成，用时：{minutes}分{seconds}秒")
+        return True
+    else:
+        logger.error(f"邮件领取失败: {result.error_msg}")
         return False

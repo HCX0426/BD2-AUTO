@@ -25,220 +25,201 @@ def intensive_decomposition(auto: Auto, timeout: int = 600) -> bool:
     logger.info("开始装备强化分解流程")
 
     start_time = time.time()
-    phase = "decomposition"  # decomposition | enhancement
-    state = "init"  # 状态机: init -> bag_opened -> filter_set -> confirm -> execute -> complete
 
-    try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.error("任务执行超时")
-                return False
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
-                return True
+    # 使用任务链替代状态机
+    chain = auto.chain()
+    chain.set_total_timeout(timeout)
 
-            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-            
-            # 分解阶段
-            if phase == "decomposition":
-                if state == "init":
-                    if back_to_main(auto, remaining_timeout):
-                        if auto.text_click(
-                            "背包", 
-                            click_time=2, 
-                            roi=roi_config.get_roi("backpack_button", "intensive_decomposition"),
-                            verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
-                        ):
-                            logger.info("打开背包")
-                            auto.sleep(3)
-                            state = "bag_opened"
-                    continue
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
 
-                if state == "bag_opened":
-                    if auto.template_click(
-                        "intensive_decomposition/装备标识",
-                        roi=roi_config.get_roi("equipment_icon", "intensive_decomposition"),
-                        click_time=2,
-                        verify={"type": "exist", "target": "intensive_decomposition/筛选标识"},
-                    ):
-                        logger.info("进入装备界面")
-                        state = "filter_set"
-                    continue
+    # ===========================================
+    # 分解阶段 (decomposition phase)
+    # ===========================================
+    
+    # 1. 返回主界面
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
 
-                if state == "filter_set":
-                    if auto.template_click(
-                        "intensive_decomposition/筛选标识",
-                        roi=roi_config.get_roi("filter_icon", "intensive_decomposition"),
-                        verify={"type": "exist", "target": "intensive_decomposition/R"},
-                    ):
-                        logger.info("打开筛选界面")
-                        auto.sleep(2)
-                        if auto.template_click(
-                            "intensive_decomposition/R",
-                            verify={"type": "text", "target": "确认"},
-                        ):
-                            logger.info("选择R装备")
-                            auto.sleep(2)
-                            if auto.text_click(
-                                "确认", 
-                                click_time=3,
-                                verify={"type": "text", "target": "一键分解"},
-                            ):
-                                logger.info("确认筛选条件")
-                                auto.sleep(3)
-                                state = "confirm"
-                    else:
-                        logger.error("筛选标识不存在")
-                        state = "bag_opened"
-                    continue
+    # 2. 打开背包
+    chain.then().text_click(
+        "背包", 
+        click_time=2, 
+        roi=roi_config.get_roi("backpack_button", "intensive_decomposition"),
+        verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
+    )
 
-                if state == "confirm":
-                    if auto.text_click(
-                        "一键分解", 
-                        roi=roi_config.get_roi("one_click_decompose", "intensive_decomposition"),
-                        verify={"type": "exist", "target": "intensive_decomposition/确认"},
-                    ):
-                        logger.info("执行一键分解")
-                        auto.sleep(2)
-                        if auto.click((785, 200), coord_type="BASE"):  # 选择装备位置
-                            auto.sleep(1)
-                    if auto.template_click(
-                        "intensive_decomposition/确认",
-                        roi=roi_config.get_roi("confirm_button", "intensive_decomposition"),
-                        verify={"type": "exist", "target": "intensive_decomposition/分解按钮"},
-                    ):
-                        auto.sleep(2)
-                        if auto.template_click(
-                            "intensive_decomposition/分解按钮",
-                            roi=roi_config.get_roi("decompose_button", "intensive_decomposition"),
-                            verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
-                        ):
-                            logger.info("确认分解")
-                            auto.sleep(3)
-                            phase = "enhancement"
-                            state = "init"
-                        else:
-                            logger.error("分解按钮不存在")
-                    continue
+    # 3. 进入装备界面
+    chain.then().template_click(
+        "intensive_decomposition/装备标识",
+        roi=roi_config.get_roi("equipment_icon", "intensive_decomposition"),
+        click_time=2,
+        verify={"type": "exist", "target": "intensive_decomposition/筛选标识"},
+    )
 
-            # 强化阶段
-            elif phase == "enhancement":
-                if state == "init":
-                    if back_to_main(auto, remaining_timeout):
-                        if auto.text_click(
-                            "背包", 
-                            click_time=2, 
-                            roi=roi_config.get_roi("backpack_button", "intensive_decomposition"),
-                            verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
-                        ):
-                            logger.info("打开背包")
-                            auto.sleep(3)
-                            state = "bag_opened"
-                    continue
+    # 4. 打开筛选界面并选择R装备
+    chain.then().template_click(
+        "intensive_decomposition/筛选标识",
+        roi=roi_config.get_roi("filter_icon", "intensive_decomposition"),
+        verify={"type": "exist", "target": "intensive_decomposition/R"},
+    )
 
-                if state == "bag_opened":
-                    if auto.template_click(
-                        "intensive_decomposition/装备标识",
-                        roi=roi_config.get_roi("equipment_icon", "intensive_decomposition"),
-                        click_time=2,
-                        verify={"type": "exist", "target": "intensive_decomposition/筛选标识"},
-                    ):
-                        logger.info("进入装备界面")
-                        state = "filter_set"
-                    else:
-                        logger.error("未进入背包界面")
-                        state = "init"
-                    continue
+    # 5. 选择R装备
+    chain.then().template_click(
+        "intensive_decomposition/R",
+        verify={"type": "text", "target": "确认"},
+    )
 
-                if state == "filter_set":
-                    if auto.template_click(
-                        "intensive_decomposition/筛选标识",
-                        roi=roi_config.get_roi("filter_icon", "intensive_decomposition"),
-                        verify={"type": "exist", "target": "intensive_decomposition/18加"},
-                    ):
-                        logger.info("打开筛选界面")
-                        auto.sleep(1)
-                        if auto.template_click(
-                            "intensive_decomposition/18加",
-                            verify={"type": "exist", "target": "intensive_decomposition/制作"},
-                        ):
-                            auto.sleep(1)
-                            if auto.template_click(
-                                "intensive_decomposition/制作",
-                                verify={"type": "text", "target": "确认"},
-                            ):
-                                auto.sleep(1)
-                                if auto.text_click(
-                                    "确认", 
-                                    click_time=3,
-                                    verify={"type": "text", "target": "精炼"},
-                                ):
-                                    auto.sleep(1)
-                                    state = "confirm"
-                    continue
+    # 6. 确认筛选条件
+    chain.then().text_click(
+        "确认", 
+        click_time=3,
+        verify={"type": "text", "target": "一键分解"},
+    )
 
-                if state == "confirm":
-                    if auto.click((785, 200), coord_type="BASE"):  # 选择装备位置
-                        logger.info("选择装备")
-                        auto.sleep(1)
-                        if auto.text_click(
-                            "精炼", 
-                            click_time=3,
-                            verify={"type": "text", "target": "连续精炼"},
-                        ):
-                            logger.info("进入精炼界面")
-                            auto.sleep(2)
-                    if auto.text_click(
-                        "连续精炼",
-                        verify={"type": "exist", "target": "intensive_decomposition/加十"},
-                    ):
-                        logger.info("进入连续精炼界面")
-                        state = "execute"
-                    continue
+    # 7. 执行一键分解
+    chain.then().text_click(
+        "一键分解", 
+        roi=roi_config.get_roi("one_click_decompose", "intensive_decomposition"),
+        verify={"type": "exist", "target": "intensive_decomposition/确认"},
+    )
 
-                if state == "execute":
-                    if auto.text_click("连续精炼", click=False):
-                        logger.info("开始连续精炼")
-                        auto.sleep(3)
-                        if auto.template_click(
-                            "intensive_decomposition/加十",
-                            verify={"type": "exist", "target": "intensive_decomposition/精炼"},
-                        ):
-                            auto.sleep(1)
-                            if auto.template_click(
-                                "intensive_decomposition/精炼",
-                                click_time=2,
-                                verify={"type": "exist", "target": "public/跳过"},
-                            ):
-                                auto.sleep(1)
-                        if auto.template_click(
-                            "public/跳过",
-                            click_time=2,
-                            verify={"type": "text", "target": "确认"},
-                        ):
-                            auto.sleep(5)
-                    if auto.text_click("确认", click=False):
-                        logger.info("确认精炼完成")
-                        auto.click((1100, 500), click_time=2, coord_type="BASE")
-                        state = "complete"
-                    continue
+    # 8. 选择装备位置
+    chain.then().click((785, 200), coord_type="BASE")
 
-                if state == "complete":
-                    if click_back(auto, remaining_timeout):
-                        logger.info("从战斗界面返回")
-                    auto.key_press("esc")
-                    
-                    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-                    if back_to_main(auto, remaining_timeout):
-                        total_time = round(time.time() - start_time, 2)
-                        minutes = int(total_time // 60)
-                        seconds = round(total_time % 60, 2)
-                        logger.info(f"强化分解完成，用时：{minutes}分{seconds}秒")
-                        return True
-                    return False
+    # 9. 确认分解
+    chain.then().template_click(
+        "intensive_decomposition/确认",
+        roi=roi_config.get_roi("confirm_button", "intensive_decomposition"),
+        verify={"type": "exist", "target": "intensive_decomposition/分解按钮"},
+    )
 
-            auto.sleep(0.5)
+    # 10. 执行分解
+    chain.then().template_click(
+        "intensive_decomposition/分解按钮",
+        roi=roi_config.get_roi("decompose_button", "intensive_decomposition"),
+        verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
+    )
 
-    except Exception as e:
-        logger.error(f"强化分解过程中出错: {e}")
+    # ===========================================
+    # 强化阶段 (enhancement phase)
+    # ===========================================
+    
+    # 11. 返回主界面
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
+
+    # 12. 打开背包
+    chain.then().text_click(
+        "背包", 
+        click_time=2, 
+        roi=roi_config.get_roi("backpack_button", "intensive_decomposition"),
+        verify={"type": "exist", "target": "intensive_decomposition/装备标识"},
+    )
+
+    # 13. 进入装备界面
+    chain.then().template_click(
+        "intensive_decomposition/装备标识",
+        roi=roi_config.get_roi("equipment_icon", "intensive_decomposition"),
+        click_time=2,
+        verify={"type": "exist", "target": "intensive_decomposition/筛选标识"},
+    )
+
+    # 14. 打开筛选界面
+    chain.then().template_click(
+        "intensive_decomposition/筛选标识",
+        roi=roi_config.get_roi("filter_icon", "intensive_decomposition"),
+        verify={"type": "exist", "target": "intensive_decomposition/18加"},
+    )
+
+    # 15. 选择18加装备
+    chain.then().template_click(
+        "intensive_decomposition/18加",
+        verify={"type": "exist", "target": "intensive_decomposition/制作"},
+    )
+
+    # 16. 点击制作
+    chain.then().template_click(
+        "intensive_decomposition/制作",
+        verify={"type": "text", "target": "确认"},
+    )
+
+    # 17. 确认筛选条件
+    chain.then().text_click(
+        "确认", 
+        click_time=3,
+        verify={"type": "text", "target": "精炼"},
+    )
+
+    # 18. 选择装备并进入精炼界面
+    def select_equipment_step() -> bool:
+        """选择装备并进入精炼界面的自定义步骤"""
+        if auto.click((785, 200), coord_type="BASE"):  # 选择装备位置
+            logger.info("选择装备")
+            auto.sleep(1)
+            return auto.text_click(
+                "精炼", 
+                click_time=3,
+                verify={"type": "text", "target": "连续精炼"},
+            )
+        return False
+    chain.then().custom_step(select_equipment_step)
+
+    # 19. 进入连续精炼界面
+    chain.then().text_click(
+        "连续精炼",
+        verify={"type": "exist", "target": "intensive_decomposition/加十"},
+    )
+
+    # 20. 执行连续精炼
+    def execute_enhancement_step() -> bool:
+        """执行连续精炼的自定义步骤"""
+        if auto.text_click("连续精炼", click=False):
+            logger.info("开始连续精炼")
+            auto.sleep(3)
+            # 点击加十
+            auto.template_click(
+                "intensive_decomposition/加十",
+                verify={"type": "exist", "target": "intensive_decomposition/精炼"},
+            )
+            auto.sleep(1)
+            # 点击精炼
+            auto.template_click(
+                "intensive_decomposition/精炼",
+                click_time=2,
+                verify={"type": "exist", "target": "public/跳过"},
+            )
+            auto.sleep(1)
+            # 点击跳过
+            auto.template_click(
+                "public/跳过",
+                click_time=2,
+                verify={"type": "text", "target": "确认"},
+            )
+            auto.sleep(5)
+        # 确认精炼完成
+        if auto.text_click("确认", click=False):
+            logger.info("确认精炼完成")
+            auto.click((1100, 500), click_time=2, coord_type="BASE")
+        return True
+    chain.then().custom_step(execute_enhancement_step)
+
+    # 21. 返回并退出
+    def return_and_exit_step() -> bool:
+        """返回并退出的自定义步骤"""
+        click_back(auto, remaining_timeout)
+        logger.info("从战斗界面返回")
+        auto.key_press("esc")
+        return back_to_main(auto, remaining_timeout)
+    chain.then().custom_step(return_and_exit_step, timeout=remaining_timeout)
+
+    # 执行任务链
+    result = chain.execute()
+
+    if result.success:
+        total_time = round(result.elapsed_time, 2)
+        minutes = int(total_time // 60)
+        seconds = round(total_time % 60, 2)
+        logger.info(f"强化分解完成，用时：{minutes}分{seconds}秒")
+        return True
+    else:
+        logger.error(f"强化分解失败: {result.error_msg}")
         return False

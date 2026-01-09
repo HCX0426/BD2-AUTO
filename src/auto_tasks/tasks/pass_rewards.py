@@ -25,7 +25,6 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
     logger.info("开始通行证奖励领取流程")
 
     start_time = time.time()
-    state = "init"  # 状态机: init -> entered -> collecting -> completing
 
     # 奖励位置配置
     # 从roi_config获取奖励位置
@@ -37,81 +36,75 @@ def pass_rewards(auto: Auto, timeout: int = 600) -> bool:
         roi_config.get_roi("pass_rewards_reward_pos_5", "pass_rewards")[:2],
         roi_config.get_roi("pass_rewards_reward_pos_6", "pass_rewards")[:2],
     ]
-    current_reward = 0
 
-    try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.error("任务执行超时")
-                return False
+    # 使用任务链替代状态机
+    chain = auto.chain()
+    chain.set_total_timeout(timeout)
+
+    # 1. 返回主界面
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
+
+    # 2. 进入通行证界面
+    chain.then().template_click(
+        "pass_rewards/通行证标识",
+        verify={"type": "text", "target": "基础", "roi": (1235, 300, 69, 37)},
+    )
+
+    # 3. 领取所有奖励
+    def collect_rewards_step() -> bool:
+        """领取所有通行证奖励的自定义步骤"""
+        for i, (x, y) in enumerate(reward_positions):
             if auto.check_should_stop():
                 logger.info("检测到停止信号，退出任务")
                 return True
-
-            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
             
-            # 初始状态：进入通行证界面
-            if state == "init":
-                if back_to_main(auto, remaining_timeout):
-                    if auto.template_click(
-                        "pass_rewards/通行证标识",
-                        verify={"type": "text", "target": "基础", "roi": (1235, 300, 69, 37)},
+            logger.info(f"点击第{i+1}个奖励")
+            
+            # 点击奖励位置
+            if auto.click(
+                (x, y),
+                click_time=2,
+                coord_type="BASE",
+                verify={"type": "exist", "target": "public/返回键1"},
+            ):
+                auto.sleep(1.5)
+                
+                # 点击领取按钮位置
+                if auto.click(
+                    (1590, 680),
+                    click_time=2,
+                    coord_type="BASE",
+                    verify={"type": "text", "target": "全部获得", "roi": (1390, 750, 100, 30)},
+                ):
+                    if auto.text_click(
+                        "全部获得",
+                        roi=(1390, 750, 100, 30),
+                        verify={"type": "exist", "target": "pass_rewards/通行证标识"},
                     ):
-                        logger.info("进入通行证界面")
-                        state = "entered"
-                continue
+                        logger.info(f"领取第{i+1}个奖励")
+                    else:
+                        logger.warning(f"领取第{i+1}个奖励失败")
+                        click_back(auto, remaining_timeout)
+            else:
+                logger.warning(f"点击第{i+1}个奖励位置失败")
+        return True
+    
+    chain.then().custom_step(collect_rewards_step)
 
-            # 领取奖励状态
-            if state == "entered":
-                if current_reward < len(reward_positions):
-                    x, y = reward_positions[current_reward]
+    # 4. 返回主界面
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
 
-                    # 点击奖励位置
-                    if auto.click(
-                        (x, y),
-                        click_time=2,
-                        coord_type="BASE",
-                        verify={"type": "exist", "target": "public/返回键1"},
-                    ):
-                        logger.info(f"点击第{current_reward+1}个奖励")
-                        auto.sleep(1.5)
-                        # 点击领取按钮位置
-                        if auto.click(
-                            (1590, 680),
-                            click_time=2,
-                            coord_type="BASE",
-                            verify={"type": "text", "target": "全部获得", "roi": (1390, 750, 100, 30)},
-                        ):
-                            if auto.text_click(
-                                "全部获得",
-                                roi=(1390, 750, 100, 30),
-                                verify={"type": "exist", "target": "pass_rewards/通行证标识"},
-                            ):
-                                logger.info(f"领取第{current_reward+1}个奖励")
-                                current_reward += 1
-                            else:
-                                logger.warning(f"领取第{current_reward+1}个奖励失败")
-                                click_back(auto, remaining_timeout)
-                                current_reward += 1
-                else:
-                    state = "completing"
-                continue
+    # 执行任务链
+    result = chain.execute()
 
-            # 完成状态：返回主界面
-            if state == "completing":
-                if back_to_main(auto, remaining_timeout):
-                    total_time = round(time.time() - start_time, 2)
-                    minutes = int(total_time // 60)
-                    seconds = round(total_time % 60, 2)
-                    logger.info(f"通行证奖励领取完成，用时：{minutes}分{seconds}秒")
-                    return True
-
-                logger.warning("返回主界面失败，重试中...")
-                state = "init"  # 返回失败则重新开始流程
-                continue
-
-            auto.sleep(0.5)
-
-    except Exception as e:
-        logger.error(f"通行证奖励领取过程中出错: {e}")
+    if result.success:
+        total_time = round(result.elapsed_time, 2)
+        minutes = int(total_time // 60)
+        seconds = round(total_time % 60, 2)
+        logger.info(f"通行证奖励领取完成，用时：{minutes}分{seconds}秒")
+        return True
+    else:
+        logger.error(f"通行证奖励领取失败: {result.error_msg}")
         return False

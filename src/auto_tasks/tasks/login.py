@@ -22,72 +22,51 @@ def login(auto: Auto, timeout: int = 300) -> bool:
     logger = auto.get_task_logger("Login")
     logger.info("开始登录流程")
 
+    # 记录任务开始时间，用于计算剩余超时
     start_time = time.time()
-    state = "init"  # 状态机: init -> confirm_checked -> game_started -> main_returned -> map_returned -> completed
 
-    try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.error("任务执行超时")
-                return False
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
-                return True
+    # 使用任务链替代状态机
+    chain = auto.chain()
+    chain.set_total_timeout(timeout)
 
-            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-            
-            # 1. 处理确认按钮
-            if state == "init":
-                logger.info("检查是否有确认按钮")
-                auto.text_click(
-                "确认", 
-                roi=roi_config.get_roi("login_confirm_button", "login"),
-                verify={"type": "exist", "target": "login/开始游戏", "roi": roi_config.get_roi("login_start_button", "login")},
-            )
-                auto.sleep(2)
-                state = "confirm_checked"
-                continue
+    # 1. 处理确认按钮
+    chain.then().text_click(
+        "确认", 
+        roi=roi_config.get_roi("login_confirm_button", "login"),
+        verify={"type": "exist", "target": "login/开始游戏", "roi": roi_config.get_roi("login_start_button", "login")}
+    )
 
-            # 2. 点击开始游戏按钮，验证进入游戏
-            if state == "confirm_checked":
-                logger.info("点击开始游戏按钮")
-                if auto.template_click(
-                    "login/开始游戏",
-                    roi=roi_config.get_roi("login_start_button", "login"),
-                    verify={
-                        "type": "exist",
-                        "target": "main_ui/主界面"
-                    },
-                ):
-                    auto.sleep(3)
-                    state = "game_started"
-                continue
+    # 2. 点击开始游戏按钮，验证进入游戏
+    chain.then().template_click(
+        "login/开始游戏",
+        roi=roi_config.get_roi("login_start_button", "login"),
+        verify={
+            "type": "exist",
+            "target": "main_ui/主界面"
+        }
+    )
 
-            # 3. 返回主界面
-            if state == "game_started":
-                logger.info("返回主界面")
-                if back_to_main(auto, remaining_timeout):
-                    state = "main_returned"
-                continue
+    # 3. 返回主界面
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
 
-            # 4. 处理弹窗，返回地图
-            if state == "main_returned":
-                logger.info("处理弹窗，返回地图")
-                if back_to_map(auto, remaining_timeout):
-                    state = "map_returned"
-                continue
+    # 4. 处理弹窗，返回地图
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_map(auto, remaining_timeout), timeout=remaining_timeout)
 
-            # 5. 返回主界面，完成登录
-            if state == "map_returned":
-                logger.info("返回主界面，完成登录")
-                if back_to_main(auto, remaining_timeout):
-                    total_time = round(time.time() - start_time, 2)
-                    minutes = int(total_time // 60)
-                    seconds = round(total_time % 60, 2)
-                    logger.info(f"登录完成，用时：{minutes}分{seconds}秒")
-                    return True
-                continue
+    # 5. 返回主界面，完成登录
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
 
-    except Exception as e:
-        logger.error(f"登录过程中发生错误: {e}")
+    # 执行任务链
+    result = chain.execute()
+
+    if result.success:
+        total_time = round(result.elapsed_time, 2)
+        minutes = int(total_time // 60)
+        seconds = round(total_time % 60, 2)
+        logger.info(f"登录完成，用时：{minutes}分{seconds}秒")
+        return True
+    else:
+        logger.error(f"登录失败: {result.error_msg}")
         return False

@@ -10,7 +10,7 @@ from .auto_utils import LogFormatter
 
 @dataclass
 class Step:
-    """链式调用的步骤对象（支持单步重试+前置验证重试+回退重试）"""
+    """链式调用的步骤对象（支持单步重试+前置验证重试+回退重试+后置验证）"""
 
     step_type: str  # 操作类型：template_click/text_click/custom等
     params: dict  # 操作参数
@@ -20,6 +20,7 @@ class Step:
     pre_verify: Optional[dict] = None  # 前置验证配置：{"type": 方法名, "params": 参数}
     pre_verify_retry: int = AutoConfig.DEFAULT_VERIFY_RETRY  # 前置验证的单步重试次数
     back_retry: int = AutoConfig.DEFAULT_BACK_RETRY  # 前置验证失败时回退到上一步的重试次数
+    post_verify: Optional[dict] = None  # 后置验证配置：{"type": 方法名, "target": 目标, "roi": 区域}
     is_back_retried: bool = False  # 标记当前步骤是否已经回退重试过
 
 
@@ -75,6 +76,7 @@ class ChainManager:
         click_time: int = 1,
         right_click: bool = False,
         roi: Optional[Tuple[int, int, int, int]] = None,
+        verify: Optional[dict] = None,
         timeout: float = None,
         step_retry: int = None,
         retry_on_failure: bool = True,
@@ -111,6 +113,7 @@ class ChainManager:
                     if self._current_pre_verify
                     else self.config.DEFAULT_BACK_RETRY
                 ),
+                post_verify=verify,
             )
         )
         self._current_pre_verify = None
@@ -127,6 +130,7 @@ class ChainManager:
         duration: float = 0.1,
         click_time: int = 1,
         right_click: bool = False,
+        verify: Optional[dict] = None,
         timeout: float = None,
         step_retry: int = None,
         retry_on_failure: bool = True,
@@ -160,6 +164,7 @@ class ChainManager:
                     if self._current_pre_verify
                     else self.config.DEFAULT_VERIFY_RETRY
                 ),
+                post_verify=verify,
             )
         )
         self._current_pre_verify = None
@@ -172,6 +177,7 @@ class ChainManager:
         delay: float = None,
         device_uri: Optional[str] = None,
         coord_type: str = None,
+        verify: Optional[dict] = None,
         timeout: float = None,
         step_retry: int = None,
         retry_on_failure: bool = True,
@@ -202,6 +208,7 @@ class ChainManager:
                     if self._current_pre_verify
                     else self.config.DEFAULT_VERIFY_RETRY
                 ),
+                post_verify=verify,
             )
         )
         self._current_pre_verify = None
@@ -216,6 +223,7 @@ class ChainManager:
         delay: float = None,
         device_uri: Optional[str] = None,
         coord_type: str = None,
+        verify: Optional[dict] = None,
         timeout: float = None,
         step_retry: int = None,
         retry_on_failure: bool = True,
@@ -250,6 +258,7 @@ class ChainManager:
                     if self._current_pre_verify
                     else self.config.DEFAULT_VERIFY_RETRY
                 ),
+                post_verify=verify,
             )
         )
         self._current_pre_verify = None
@@ -261,6 +270,7 @@ class ChainManager:
         interval: float = None,
         delay: float = None,
         device_uri: Optional[str] = None,
+        verify: Optional[dict] = None,
         timeout: float = None,
         step_retry: int = None,
         retry_on_failure: bool = True,
@@ -284,6 +294,7 @@ class ChainManager:
                     if self._current_pre_verify
                     else self.config.DEFAULT_VERIFY_RETRY
                 ),
+                post_verify=verify,
             )
         )
         self._current_pre_verify = None
@@ -498,6 +509,28 @@ class ChainManager:
             step_result = self._execute_single_step(step)
 
             if step_result.success:
+                # 如果有后置验证，执行验证
+                if step.post_verify:
+                    verify_type = step.post_verify.get("type")
+                    verify_target = step.post_verify.get("target")
+                    verify_timeout = step.post_verify.get("timeout", self.config.DEFAULT_WAIT_TIMEOUT)
+                    verify_roi = step.post_verify.get("roi")
+
+                    self.logger.info(f"执行后置验证：{verify_type} -> {verify_target}")
+                    verify_result = self.auto.verify(
+                        verify_type=verify_type, target=verify_target, timeout=verify_timeout, roi=verify_roi
+                    )
+
+                    if verify_result.success:
+                        self.logger.info("后置验证通过")
+                        return True, step_result
+                    else:
+                        self.logger.warning(f"后置验证失败：{verify_result.error_msg}")
+                        # 验证失败，继续重试
+                        if attempt < max_retry:
+                            self.auto.sleep(0.5)
+                        continue
+                # 无后置验证，直接返回成功
                 return True, step_result
             self.logger.warning(f"步骤执行失败：{step_result.error_msg}")
 

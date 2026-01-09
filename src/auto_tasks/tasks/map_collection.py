@@ -25,112 +25,78 @@ def map_collection(auto: Auto, timeout: int = 600) -> bool:
     logger.info("开始地图奖励收集流程")
 
     start_time = time.time()
-    state = "init"  # 状态机: init -> chapter_selected -> exploring -> collecting -> completing
 
-    # 收集状态
-    materials_collected = False
-    gold_collected = False
-    collect_attempts = 0
+    # 使用任务链替代状态机
+    chain = auto.chain()
+    chain.set_total_timeout(timeout)
 
-    try:
-        while True:
-            if timeout > 0 and time.time() - start_time >= timeout:
-                logger.error("任务执行超时")
-                return False
-            if auto.check_should_stop():
-                logger.info("检测到停止信号，退出任务")
-                return True
+    # 1. 返回主界面并进入地图选择
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    def enter_map_step() -> bool:
+        """进入地图选择的自定义步骤"""
+        return back_to_main(auto, remaining_timeout) and enter_map_select(auto, remaining_timeout)
+    chain.then().custom_step(enter_map_step, timeout=remaining_timeout)
 
-            remaining_timeout = calculate_remaining_timeout(timeout, start_time)
-            
-            # 初始状态：进入地图选择
-            if state == "init":
-                if back_to_main(auto, remaining_timeout) and enter_map_select(auto, remaining_timeout):
-                    logger.info("成功进入地图选择界面")
-                    state = "chapter_selecting"
-                continue
+    # 2. 选择第七章地图（包含滑动寻找逻辑）
+    def select_chapter_step() -> bool:
+        """选择第七章地图的自定义步骤"""
+        # 尝试找到第七章地图
+        if auto.template_click(
+            "map_collection/第七章1",
+            verify={"type": "exist", "target": "map_collection/探寻"},
+        ):
+            logger.info("进入第七章1")
+            auto.sleep(5)
+            return True
+        elif auto.template_click(
+            "map_collection/第七章2",
+            verify={"type": "exist", "target": "map_collection/探寻"},
+        ):
+            logger.info("进入第七章2")
+            auto.sleep(5)
+            return True
+        else:
+            # 滑动地图寻找第七章
+            logger.info("滑动寻找第七章")
+            auto.swipe((1666, 266), (833, 266), duration=5, steps=4, coord_type="BASE")
+            auto.sleep(2)
+            return False  # 返回False会触发重试
+    chain.then().custom_step(select_chapter_step)
 
-            # 选择章节
-            if state == "chapter_selecting":
-                # 尝试找到第七章地图
-                if auto.template_click(
-                    "map_collection/第七章1",
-                    verify={"type": "exist", "target": "map_collection/探寻"},
-                ):
-                    logger.info("进入第七章1")
-                elif auto.template_click(
-                    "map_collection/第七章2",
-                    verify={"type": "exist", "target": "map_collection/探寻"},
-                ):
-                    logger.info("进入第七章2")
-                else:
-                    # 滑动地图寻找第七章
-                    logger.info("滑动寻找第七章")
-                    auto.swipe((1666, 266), (833, 266), duration=5, steps=4, coord_type="BASE")
-                    auto.sleep(2)
-                    continue
+    # 3. 开始探寻
+    chain.then().template_click(
+        "map_collection/探寻",
+        click_time=2,
+        verify={"type": "exist", "target": "map_collection/材料吸收"},
+    )
 
-                auto.sleep(5)
-                state = "chapter_selected"
-                continue
+    # 4. 收集材料
+    chain.then().template_click(
+        "map_collection/材料吸收",
+        click_time=2,
+        verify={"type": "exist", "target": "map_collection/吸收材料完成"},
+    )
 
-            # 章节已选择状态
-            if state == "chapter_selected":
-                if auto.template_click(
-                    "map_collection/探寻",
-                    click_time=2,
-                    verify={"type": "exist", "target": "map_collection/材料吸收"},
-                ):
-                    logger.info("开始探寻")
-                    state = "exploring"
-                continue
+    # 5. 收集金币
+    chain.then().template_click(
+        "map_collection/金币吸收",
+        click_time=2,
+        verify={"type": "exist", "target": "map_collection/金币吸收完成"},
+    )
 
-            # 探索中状态
-            if state == "exploring":
-                # 收集材料
-                if not materials_collected:
-                    if auto.template_click(
-                        "map_collection/材料吸收",
-                        click_time=2,
-                        verify={"type": "exist", "target": "map_collection/吸收材料完成"},
-                    ):
-                        logger.info("收集材料")
-                        collect_attempts += 1
-                        materials_collected = True
-                        auto.sleep(2)
+    # 6. 返回主界面
+    remaining_timeout = calculate_remaining_timeout(timeout, start_time)
+    chain.then().custom_step(lambda: back_to_main(auto, remaining_timeout), timeout=remaining_timeout)
 
-                # 收集金币
-                if not gold_collected:
-                    if auto.template_click(
-                        "map_collection/金币吸收",
-                        click_time=2,
-                        verify={"type": "exist", "target": "map_collection/金币吸收完成"},
-                    ):
-                        logger.info("收集金币")
-                        collect_attempts += 1
-                        gold_collected = True
-                        auto.sleep(2)
+    # 执行任务链
+    result = chain.execute()
 
-                # 检查是否完成
-                if materials_collected and gold_collected:
-                    state = "completing"
-                continue
-
-            # 完成状态
-            if state == "completing":
-                if back_to_main(auto, remaining_timeout):
-                    total_time = round(time.time() - start_time, 2)
-                    minutes = int(total_time // 60)
-                    seconds = round(total_time % 60, 2)
-                    logger.info(f"地图奖励收集完成，用时：{minutes}分{seconds}秒")
-                    return True
-
-                logger.warning("返回主界面失败，重试中...")
-                state = "init"  # 返回失败则重新开始流程
-                continue
-
-            auto.sleep(0.5)
-
-    except Exception as e:
-        logger.error(f"地图奖励收集过程中出错: {e}")
+    if result.success:
+        total_time = round(result.elapsed_time, 2)
+        minutes = int(total_time // 60)
+        seconds = round(total_time % 60, 2)
+        logger.info(f"地图奖励收集完成，用时：{minutes}分{seconds}秒")
+        return True
+    else:
+        logger.error(f"地图奖励收集失败: {result.error_msg}")
         return False
