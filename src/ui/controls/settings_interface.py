@@ -15,8 +15,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.ui.core.signals import signal_bus
-
 
 class SettingsInterface(QWidget):
     """
@@ -54,6 +52,11 @@ class SettingsInterface(QWidget):
         # 应用程序设置组
         app_group = QGroupBox("应用程序设置")
         app_layout = QFormLayout()
+
+        # 窗口大小设置
+        self.window_size_combo = QComboBox()
+        self.window_size_combo.addItems(["1600 x 900", "1280 x 720", "960 x 540"])
+        app_layout.addRow("窗口大小:", self.window_size_combo)
 
         # 侧边栏宽度设置
         self.sidebar_width_spin = QSpinBox()
@@ -157,6 +160,7 @@ class SettingsInterface(QWidget):
         self.click_mode_combo.currentIndexChanged.connect(self._update_screenshot_mode_options)
 
         # 连接设置变化信号，实现自动保存
+        self.window_size_combo.currentIndexChanged.connect(self.on_setting_changed)
         self.auto_save_check.stateChanged.connect(self.on_setting_changed)
         self.auto_clear_log_check.stateChanged.connect(self.on_setting_changed)
         self.remember_window_pos_check.stateChanged.connect(self.on_setting_changed)
@@ -207,6 +211,15 @@ class SettingsInterface(QWidget):
         """
         加载当前设置
         """
+        # 加载窗口大小
+        window_size = self.settings_manager.get_setting("window_size", [960, 540])
+        size_str = f"{window_size[0]} x {window_size[1]}"
+        index = self.window_size_combo.findText(size_str)
+        if index != -1:
+            self.window_size_combo.setCurrentIndex(index)
+        else:
+            self.window_size_combo.setCurrentIndex(2)  # 默认960 x 540
+
         # 加载侧边栏宽度
         self.sidebar_width_spin.setValue(self.settings_manager.get_setting("sidebar_width", 200))
 
@@ -214,7 +227,7 @@ class SettingsInterface(QWidget):
         self.auto_save_check.setChecked(self.settings_manager.get_setting("auto_save_settings", True))
 
         # 加载日志自动清理设置
-        self.auto_clear_log_check.setChecked(self.settings_manager.get_setting("auto_clear_log", False))
+        self.auto_clear_log_check.setChecked(self.settings_manager.get_setting("auto_clear_log", True))
 
         # 加载记住界面位置和大小设置
         self.remember_window_pos_check.setChecked(self.settings_manager.get_setting("remember_window_pos", False))
@@ -252,9 +265,15 @@ class SettingsInterface(QWidget):
         保存设置
         """
         # 获取信号总线实例
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
 
-        signal_bus = get_signal_bus_instance()
+        # 保存窗口大小
+        selected_size = self.window_size_combo.currentText()
+        width, height = map(int, selected_size.split(" x "))
+        self.settings_manager.set_setting("window_size", [width, height])
+        # 发送窗口大小变更信号
+        signal_bus.emit_window_size_changed([width, height])
 
         # 保存侧边栏宽度
         self.settings_manager.set_setting("sidebar_width", self.sidebar_width_spin.value())
@@ -303,14 +322,14 @@ class SettingsInterface(QWidget):
         重置设置为默认值
         """
         # 获取信号总线实例
-        from src.ui.core.signals import get_signal_bus_instance
-
-        signal_bus = get_signal_bus_instance()
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
 
         # 设置默认值
+        self.window_size_combo.setCurrentIndex(2)  # 默认960 x 540
         self.sidebar_width_spin.setValue(60)
         self.auto_save_check.setChecked(True)
-        self.auto_clear_log_check.setChecked(False)
+        self.auto_clear_log_check.setChecked(True)  # 默认选中自动清理日志
         self.remember_window_pos_check.setChecked(False)
         self.device_timeout_spin.setValue(10)
         self.device_type_combo.setCurrentIndex(0)  # 默认窗口设备

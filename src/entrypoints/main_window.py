@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("自动任务控制系统")
 
         # 设置窗口大小
-        self.resize(*self.settings_manager.get_setting("window_size", [1280, 720]))
+        self.resize(*self.settings_manager.get_setting("window_size", [960, 540]))
         self.setMinimumSize(1024, 600)
 
         # 如果设置了记住窗口位置，则加载位置，否则居中显示
@@ -146,9 +146,9 @@ class MainWindow(QMainWindow):
     def connect_signals(self):
         """连接所有信号"""
         # 确保信号总线已经初始化
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         # 信号总线连接
         signal_bus.init_completed.connect(self.on_auto_init_completed)
@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
         signal_bus.task_status_updated.connect(self.on_task_status_updated)
         signal_bus.device_status_updated.connect(self.on_device_status_updated)
         signal_bus.task_finished.connect(self.on_task_finished)
+        signal_bus.window_size_changed.connect(self.on_window_size_changed)
 
     def start_auto_init_thread(self):
         """
@@ -198,9 +199,9 @@ class MainWindow(QMainWindow):
     def on_auto_init_completed(self, auto_instance):
         """自动初始化完成槽函数"""
         self.auto_instance = auto_instance
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         # 应用设置中的截图模式和点击模式到设备
         device = self.auto_instance.device_manager.get_active_device()
@@ -235,9 +236,9 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def on_auto_init_failed(self, error_msg):
         """自动初始化失败槽函数"""
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         signal_bus.emit_log(f"自动化核心初始化失败: {error_msg}")
         QMessageBox.warning(self, "初始化失败", f"自动化核心初始化失败:\n{error_msg}")
@@ -262,9 +263,9 @@ class MainWindow(QMainWindow):
         """
         开始执行任务
         """
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         if not self.auto_instance:
             if self.auto_init_thread and self.auto_init_thread.isRunning():
@@ -319,9 +320,9 @@ class MainWindow(QMainWindow):
         """
         停止执行任务
         """
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         if not self.task_running:
             return
@@ -358,9 +359,9 @@ class MainWindow(QMainWindow):
         """
         轮询检查任务是否已停止
         """
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         self.stop_attempts += 1
 
@@ -399,9 +400,9 @@ class MainWindow(QMainWindow):
         """
         重置任务状态
         """
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         self.task_running = False
         self.main_interface.enable_task_controls(start_enabled=True, stop_enabled=False)
@@ -432,12 +433,27 @@ class MainWindow(QMainWindow):
         """
         任务完成槽函数
         """
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         signal_bus.emit_log("所有任务执行完成")
         self.reset_task_state()
+
+    def on_window_size_changed(self, size):
+        """
+        窗口大小变更槽函数
+
+        Args:
+            size: 新的窗口大小 [width, height]
+        """
+        from src.ui.core.signals import get_signal_bus
+
+        signal_bus = get_signal_bus()
+        signal_bus.emit_log(f"窗口大小已更改为: {size[0]}x{size[1]}")
+
+        # 调整窗口大小
+        self.resize(size[0], size[1])
 
     def launch_game(self):
         """启动游戏"""
@@ -445,9 +461,9 @@ class MainWindow(QMainWindow):
         import shlex
         import subprocess
 
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         # 从设备设置中获取游戏路径和启动参数
         device_type = self.settings_manager.get_setting("device_type", "windows")
@@ -527,9 +543,9 @@ class MainWindow(QMainWindow):
             # 保存修改后的设置
             self.settings_manager.settings = temp_settings
             self.settings_manager.save_settings()
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         # 停止正在运行的任务
         if self.task_running:
@@ -560,9 +576,9 @@ class MainWindow(QMainWindow):
         """
         检查任务是否已停止，用于窗口关闭前的异步等待
         """
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         self.close_wait_time += 1
 
@@ -581,9 +597,9 @@ class MainWindow(QMainWindow):
         """
         执行窗口关闭操作
         """
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         signal_bus.emit_log("窗口正在关闭...")
 
@@ -629,12 +645,9 @@ def main():
         app.setApplicationName("BD2-AUTO")
 
         # 初始化信号总线（必须在QApplication创建后）
-        from src.ui.core.signals import get_signal_bus_instance, init_signal_bus
+        from src.ui.core.signals import init_signal_bus
 
         bus_instance = init_signal_bus()
-
-        # 确保全局signal_bus变量已经初始化
-        global_signal_bus = get_signal_bus_instance()
 
         # 创建并显示主窗口
         window = MainWindow(settings_manager=settings_manager, config_manager=config_manager, task_mapping=task_mapping)

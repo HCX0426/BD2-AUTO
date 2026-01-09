@@ -2,8 +2,6 @@ import os
 import subprocess
 from PyQt6.QtWidgets import QMessageBox
 
-from src.ui.core.signals import signal_bus
-
 
 class GameManager:
     """游戏管理类，负责游戏启动等功能"""
@@ -21,6 +19,9 @@ class GameManager:
         
         从设置中获取游戏路径，检查路径是否存在，然后启动游戏
         """
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
+        
         pc_game_path = self.settings_manager.get_setting("pc_game_path", "")
         if not pc_game_path:
             QMessageBox.warning(None, "警告", "请先在设置中配置PC游戏路径")

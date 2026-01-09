@@ -20,6 +20,8 @@ class SignalBus(QObject):
     theme_changed = pyqtSignal(str)
     # 侧边栏宽度变更信号
     sidebar_width_changed = pyqtSignal(int)
+    # 窗口大小变更信号
+    window_size_changed = pyqtSignal(list)
     # 任务状态更新信号
     task_status_updated = pyqtSignal(str, bool)
     # 设备状态更新信号
@@ -57,10 +59,14 @@ class SignalBus(QObject):
     def emit_device_status_updated(self, action, is_running):
         """发送设备状态更新信号"""
         self.device_status_updated.emit(action, is_running)
-    
+
     def emit_sidebar_width_changed(self, width):
         """发送侧边栏宽度变更信号"""
         self.sidebar_width_changed.emit(width)
+
+    def emit_window_size_changed(self, size):
+        """发送窗口大小变更信号"""
+        self.window_size_changed.emit(size)
 
 
 # 创建信号总线实例（在QApplication创建后使用）
@@ -87,15 +93,3 @@ def get_signal_bus():
 def init_signal_bus():
     """初始化信号总线，需要在QApplication创建后调用"""
     return get_signal_bus()
-
-
-# 提供兼容旧代码的接口
-signal_bus = None
-
-
-def get_signal_bus_instance():
-    """获取信号总线实例，兼容旧代码"""
-    global signal_bus
-    if signal_bus is None:
-        signal_bus = get_signal_bus()
-    return signal_bus

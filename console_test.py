@@ -30,10 +30,7 @@ def console_execute():
 
         cancel_pos = auto.text_click("任务", roi=(616, 951, 130, 86))
         print("取消按钮位置: " + str(cancel_pos))
-        # click_success = auto.click((179,158))
-        # back_to_main(auto, max_attempts=2)
-        # if pos := auto.check_element_exist("get_pvp/image"):
-        #     print(pos)
+
         # return True
     except Exception as e:
         auto.logger.error(f"运行失败: {str(e)}", exc_info=True)

@@ -19,7 +19,7 @@ class AppSettingsManager:
         default_settings = {
             "sidebar_width": 60,
             "sidebar_visible": True,
-            "window_size": [1280, 720],
+            "window_size": [960, 540],
             "theme": "light",
             "remember_window_pos": False,
             "window_pos": None,

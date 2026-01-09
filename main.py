@@ -31,12 +31,9 @@ def main():
         app.setApplicationName("BD2-AUTO")
 
         # 初始化信号总线（必须在QApplication创建后）
-        from src.ui.core.signals import get_signal_bus_instance, init_signal_bus
+        from src.ui.core.signals import init_signal_bus
 
-        bus_instance = init_signal_bus()
-
-        # 确保全局signal_bus变量已经初始化
-        global_signal_bus = get_signal_bus_instance()
+        init_signal_bus()
 
         from src.entrypoints.main_window import MainWindow
 

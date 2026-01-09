@@ -186,9 +186,8 @@ class MainInterface(QWidget):
         self.launch_game_btn.clicked.connect(self.on_launch_game)
 
         # 信号总线连接
-        from src.ui.core.signals import get_signal_bus_instance
-
-        signal_bus = get_signal_bus_instance()
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
         signal_bus.log_updated.connect(self.update_log)
         signal_bus.progress_updated.connect(self.update_progress)
 
@@ -417,9 +416,8 @@ class MainInterface(QWidget):
         # 保存参数
         self.config_manager.save_task_config(self.current_task_id, params)
         # 使用正确的信号总线实例
-        from src.ui.core.signals import get_signal_bus_instance
-
-        signal_bus = get_signal_bus_instance()
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
         signal_bus.emit_log(f"已保存任务 '{self.task_mapping[self.current_task_id]['name']}' 的参数")
 
     def get_selected_tasks(self):
@@ -495,9 +493,9 @@ class MainInterface(QWidget):
         开始任务按钮点击事件
         """
         # 获取信号总线实例
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         # 发送开始任务信号
         selected_tasks = self.get_selected_tasks()
@@ -516,9 +514,8 @@ class MainInterface(QWidget):
         停止任务按钮点击事件
         """
         # 获取信号总线实例
-        from src.ui.core.signals import get_signal_bus_instance
-
-        signal_bus = get_signal_bus_instance()
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
 
         self.stop_task_btn.setEnabled(False)
         signal_bus.emit_log("正在停止任务...")
@@ -531,9 +528,9 @@ class MainInterface(QWidget):
         启动游戏按钮点击事件
         """
         # 获取信号总线实例
-        from src.ui.core.signals import get_signal_bus_instance
+        from src.ui.core.signals import get_signal_bus
 
-        signal_bus = get_signal_bus_instance()
+        signal_bus = get_signal_bus()
 
         signal_bus.emit_log("启动游戏")
         # 发送启动游戏信号（由主窗口处理）

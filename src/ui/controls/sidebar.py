@@ -83,9 +83,8 @@ class Sidebar(QFrame):
         self.button_group.buttonClicked.connect(self.on_sidebar_button_clicked)
 
         # 获取信号总线实例
-        from src.ui.core.signals import get_signal_bus_instance
-
-        signal_bus = get_signal_bus_instance()
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
 
         # 连接侧边栏宽度变更信号
         signal_bus.sidebar_width_changed.connect(self.update_sidebar_width)

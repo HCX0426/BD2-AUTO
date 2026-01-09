@@ -33,14 +33,16 @@ class AutoInitThread(QThread):
 
             auto_instance = Auto(ocr_engine=self.ocr_engine, device_type=self.device_type, device_uri=self.device_uri, settings_manager=self.settings_manager)
             # 延迟导入signal_bus，确保它已经被初始化
-            from src.ui.core.signals import signal_bus
+            from src.ui.core.signals import get_signal_bus
+            signal_bus = get_signal_bus()
 
             # 只发送初始化完成信号，日志由主线程处理
             signal_bus.emit_init_completed(auto_instance)
         except Exception as e:
             error_msg = f"自动化核心初始化失败: {str(e)}"
             # 延迟导入signal_bus，确保它已经被初始化
-            from src.ui.core.signals import signal_bus
+            from src.ui.core.signals import get_signal_bus
+            signal_bus = get_signal_bus()
 
             # 只发送初始化失败信号，日志由主线程处理
             signal_bus.emit_init_failed(error_msg)

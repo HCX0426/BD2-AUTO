@@ -348,7 +348,7 @@ class ChainManager:
             step_idx = idx + 1
             step_name = step.step_type
             step_start = time.time()
-            self.logger.info(f"\n--- 执行步骤 {step_idx}/{len(self.steps)}: {step_name} ---\n")
+            self.logger.info(f"\n--- 执行步骤 {step_idx}/{len(self.steps)}: {step_name} ---")
 
             # 总超时检查
             if self._check_total_timeout(start_time):

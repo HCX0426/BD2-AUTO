@@ -37,7 +37,8 @@ class TaskWorker(QThread):
         继承自QThread，在后台线程中执行
         """
         # 延迟导入signal_bus，确保它已经被初始化
-        from src.ui.core.signals import signal_bus
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
 
         total_tasks = len(self.task_ids)
         success = True
@@ -233,7 +234,8 @@ class TaskWorker(QThread):
         请求任务停止
         """
         # 延迟导入signal_bus，确保它已经被初始化
-        from src.ui.core.signals import signal_bus
+        from src.ui.core.signals import get_signal_bus
+        signal_bus = get_signal_bus()
 
         self.should_stop = True
         self.auto_instance.set_should_stop(True)
