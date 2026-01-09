@@ -84,7 +84,7 @@ def lucky_draw(auto: Auto, timeout: int = 400, target_count: int = 7) -> bool:
                     auto.sleep(1)
 
                 # 检查是否抽完
-                if auto.check_element_exist("lucky_draw/抽完标识"):
+                if auto.wait_element("lucky_draw/抽完标识", wait_timeout=0):
                     logger.info("检测到抽完标识")
                     auto.sleep(1)
                     auto.key_press("esc")

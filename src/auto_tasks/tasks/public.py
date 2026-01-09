@@ -39,7 +39,7 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
 
     try:
         # 检查是否已在主界面
-        if auto.check_element_exist("public/主界面", roi=roi_config.get_roi("main_menu")):
+        if auto.wait_element("public/主界面", roi=roi_config.get_roi("main_menu"), wait_timeout=0):
             logger.debug("已在主界面")
             return True
 
@@ -78,8 +78,8 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
 
 def _handle_return_identifiers(auto: Auto) -> bool:
     """处理返回主界面相关的标识（闪避标识/地图标识）"""
-    dodge_pos = auto.check_element_exist("public/闪避标识", roi=roi_config.get_roi("dodge_indicator"))
-    map_pos = auto.check_element_exist("public/地图标识", roi=roi_config.get_roi("map_indicator"))
+    dodge_pos = auto.wait_element("public/闪避标识", roi=roi_config.get_roi("dodge_indicator"), wait_timeout=0)
+    map_pos = auto.wait_element("public/地图标识", roi=roi_config.get_roi("map_indicator"), wait_timeout=0)
 
     if dodge_pos or map_pos:
         auto.key_press("h")
@@ -122,8 +122,8 @@ def back_to_map(auto: Auto, timeout: int = 30) -> bool:
                 logger.info("检测到停止信号，退出任务")
                 return True
 
-            dodge_pos = auto.check_element_exist("public/闪避标识", roi=roi_config.get_roi("dodge_indicator"))
-            map_pos = auto.check_element_exist("public/地图标识", roi=roi_config.get_roi("map_indicator"))
+            dodge_pos = auto.wait_element("public/闪避标识", roi=roi_config.get_roi("dodge_indicator"), wait_timeout=0)
+            map_pos = auto.wait_element("public/地图标识", roi=roi_config.get_roi("map_indicator"), wait_timeout=0)
 
             if dodge_pos or map_pos:
                 logger.info("已在地图")

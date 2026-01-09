@@ -18,6 +18,42 @@ class VerifyHandler:
         self.delay_manager = DelayManager()
         self.device_handler = auto_instance.device_handler
 
+    def _check_window_topmost(self, device) -> bool:
+        """检查窗口是否在前台且可见，用于控制层等待逻辑"""
+        try:
+            import win32con
+            import win32gui
+
+            from src.auto_control.devices.windows import WindowsDevice
+
+            if isinstance(device, WindowsDevice):
+                # 1. 检查窗口是否存在
+                if not win32gui.IsWindow(device.hwnd):
+                    device.logger.debug(f"窗口不存在，句柄: {device.hwnd}")
+                    return False  # 窗口不存在时应该停止执行，避免无效等待
+
+                # 2. 检查窗口是否可见
+                if not win32gui.IsWindowVisible(device.hwnd):
+                    device.logger.warning("窗口不可见，控制层进入无限等待")
+                    return False
+
+                # 3. 检查窗口是否最小化
+                if win32gui.IsIconic(device.hwnd):
+                    device.logger.warning("窗口被最小化，控制层进入无限等待")
+                    return False
+
+                # 4. 检查窗口是否在前台（关键：窗口被遮挡时不在前台，应该进入无限等待）
+                current_foreground = win32gui.GetForegroundWindow()
+                if current_foreground != device.hwnd:
+                    device.logger.warning(
+                        f"窗口不在前台，当前前台句柄: {current_foreground}，目标句柄: {device.hwnd}，控制层进入无限等待"
+                    )
+                    return False
+            return True
+        except Exception as e:
+            device.logger.error(f"检查窗口状态异常: {e}")
+            return True  # 非Windows设备或异常时默认继续执行
+
     def wait_for(
         self, condition: Callable[[], bool], timeout: int = None, interval: float = 0.5, desc: str = "条件验证"
     ) -> AutoResult:
@@ -67,48 +103,35 @@ class VerifyHandler:
             # 等待间隔
             self.delay_manager.apply_delay(interval, self.stop_event)
 
-    def _verify_condition(
-        self, verify_type: str, target: Union[str, List[str]], roi: Optional[Tuple[int, int, int, int]]
-    ) -> bool:
-        """验证条件判断函数"""
-        if verify_type == "exist":
-            return self.check_element_exist(target, roi=roi, wait_timeout=0).success
-        elif verify_type == "disappear":
-            return not self.check_element_exist(target, roi=roi, wait_timeout=0).success
-        elif verify_type == "text":
-            return self.auto.text_click(target, click=False, roi=roi, retry=0).success
-        else:
-            raise VerifyError(f"无效的验证类型: {verify_type}")
-
-    def verify(
-        self,
-        verify_type: str,
-        target: Union[str, List[str]],
-        timeout: int = None,
-        roi: Optional[Tuple[int, int, int, int]] = None,
+    def _wait_with_condition(
+        self, condition_func: Callable[[], bool], desc: str, timeout: int, start_time: float, result: Any = None
     ) -> AutoResult:
-        """统一的屏幕验证方法"""
-        timeout = timeout or self.config.DEFAULT_WAIT_TIMEOUT
-        start_time = time.time()
+        """通用等待方法，减少代码重复，支持窗口未置顶检测"""
+        # 获取当前活动设备
+        active_device = self.device_handler.get_device()
 
-        # 使用提取的独立方法作为条件
-        def condition() -> bool:
-            return self._verify_condition(verify_type, target, roi)
+        def enhanced_condition() -> bool:
+            # 1. 检查窗口置顶状态
+            if not self._check_window_topmost(active_device):
+                return False
+            # 2. 执行原始条件检查
+            return condition_func()
 
-        # 执行等待并处理结果
-        wait_result = self.wait_for(condition, timeout, desc=f"{verify_type} - {target}")
+        wait_result = self.wait_for(enhanced_condition, timeout, desc=desc)
+        elapsed = time.time() - start_time
+
         if wait_result.success and not wait_result.is_interrupted:
-            return AutoResult.success_result(data=True, elapsed_time=wait_result.elapsed_time)
+            return AutoResult.success_result(data=result.data if result else True, elapsed_time=elapsed)
         elif wait_result.is_interrupted:
             return AutoResult.fail_result(
-                error_msg=f"验证{verify_type}-{target}被中断",
-                elapsed_time=wait_result.elapsed_time,
+                error_msg=f"{desc}被中断",
+                elapsed_time=elapsed,
                 is_interrupted=True,
             )
         else:
             return AutoResult.fail_result(
                 error_msg=wait_result.error_msg,
-                elapsed_time=wait_result.elapsed_time,
+                elapsed_time=elapsed,
                 is_interrupted=wait_result.is_interrupted,
             )
 
@@ -162,111 +185,48 @@ class VerifyHandler:
             self.logger.error(error_msg, exc_info=True)
             return AutoResult.fail_result(error_msg=error_msg)
 
-    def check_element_exist(
+    def wait_element(
         self,
-        template_name: Union[str, List[str]],
+        template: Union[str, List[str]],
+        timeout: int = None,
+        roi: Optional[Tuple[int, int, int, int]] = None,
         delay: float = None,
         device_uri: Optional[str] = None,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-        wait_timeout: int = 0,
+        wait_timeout: int = None,
     ) -> AutoResult:
-        """检查模板元素是否存在并返回坐标"""
-        start_time = time.time()
-        delay = delay or self.config.CHECK_ELEMENT_DELAY
+        """等待元素出现并返回坐标，支持单次检查和等待模式
 
-        if wait_timeout > 0:
+        Args:
+            template: 模板名称或模板列表
+            timeout: 等待超时时间（仅在wait_timeout为None时有效）
+            roi: 模板匹配的ROI区域
+            delay: 检查前的延迟时间
+            device_uri: 设备URI
+            wait_timeout: 等待超时时间（优先级高于timeout），0表示仅检查一次
+        """
+        # 处理参数优先级
+        actual_timeout = wait_timeout if wait_timeout is not None else (timeout or self.config.DEFAULT_WAIT_TIMEOUT)
+        delay = delay or self.config.CHECK_ELEMENT_DELAY
+        start_time = time.time()
+
+        if actual_timeout > 0:
             result = None
 
             def condition_func():
                 nonlocal result
-                check_result = self._check_element_once(template_name, delay, device_uri, roi)
+                check_result = self._check_element_once(template, delay, device_uri, roi)
                 result = check_result
                 return check_result.success
 
             return self._wait_with_condition(
                 condition_func=condition_func,
-                desc=f"等待元素 {template_name} 出现",
-                timeout=wait_timeout,
+                desc=f"等待元素 {template} 出现",
+                timeout=actual_timeout,
                 start_time=start_time,
                 result=result,
             )
         else:
-            return self._check_element_once(template_name, delay, device_uri, roi)
-
-    def wait_element(
-        self, template: Union[str, List[str]], timeout: int = None, roi: Optional[Tuple[int, int, int, int]] = None
-    ) -> AutoResult:
-        """等待元素出现并返回坐标"""
-        timeout = timeout or self.config.DEFAULT_WAIT_TIMEOUT
-        return self.check_element_exist(template, roi=roi, wait_timeout=timeout)
-
-    def _check_window_topmost(self, device) -> bool:
-        """检查窗口是否在前台且可见，用于控制层等待逻辑"""
-        try:
-            import win32con
-            import win32gui
-
-            from src.auto_control.devices.windows import WindowsDevice
-
-            if isinstance(device, WindowsDevice):
-                # 1. 检查窗口是否存在
-                if not win32gui.IsWindow(device.hwnd):
-                    device.logger.debug(f"窗口不存在，句柄: {device.hwnd}")
-                    return False  # 窗口不存在时应该停止执行，避免无效等待
-
-                # 2. 检查窗口是否可见
-                if not win32gui.IsWindowVisible(device.hwnd):
-                    device.logger.warning("窗口不可见，控制层进入无限等待")
-                    return False
-
-                # 3. 检查窗口是否最小化
-                if win32gui.IsIconic(device.hwnd):
-                    device.logger.warning("窗口被最小化，控制层进入无限等待")
-                    return False
-
-                # 4. 检查窗口是否在前台（关键：窗口被遮挡时不在前台，应该进入无限等待）
-                current_foreground = win32gui.GetForegroundWindow()
-                if current_foreground != device.hwnd:
-                    device.logger.warning(
-                        f"窗口不在前台，当前前台句柄: {current_foreground}，目标句柄: {device.hwnd}，控制层进入无限等待"
-                    )
-                    return False
-            return True
-        except Exception as e:
-            device.logger.error(f"检查窗口状态异常: {e}")
-            return True  # 非Windows设备或异常时默认继续执行
-
-    def _wait_with_condition(
-        self, condition_func: Callable[[], bool], desc: str, timeout: int, start_time: float, result: Any = None
-    ) -> AutoResult:
-        """通用等待方法，减少代码重复，支持窗口未置顶检测"""
-        # 获取当前活动设备
-        active_device = self.device_handler.get_device()
-
-        def enhanced_condition() -> bool:
-            # 1. 检查窗口置顶状态
-            if not self._check_window_topmost(active_device):
-                return False
-            # 2. 执行原始条件检查
-            return condition_func()
-
-        wait_result = self.wait_for(enhanced_condition, timeout, desc=desc)
-        elapsed = time.time() - start_time
-
-        if wait_result.success and not wait_result.is_interrupted:
-            return AutoResult.success_result(data=result.data if result else True, elapsed_time=elapsed)
-        elif wait_result.is_interrupted:
-            return AutoResult.fail_result(
-                error_msg=f"{desc}被中断",
-                elapsed_time=elapsed,
-                is_interrupted=True,
-            )
-        else:
-            return AutoResult.fail_result(
-                error_msg=wait_result.error_msg,
-                elapsed_time=elapsed,
-                is_interrupted=wait_result.is_interrupted,
-            )
+            return self._check_element_once(template, delay, device_uri, roi)
 
     def wait_text(self, text: str, timeout: int = None, roi: Optional[Tuple[int, int, int, int]] = None) -> AutoResult:
         """等待文本出现并返回坐标"""
@@ -287,3 +247,48 @@ class VerifyHandler:
             start_time=start_time,
             result=result,
         )
+
+    def _verify_condition(
+        self, verify_type: str, target: Union[str, List[str]], roi: Optional[Tuple[int, int, int, int]]
+    ) -> bool:
+        """验证条件判断函数"""
+        if verify_type == "exist":
+            return self.wait_element(target, roi=roi, wait_timeout=0).success
+        elif verify_type == "disappear":
+            return not self.wait_element(target, roi=roi, wait_timeout=0).success
+        elif verify_type == "text":
+            return self.auto.text_click(target, click=False, roi=roi, retry=0).success
+        else:
+            raise VerifyError(f"无效的验证类型: {verify_type}")
+
+    def verify(
+        self,
+        verify_type: str,
+        target: Union[str, List[str]],
+        timeout: int = None,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+    ) -> AutoResult:
+        """统一的屏幕验证方法"""
+        timeout = timeout or self.config.DEFAULT_WAIT_TIMEOUT
+        start_time = time.time()
+
+        # 使用提取的独立方法作为条件
+        def condition() -> bool:
+            return self._verify_condition(verify_type, target, roi)
+
+        # 执行等待并处理结果
+        wait_result = self.wait_for(condition, timeout, desc=f"{verify_type} - {target}")
+        if wait_result.success and not wait_result.is_interrupted:
+            return AutoResult.success_result(data=True, elapsed_time=wait_result.elapsed_time)
+        elif wait_result.is_interrupted:
+            return AutoResult.fail_result(
+                error_msg=f"验证{verify_type}-{target}被中断",
+                elapsed_time=wait_result.elapsed_time,
+                is_interrupted=True,
+            )
+        else:
+            return AutoResult.fail_result(
+                error_msg=wait_result.error_msg,
+                elapsed_time=wait_result.elapsed_time,
+                is_interrupted=wait_result.is_interrupted,
+            )

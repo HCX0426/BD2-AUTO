@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1024, 600)
 
         # 如果设置了记住窗口位置，则加载位置，否则居中显示
-        if self.settings_manager.get_setting("remember_window_pos", True):
+        if self.settings_manager.get_setting("remember_window_pos", False):
             window_pos = self.settings_manager.get_setting("window_pos", None)
             if window_pos:
                 self.move(window_pos[0], window_pos[1])
@@ -510,14 +510,23 @@ class MainWindow(QMainWindow):
         """
         关闭窗口事件处理，确保任务完全终止后再关闭窗口
         """
-        # 保存窗口大小
-        self.settings_manager.set_setting("window_size", [self.width(), self.height()])
-
-        # 如果设置了记住窗口位置，则保存位置
-        if self.settings_manager.get_setting("remember_window_pos", True):
+        # 只有当记住窗口位置时，才保存窗口大小和位置
+        if self.settings_manager.get_setting("remember_window_pos", False):
+            # 保存窗口大小和位置
+            self.settings_manager.set_setting("window_size", [self.width(), self.height()])
             self.settings_manager.set_setting("window_pos", [self.x(), self.y()])
-
-        self.settings_manager.save_settings()
+            self.settings_manager.save_settings()
+        else:
+            # 只保存其他设置，不保存窗口大小和位置
+            # 创建一个临时字典，排除窗口大小和位置设置
+            temp_settings = self.settings_manager.settings.copy()
+            if "window_size" in temp_settings:
+                del temp_settings["window_size"]
+            if "window_pos" in temp_settings:
+                del temp_settings["window_pos"]
+            # 保存修改后的设置
+            self.settings_manager.settings = temp_settings
+            self.settings_manager.save_settings()
         from src.ui.core.signals import get_signal_bus_instance
 
         signal_bus = get_signal_bus_instance()

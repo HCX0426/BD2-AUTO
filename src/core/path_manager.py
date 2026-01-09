@@ -50,7 +50,6 @@ class PathManager:
         self.task_template_path = os.path.join(self.static_base, "src", "auto_tasks", "templates")
         self.task_path = os.path.join(self.static_base, "src", "auto_tasks", "tasks")  # 定义 task_path
         self.log_path = os.path.join(self.dynamic_base, "logs")
-        self.cache_path = os.path.join(self.dynamic_base, "cache")
         self.task_configs_path = os.path.join(self.dynamic_base, "task_configs.json")
         self.match_temple_debug_path = os.path.join(self.dynamic_base, "temple_debug")
         self.match_ocr_debug_path = os.path.join(self.dynamic_base, "ocr_debug")
@@ -62,7 +61,6 @@ class PathManager:
         dirs_to_create = [
             os.path.dirname(self.ui_app_settings_path),
             self.log_path,
-            self.cache_path,
             self.match_temple_debug_path,
             self.match_ocr_debug_path,
             self.ocr_model_path,
@@ -89,7 +87,6 @@ class PathManager:
             "rois_config": self.rois_config_path,
             "task_template": self.task_template_path,
             "log": self.log_path,
-            "cache": self.cache_path,
             "task_configs": self.task_configs_path,
             "app_settings": self.ui_app_settings_path,
             "task_path": self.task_path,  # 对外提供 task_path

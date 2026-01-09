@@ -10,7 +10,7 @@ from .auto_utils import LogFormatter
 
 @dataclass
 class Step:
-    """链式调用的步骤对象（支持单步重试+前置验证重试）"""
+    """链式调用的步骤对象（支持单步重试+前置验证重试+回退重试）"""
 
     step_type: str  # 操作类型：template_click/text_click/custom等
     params: dict  # 操作参数
@@ -19,6 +19,8 @@ class Step:
     retry_on_failure: bool = True  # 单步耗尽后是否整体失败
     pre_verify: Optional[dict] = None  # 前置验证配置：{"type": 方法名, "params": 参数}
     pre_verify_retry: int = AutoConfig.DEFAULT_VERIFY_RETRY  # 前置验证的单步重试次数
+    back_retry: int = AutoConfig.DEFAULT_BACK_RETRY  # 前置验证失败时回退到上一步的重试次数
+    is_back_retried: bool = False  # 标记当前步骤是否已经回退重试过
 
 
 class ChainManager:
@@ -37,15 +39,24 @@ class ChainManager:
         """链式调用衔接符（仅语法糖，无实际逻辑）"""
         return self
 
-    def with_pre_verify(self, verify_type: str, pre_verify_retry: int = None, **verify_params) -> "ChainManager":
+    def with_pre_verify(
+        self, verify_type: str, pre_verify_retry: int = None, back_retry: int = None, **verify_params
+    ) -> "ChainManager":
         """
         为下一个步骤配置前置验证
-        :param verify_type: 验证方法名（复用已有方法：wait_element/wait_text/check_element_exist/verify等）
+        :param verify_type: 验证方法名（复用已有方法：wait_element/wait_text/verify等）
         :param pre_verify_retry: 前置验证的单步重试次数
+        :param back_retry: 前置验证失败时回退到上一步的重试次数
         :param verify_params: 验证方法的参数（与对应方法完全一致）
         """
         pre_verify_retry = pre_verify_retry or self.config.DEFAULT_VERIFY_RETRY
-        self._current_pre_verify = {"type": verify_type, "params": verify_params, "retry": pre_verify_retry}
+        back_retry = back_retry or self.config.DEFAULT_BACK_RETRY
+        self._current_pre_verify = {
+            "type": verify_type,
+            "params": verify_params,
+            "retry": pre_verify_retry,
+            "back_retry": back_retry,
+        }
         return self
 
     # ======================== 重试/超时配置 ========================
@@ -94,6 +105,11 @@ class ChainManager:
                     self._current_pre_verify.get("retry", self.config.DEFAULT_VERIFY_RETRY)
                     if self._current_pre_verify
                     else self.config.DEFAULT_VERIFY_RETRY
+                ),
+                back_retry=(
+                    self._current_pre_verify.get("back_retry", self.config.DEFAULT_BACK_RETRY)
+                    if self._current_pre_verify
+                    else self.config.DEFAULT_BACK_RETRY
                 ),
             )
         )
@@ -312,9 +328,9 @@ class ChainManager:
     def execute(self) -> AutoResult:
         """
         执行逻辑：
-        1. 前置验证失败 → 重试验证（直到验证重试耗尽）→ 验证仍失败则步骤失败
+        1. 前置验证失败 → 重试验证（直到验证重试耗尽）→ 验证仍失败则回退到上一步重试
         2. 步骤执行失败 → 重试当前步骤（直到单步重试耗尽）→ 步骤仍失败则整体失败
-        3. 全程不回退到上一步/第一步，仅重试当前失败节点
+        3. 回退重试时，重置到上一个步骤重新执行
         """
         start_time = time.time()
         step_results: List[AutoResult] = []
@@ -325,26 +341,64 @@ class ChainManager:
                 error_msg=f"步骤链总超时（{self.total_timeout}秒）", elapsed_time=time.time() - start_time
             )
 
-        # 逐个执行步骤
-        for idx, step in enumerate(self.steps):
+        # 逐个执行步骤，使用while循环替代for循环，支持回退重试
+        idx = 0
+        while idx < len(self.steps):
+            step = self.steps[idx]
             step_idx = idx + 1
             step_name = step.step_type
             step_start = time.time()
-            self.logger.info(f"\n--- 执行步骤 {step_idx}/{len(self.steps)}: {step_name} ---")
+            self.logger.info(f"\n--- 执行步骤 {step_idx}/{len(self.steps)}: {step_name} ---\n")
+
+            # 总超时检查
+            if self._check_total_timeout(start_time):
+                return AutoResult.fail_result(
+                    error_msg=f"步骤链总超时（{self.total_timeout}秒）", elapsed_time=time.time() - start_time
+                )
 
             # 步骤1：执行前置验证（带单步重试）
+            verify_success = True
             if step.pre_verify:
                 try:
                     verify_success = self._execute_pre_verify(step)
                 except VerifyError as e:
                     error_msg = f"步骤{step_idx}前置验证异常：{str(e)}"
                     self.logger.error(error_msg)
-                    return AutoResult.fail_result(error_msg=error_msg, elapsed_time=time.time() - start_time)
+                    verify_success = False
 
-                if not verify_success:
-                    error_msg = f"步骤{step_idx}前置验证重试{step.pre_verify_retry}次后仍失败"
-                    self.logger.error(error_msg)
+            if not verify_success:
+                error_msg = f"步骤{step_idx}前置验证重试{step.pre_verify_retry}次后仍失败"
+                self.logger.error(error_msg)
+
+                # 检查是否可以回退到上一步
+                if idx > 0 and step.back_retry > 0 and not step.is_back_retried:
+                    # 可以回退，执行回退逻辑
+                    self.logger.info(
+                        f"尝试回退到步骤{idx}/{len(self.steps)}重新执行，剩余回退次数：{step.back_retry-1}"
+                    )
+
+                    # 重置当前步骤的回退状态
+                    step.is_back_retried = True
+                    step.back_retry -= 1
+
+                    # 清空已保存的当前步骤及后续步骤的结果
+                    if idx < len(step_results):
+                        step_results = step_results[:idx]
+
+                    # 回退到上一个步骤
+                    idx -= 1
+                    continue
+
+                # 无法回退，返回失败结果
+                if step.retry_on_failure:
                     return AutoResult.fail_result(error_msg=error_msg, elapsed_time=time.time() - start_time)
+                else:
+                    # 允许跳过，继续执行下一个步骤
+                    self.logger.warning(f"步骤{step_idx}失败，但允许跳过，继续执行下一个步骤")
+                    idx += 1
+                    continue
+
+            if step.pre_verify:
                 self.logger.info("前置验证通过")
 
             # 步骤2：执行当前步骤（带单步重试）
@@ -353,17 +407,37 @@ class ChainManager:
             except StepExecuteError as e:
                 error_msg = f"步骤{step_idx}执行异常：{str(e)}"
                 self.logger.error(error_msg)
-                return AutoResult.fail_result(error_msg=error_msg, elapsed_time=time.time() - start_time)
+                if step.retry_on_failure:
+                    return AutoResult.fail_result(error_msg=error_msg, elapsed_time=time.time() - start_time)
+                else:
+                    # 允许跳过，继续执行下一个步骤
+                    self.logger.warning(f"步骤{step_idx}失败，但允许跳过，继续执行下一个步骤")
+                    idx += 1
+                    continue
 
             if not step_success:
                 error_msg = f"步骤{step_idx}({step_name})重试{step.step_retry}次后仍失败"
                 self.logger.error(error_msg)
-                return AutoResult.fail_result(
-                    error_msg=error_msg, elapsed_time=time.time() - start_time, retry_count=step.step_retry
-                )
+                if step.retry_on_failure:
+                    return AutoResult.fail_result(
+                        error_msg=error_msg, elapsed_time=time.time() - start_time, retry_count=step.step_retry
+                    )
+                else:
+                    # 允许跳过，继续执行下一个步骤
+                    self.logger.warning(f"步骤{step_idx}失败，但允许跳过，继续执行下一个步骤")
+                    idx += 1
+                    continue
 
-            step_results.append(step_result)
+            # 步骤执行成功，保存结果，继续执行下一个步骤
+            if idx < len(step_results):
+                step_results[idx] = step_result
+            else:
+                step_results.append(step_result)
             self.logger.info(f"步骤{step_idx}执行成功，耗时: {time.time()-step_start:.1f}秒")
+
+            # 重置回退状态，准备执行下一个步骤
+            step.is_back_retried = False
+            idx += 1
 
         # 所有步骤执行成功
         total_elapsed = time.time() - start_time

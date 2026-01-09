@@ -280,28 +280,6 @@ class BaseDevice(ABC):
         pass
 
     @abstractmethod
-    def wait(
-        self,
-        template_name: Union[str, list],
-        timeout: float = 10.0,
-        interval: float = 0.5,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-    ) -> Optional[Tuple[int, int]]:
-        """
-        等待指定模板元素出现，超时未出现则返回None。
-
-        Args:
-            template_name: 模板名称（str）或模板列表（list）
-            timeout: 等待超时时间（秒），默认10.0秒
-            interval: 模板检查间隔（秒），默认0.5秒
-            roi: 模板匹配的ROI区域，None表示全图
-
-        Returns:
-            Optional[Tuple[int, int]]: 匹配到的模板中心点坐标，超时/失败返回None
-        """
-        pass
-
-    @abstractmethod
     def exists(
         self,
         template_name: Union[str, list],
@@ -371,7 +349,6 @@ class BaseDevice(ABC):
             bool: 最小化返回True，否则返回False
         """
         return False
-
 
     @property
     def screenshot_mode(self) -> Optional[str]:

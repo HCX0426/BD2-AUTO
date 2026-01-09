@@ -321,9 +321,6 @@ class Auto:
         return self.device_handler.set_active_device(device_uri)
 
     # ======================== 验证方法代理（对外暴露） ========================
-    def check_element_exist(self, *args, **kwargs) -> AutoResult:
-        """代理调用验证处理器的检查元素存在方法"""
-        return self.verify_handler.check_element_exist(*args, **kwargs)
 
     def wait_element(self, *args, **kwargs) -> AutoResult:
         """代理调用验证处理器的等待元素方法"""

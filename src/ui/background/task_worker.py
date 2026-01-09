@@ -87,53 +87,94 @@ class TaskWorker(QThread):
                 # 执行任务
                 task_func = task_info.get("function")
                 if task_func:
-                    try:
-                        # 从任务配置中获取重试次数，如果有则更新全局配置
-                        task_retry = task_params.get("retry")
-                        original_retry = self.auto_instance.config.DEFAULT_OPERATION_RETRY
-                        if task_retry is not None:
-                            self.auto_instance.config.DEFAULT_OPERATION_RETRY = task_retry
-                            log_msg = f"任务 {task_info['name']} 重试次数已设置为: {task_retry}"
+                    # 获取任务链重试次数：优先从任务配置获取，否则使用全局设置，最后使用默认值
+                    chain_retry = task_params.get("retry")
+                    if chain_retry is None:
+                        # 从UI设置获取全局任务链重试次数
+                        chain_retry = self.auto_instance.settings_manager.get_setting("retry_count", 0) if hasattr(self.auto_instance, "settings_manager") else 0
+                    
+                    task_success = False
+                    retry_count = 0
+                    
+                    while retry_count <= chain_retry and not task_success and not self.check_stop():
+                        try:
+                            if retry_count > 0:
+                                log_msg = f"任务 {task_info['name']} 第 {retry_count}/{chain_retry} 次重试"
+                                self.log_updated.emit(log_msg)
+                                signal_bus.emit_log(log_msg)
+                                
+                                # 重试前进行错误处理
+                                log_msg = f"任务 {task_info['name']} 重试前进行错误处理..."
+                                self.log_updated.emit(log_msg)
+                                signal_bus.emit_log(log_msg)
+                                
+                                # 1. 检查设备状态
+                                if not self.auto_instance.device_manager.get_active_device():
+                                    log_msg = f"任务 {task_info['name']} 重试前重新连接设备..."
+                                    self.log_updated.emit(log_msg)
+                                    signal_bus.emit_log(log_msg)
+                                    # 重新添加设备
+                                    if not self.auto_instance.add_device():
+                                        log_msg = f"任务 {task_info['name']} 重试时重新添加设备失败"
+                                        self.log_updated.emit(log_msg)
+                                        signal_bus.emit_log(log_msg)
+                                        continue
+                                    # 重新启动设备连接
+                                    self.auto_instance.start()
+                                
+                                # 2. 重置停止标志
+                                self.auto_instance.set_should_stop(False)
+                                
+                                # 3. 等待一小段时间，让系统稳定
+                                import time
+                                time.sleep(1.0)
+                            
+                            # 只传递函数定义中声明的参数（auto和有效参数）
+                            sig = inspect.signature(task_func)
+                            valid_params = {k: v for k, v in task_params.items() if k in sig.parameters}
+
+                            # 如果任务函数支持check_stop参数，传递check_stop方法
+                            if "check_stop" in sig.parameters:
+                                valid_params["check_stop"] = self.check_stop
+
+                            task_func(self.auto_instance, **valid_params)
+                            
+                            # 任务函数执行完成后立即检查是否需要停止
+                            if self.check_stop():
+                                # 任务被中断，不应该显示为正常完成
+                                log_msg = f"任务 {task_info['name']} 执行被中断"
+                                self.log_updated.emit(log_msg)
+                                signal_bus.emit_log(log_msg)
+                                log_msg = f"任务执行已被中断，已完成 {i+1}/{total_tasks} 个任务"
+                                self.log_updated.emit(log_msg)
+                                signal_bus.emit_log(log_msg)
+                                success = False
+                                break
+                            else:
+                                # 任务正常完成
+                                log_msg = f"任务 {task_info['name']} 执行完成"
+                                self.log_updated.emit(log_msg)
+                                signal_bus.emit_log(log_msg)
+                                task_success = True
+                        except Exception as e:
+                            retry_count += 1
+                            log_msg = f"任务 {task_info['name']} 执行出错: {str(e)}"
                             self.log_updated.emit(log_msg)
                             signal_bus.emit_log(log_msg)
-
-                        # 只传递函数定义中声明的参数（auto和有效参数）
-                        sig = inspect.signature(task_func)
-                        valid_params = {k: v for k, v in task_params.items() if k in sig.parameters}
-
-                        # 如果任务函数支持check_stop参数，传递check_stop方法
-                        if "check_stop" in sig.parameters:
-                            valid_params["check_stop"] = self.check_stop
-
-                        task_func(self.auto_instance, **valid_params)
-                        
-                        # 恢复原始重试次数
-                        if task_retry is not None:
-                            self.auto_instance.config.DEFAULT_OPERATION_RETRY = original_retry
-
-                        # 任务函数执行完成后立即检查是否需要停止
-                        if self.check_stop():
-                            # 任务被中断，不应该显示为正常完成
-                            log_msg = f"任务 {task_info['name']} 执行被中断"
-                            self.log_updated.emit(log_msg)
-                            signal_bus.emit_log(log_msg)
-                            log_msg = f"任务执行已被中断，已完成 {i+1}/{total_tasks} 个任务"
-                            self.log_updated.emit(log_msg)
-                            signal_bus.emit_log(log_msg)
-                            success = False
-                            break
-                        else:
-                            # 任务正常完成
-                            log_msg = f"任务 {task_info['name']} 执行完成"
-                            self.log_updated.emit(log_msg)
-                            signal_bus.emit_log(log_msg)
-                    except Exception as e:
-                        log_msg = f"任务 {task_info['name']} 执行出错: {str(e)}"
-                        self.log_updated.emit(log_msg)
-                        signal_bus.emit_log(log_msg)
-                        if self.check_stop():
-                            success = False
-                            break
+                            
+                            if retry_count > chain_retry:
+                                # 已达到最大重试次数
+                                log_msg = f"任务 {task_info['name']} 已达最大重试次数 {chain_retry}，执行失败"
+                                self.log_updated.emit(log_msg)
+                                signal_bus.emit_log(log_msg)
+                                
+                                # 任务失败，整个任务链失败
+                                success = False
+                                break
+                            
+                            if self.check_stop():
+                                success = False
+                                break
                 else:
                     log_msg = f"警告：任务 {task_info['name']} 没有执行函数，已跳过"
                     self.log_updated.emit(log_msg)

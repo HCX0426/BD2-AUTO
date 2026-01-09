@@ -112,8 +112,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     logger.info("设置MAX战斗次数")
                     auto.click(pos, click_time=2, coord_type="PHYSICAL")
                     auto.sleep(1)
-                    if pos := auto.check_element_exist(
-                        "get_pvp/选项完成", roi=roi_config.get_roi("option_completed", "get_pvp")
+                    if pos := auto.wait_element(
+                        "get_pvp/选项完成", roi=roi_config.get_roi("option_completed", "get_pvp"), wait_timeout=0
                     ):
                         logger.info("开始战斗, next: battle_prepared")
                         auto.click(pos, click_time=2, coord_type="LOGICAL")
@@ -128,8 +128,8 @@ def get_pvp(auto: Auto, timeout: int = 600) -> bool:
                     logger.info("设置MAX战斗次数")
                     auto.click(pos, click_time=2, coord_type="PHYSICAL")
                     auto.sleep(1)
-                    if pos := auto.check_element_exist(
-                        "get_pvp/选项完成", roi=roi_config.get_roi("option_completed", "get_pvp")
+                    if pos := auto.wait_element(
+                        "get_pvp/选项完成", roi=roi_config.get_roi("option_completed", "get_pvp"), wait_timeout=0
                     ):
                         logger.info("开始战斗")
                         auto.click(pos, click_time=2, coord_type="LOGICAL")

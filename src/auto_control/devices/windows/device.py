@@ -109,7 +109,7 @@ class WindowsDevice(BaseDevice):
         self.window_manager = WindowManager(self)
         self.screenshot_manager = ScreenshotManager(self)
         self.input_controller = InputController(self)
-        
+
         # 同步hwnd属性，确保device.hwnd与window_manager.hwnd保持一致
         self.hwnd = self.window_manager.hwnd
 
@@ -166,7 +166,7 @@ class WindowsDevice(BaseDevice):
             if not self.window_manager.hwnd:
                 self.logger.debug("窗口句柄为None，跳过动态信息更新")
                 return False
-                
+
             if self.window_manager.is_minimized():
                 self.logger.debug("窗口处于最小化状态，跳过动态信息更新")
                 return False
@@ -325,7 +325,8 @@ class WindowsDevice(BaseDevice):
                     self.logger.info(
                         f"Windows设备连接成功 | "
                         f"标题: {self.window_manager.window_title} | 句柄: {self.window_manager.hwnd} | "
-                        f"类名: {self.window_manager.window_class} | PID: {self.window_manager.process_id} | "
+                        f"类名: {self.window_manager.
+                    window_class} | PID: {self.window_manager.process_id} | "
                         f"截图策略: {self.screenshot_manager._best_screenshot_strategy} | 截图模式: {self.screenshot_manager._screenshot_mode} | "
                         f"点击模式: {self._click_mode}"
                     )
@@ -354,6 +355,7 @@ class WindowsDevice(BaseDevice):
             bool: 断开成功返回True
         """
         self.clear_last_error()
+
         if self.window_manager.hwnd:
             self.logger.info(
                 f"断开窗口连接 | 标题: {self.window_manager.window_title} | 句柄: {self.window_manager.hwnd}"
@@ -515,6 +517,7 @@ class WindowsDevice(BaseDevice):
         self.logger.info(f"开始激活窗口（最多{max_attempts}次尝试）| 句柄: {self.window_manager.hwnd}")
         if self.window_manager._activate_window(temp_activation=False, max_attempts=max_attempts):
             self._last_activate_time = current_time
+
             self._update_dynamic_window_info()
             return True
         else:
@@ -653,6 +656,7 @@ class WindowsDevice(BaseDevice):
                 is_valid, err_msg = self.coord_transformer.validate_roi_format(roi)
                 if not is_valid:
                     self.logger.warning(f"ROI无效: {err_msg}，切换为全图搜索")
+
                     processed_roi = None
 
             # 多模板匹配
@@ -679,55 +683,6 @@ class WindowsDevice(BaseDevice):
             self._record_error("exists", f"模板检查异常：{str(e)}")
             self.logger.error(self.last_error, exc_info=True)
             return None
-
-    def wait(
-        self,
-        template_name: Union[str, List[str]],
-        timeout: float = 10.0,
-        interval: float = 0.5,
-        roi: Optional[Tuple[int, int, int, int]] = None,
-    ) -> Optional[Tuple[int, int]]:
-        """
-        等待指定模板出现，超时未出现返回None。
-
-        Args:
-            template_name: 模板名称（str）或模板列表（list）
-            timeout: 等待超时时间（秒），默认10.0秒
-            interval: 模板检查间隔（秒），默认0.5秒
-            roi: 模板匹配的ROI区域，None表示全图
-
-        Returns:
-            Optional[Tuple[int, int]]: 匹配到的中心点坐标，超时/中断返回None
-        """
-        self.clear_last_error()
-        start_time = time.time()
-        templates = [template_name] if isinstance(template_name, str) else template_name
-        self.logger.info(
-            f"开始等待模板 | 列表: {templates} | 超时: {timeout}s | 检查间隔: {interval}s | "
-            f"ROI: {roi} | 截图模式: {self._screenshot_mode} | 点击模式: {self._click_mode}"
-        )
-
-        while time.time() - start_time < timeout:
-            # 检查停止信号
-            if self.stop_event.is_set():
-                self._record_error("wait", "模板等待被停止信号中断")
-                self.logger.info(self.last_error)
-                return None
-
-            # 简化处理：不再检查窗口置顶状态，由控制层处理无限等待逻辑
-
-            center_pos = self.exists(templates, threshold=0.8, roi=roi)
-            if center_pos is not None:
-                elapsed_time = time.time() - start_time
-                self.logger.info(f"模板等待成功 | 列表: {templates} | 耗时: {elapsed_time:.1f}s | 中心点: {center_pos}")
-                return center_pos
-
-            # 等待下一次检查
-            self.sleep(interval)
-
-        self._record_error("wait", f"模板等待超时：{timeout}秒")
-        self.logger.error(self.last_error)
-        return None
 
     # -------------------------- 属性访问器 --------------------------
     @property
@@ -765,7 +720,7 @@ class WindowsDevice(BaseDevice):
                 self.logger.warning(f"窗口句柄无效: {self.window_manager.hwnd}，需要重新连接")
                 # 不直接设置hwnd为None，让上层决定如何处理
                 return DeviceState.DISCONNECTED
-            
+
             # 窗口被遮挡时，只记录日志，不返回DISCONNECTED
             if not win32gui.IsWindowVisible(self.window_manager.hwnd):
                 self.logger.info(f"窗口被遮挡: {self.window_manager.hwnd}")

@@ -1,0 +1,25 @@
+# Production dependencies for BD2-AUTO
+# CPU version of PyTorch for Python 3.12
+# Only include necessary dependencies for production environment
+
+# Core dependencies
+torch==2.4.1
+numpy==1.26.4
+
+# Windows-specific dependencies
+pywin32==311
+pillow==12.0.0
+psutil==7.1.3
+pyperclip==1.11.0
+PyDirectInput==1.0.4
+
+# OCR and vision dependencies
+easyocr==1.7.2
+opencv-contrib-python==4.12.0.88
+scikit-image==0.25.2
+
+# GUI dependencies
+PyQt6==6.10.1
+
+# Hardware acceleration for screenshot
+dxcam==0.0.5

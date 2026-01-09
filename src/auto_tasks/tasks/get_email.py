@@ -62,7 +62,7 @@ def get_email(auto: Auto, timeout: int = 300) -> bool:
             # 3. 检查邮箱是否为空
             if state == "email_entered":
                 logger.info("检查邮箱是否为空")
-                if auto.check_element_exist("get_email/空邮箱标识", roi=roi_config.get_roi("empty_email", "get_email")):
+                if auto.wait_element("get_email/空邮箱标识", roi=roi_config.get_roi("empty_email", "get_email"), wait_timeout=0):
                     logger.info("邮箱为空，无需领取")
                     state = "emails_received"
                 else:

@@ -57,14 +57,15 @@ class AutoConfig:
     TEXT_INPUT_INTERVAL: float = 0.05
 
     # 超时配置（秒）
-    DEFAULT_WAIT_TIMEOUT: int = field(default_factory=lambda: config.get("framework.default_wait_timeout", 30))
+    DEFAULT_WAIT_TIMEOUT: int = field(default_factory=lambda: config.get("framework.default_wait_timeout", 20))
     DEFAULT_DEVICE_TIMEOUT: float = 10.0
     DEFAULT_TASK_TIMEOUT: int = field(default_factory=lambda: config.get("framework.default_task_timeout", 300))
 
     # 重试配置
-    DEFAULT_STEP_RETRY: int = 3
+    DEFAULT_STEP_RETRY: int = 1
     DEFAULT_VERIFY_RETRY: int = 3
     DEFAULT_OPERATION_RETRY: int = 0
+    DEFAULT_BACK_RETRY: int = 1  # 回退到上一步的重试次数
 
     # 坐标/分辨率配置
     BASE_RESOLUTION: Tuple[int, int] = field(

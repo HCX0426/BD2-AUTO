@@ -21,7 +21,7 @@ class AppSettingsManager:
             "sidebar_visible": True,
             "window_size": [1280, 720],
             "theme": "light",
-            "remember_window_pos": True,
+            "remember_window_pos": False,
             "window_pos": None,
             "device_type": "windows",
         }

@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.ui.core.signals import signal_bus
+
 
 
 class MainInterface(QWidget):

@@ -116,8 +116,6 @@ class SettingsInterface(QWidget):
         self.click_mode_combo.addItems(["前台点击", "后台点击"])
         device_layout.addRow("点击模式:", self.click_mode_combo)
 
-
-
         device_group.setLayout(device_layout)
         layout.addWidget(device_group)
 
@@ -158,12 +156,25 @@ class SettingsInterface(QWidget):
         # 点击模式变化时联动截图模式
         self.click_mode_combo.currentIndexChanged.connect(self._update_screenshot_mode_options)
 
+        # 连接设置变化信号，实现自动保存
+        self.auto_save_check.stateChanged.connect(self.on_setting_changed)
+        self.auto_clear_log_check.stateChanged.connect(self.on_setting_changed)
+        self.remember_window_pos_check.stateChanged.connect(self.on_setting_changed)
+        self.sidebar_width_spin.valueChanged.connect(self.on_setting_changed)
+        self.device_timeout_spin.valueChanged.connect(self.on_setting_changed)
+        self.device_type_combo.currentIndexChanged.connect(self.on_setting_changed)
+        self.device_path_edit.textChanged.connect(self.on_setting_changed)
+        self.device_args_edit.textChanged.connect(self.on_setting_changed)
+        self.screenshot_mode_combo.currentIndexChanged.connect(self.on_setting_changed)
+        self.click_mode_combo.currentIndexChanged.connect(self.on_setting_changed)
+        self.retry_count_spin.valueChanged.connect(self.on_setting_changed)
+
     def _update_screenshot_mode_options(self):
         """
         更新截图模式选项，根据点击模式联动禁用/启用PrintWindow
         """
         current_click_mode = self.click_mode_combo.currentText()
-        
+
         # 前台点击模式下禁用PrintWindow选项
         if current_click_mode == "前台点击":
             # 禁用PrintWindow选项
@@ -172,17 +183,26 @@ class SettingsInterface(QWidget):
                 # 如果当前选中的是PrintWindow，自动切换到BitBlt
                 if self.screenshot_mode_combo.currentIndex() == printwindow_index:
                     self.screenshot_mode_combo.setCurrentText("BitBlt")
-                
+
         # 重新启用所有选项，然后根据需要禁用
         for i in range(self.screenshot_mode_combo.count()):
             self.screenshot_mode_combo.model().item(i).setEnabled(True)
-        
+
         # 再次检查并禁用PrintWindow（如果需要）
         if current_click_mode == "前台点击":
             printwindow_index = self.screenshot_mode_combo.findText("PrintWindow")
             if printwindow_index != -1:
                 self.screenshot_mode_combo.model().item(printwindow_index).setEnabled(False)
-    
+
+    def on_setting_changed(self):
+        """
+        设置项变化时触发的槽函数，实现自动保存功能
+        """
+        # 检查是否启用了自动保存
+        if self.auto_save_check.isChecked():
+            # 调用保存设置方法
+            self.save_settings()
+
     def load_settings(self):
         """
         加载当前设置
@@ -197,7 +217,7 @@ class SettingsInterface(QWidget):
         self.auto_clear_log_check.setChecked(self.settings_manager.get_setting("auto_clear_log", False))
 
         # 加载记住界面位置和大小设置
-        self.remember_window_pos_check.setChecked(self.settings_manager.get_setting("remember_window_pos", True))
+        self.remember_window_pos_check.setChecked(self.settings_manager.get_setting("remember_window_pos", False))
 
         # 加载设备连接超时
         self.device_timeout_spin.setValue(self.settings_manager.get_setting("device_timeout", 10))
@@ -221,11 +241,9 @@ class SettingsInterface(QWidget):
         click_mode = self.settings_manager.get_setting("click_mode", "前台点击")
         self.click_mode_combo.setCurrentText(click_mode)
 
-
-
         # 加载自动重试次数
         self.retry_count_spin.setValue(self.settings_manager.get_setting("retry_count", 0))
-        
+
         # 初始加载时更新截图模式选项可用性
         self._update_screenshot_mode_options()
 
@@ -269,8 +287,6 @@ class SettingsInterface(QWidget):
         # 保存点击模式
         self.settings_manager.set_setting("click_mode", self.click_mode_combo.currentText())
 
-
-
         # 保存自动重试次数
         self.settings_manager.set_setting("retry_count", self.retry_count_spin.value())
 
@@ -295,7 +311,7 @@ class SettingsInterface(QWidget):
         self.sidebar_width_spin.setValue(60)
         self.auto_save_check.setChecked(True)
         self.auto_clear_log_check.setChecked(False)
-        self.remember_window_pos_check.setChecked(True)
+        self.remember_window_pos_check.setChecked(False)
         self.device_timeout_spin.setValue(10)
         self.device_type_combo.setCurrentIndex(0)  # 默认窗口设备
         self.device_path_edit.setText("")
