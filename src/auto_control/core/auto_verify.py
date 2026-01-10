@@ -249,7 +249,7 @@ class VerifyHandler:
         )
 
     def _verify_condition(
-        self, verify_type: str, target: Union[str, List[str]], roi: Optional[Tuple[int, int, int, int]]
+        self, verify_type: str, target: Union[str, List[str], Callable[[], bool]], roi: Optional[Tuple[int, int, int, int]]
     ) -> bool:
         """验证条件判断函数"""
         if verify_type == "exist":
@@ -258,6 +258,12 @@ class VerifyHandler:
             return not self.wait_element(target, roi=roi, wait_timeout=0).success
         elif verify_type == "text":
             return self.auto.text_click(target, click=False, roi=roi, retry=0).success
+        elif verify_type == "custom_verify":
+            # 自定义验证，直接执行target函数
+            if callable(target):
+                return target()
+            else:
+                raise VerifyError(f"custom_verify的target必须是可调用对象")
         else:
             raise VerifyError(f"无效的验证类型: {verify_type}")
 

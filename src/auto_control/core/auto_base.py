@@ -62,9 +62,9 @@ class AutoConfig:
     DEFAULT_TASK_TIMEOUT: int = field(default_factory=lambda: config.get("framework.default_task_timeout", 300))
 
     # 重试配置
-    DEFAULT_STEP_RETRY: int = 1
-    DEFAULT_VERIFY_RETRY: int = 3
-    DEFAULT_OPERATION_RETRY: int = 0
+    DEFAULT_STEP_RETRY: int = 2  # 每个步骤的重试次数（元素存在/文本匹配等）
+    DEFAULT_VERIFY_RETRY: int = 3  # 验证重试次数（元素存在/文本匹配等）
+    DEFAULT_OPERATION_RETRY: int = 0  # 操作重试次数（点击/滑动等）
     DEFAULT_BACK_RETRY: int = 1  # 回退到上一步的重试次数
 
     # 坐标/分辨率配置

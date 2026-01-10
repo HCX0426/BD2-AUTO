@@ -35,7 +35,6 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
         bool: 是否成功返回主界面
     """
     logger = auto.logger.create_task_logger("back_to_main")
-    start_time = time.time()
 
     try:
         # 检查是否已在主界面
@@ -43,9 +42,14 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
             logger.debug("已在主界面")
             return True
 
-        # 等待主界面出现，使用新的wait_element API
-        if auto.wait_element("public/主界面", timeout=timeout, roi=roi_config.get_roi("main_menu")):
-            logger.debug("等待主界面成功")
+        # 处理返回主界面相关的标识
+        if auto.template_click(
+            "public/地图标识",
+            roi=roi_config.get_roi("map_indicator"),
+            wait_timeout=0,
+            verify={"type": "exist", "target": "public/主界面", "roi": roi_config.get_roi("main_menu")},
+        ):
+            logger.debug("已在主界面")
             return True
 
         # 备用返回方式，使用带有验证和重试的template_click
@@ -58,15 +62,18 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
             return True
 
         # 检查结束游戏文本
-        end_game_pos = auto.text_click("结束游戏", click=False, roi=roi_config.get_roi("end_game_text"))
+        end_game_pos = auto.wait_text("结束游戏", roi=roi_config.get_roi("end_game_text"))
         if end_game_pos:
             logger.info("尝试使用ESC+H返回主界面")
             auto.key_press("esc")
             auto.sleep(1)
             auto.key_press("h")
             # 使用wait_element等待主界面出现
-            if auto.wait_element("public/主界面", timeout=5, roi=roi_config.get_roi("main_menu")):
+            if auto.wait_element("public/主界面", roi=roi_config.get_roi("main_menu")):
                 return True
+
+        # 处理确认对话框
+        auto.text_click("确认", roi=roi_config.get_roi("confirm_button_pvp"))
 
         logger.warning(f"返回主界面失败，已达超时时间 {timeout} 秒")
         return False
@@ -74,30 +81,6 @@ def back_to_main(auto: Auto, timeout: int = 30) -> bool:
     except Exception as e:
         logger.error(f"返回主界面时发生错误: {e}")
         return False
-
-
-def _handle_return_identifiers(auto: Auto) -> bool:
-    """处理返回主界面相关的标识（闪避标识/地图标识）"""
-    dodge_pos = auto.wait_element("public/闪避标识", roi=roi_config.get_roi("dodge_indicator"), wait_timeout=0)
-    map_pos = auto.wait_element("public/地图标识", roi=roi_config.get_roi("map_indicator"), wait_timeout=0)
-
-    if dodge_pos or map_pos:
-        auto.key_press("h")
-        auto.sleep(2)
-        return True
-    else:
-        auto.key_press("esc")
-        auto.sleep(1)
-        return False
-
-
-def _handle_confirmation_dialogs(auto: Auto) -> bool:
-    """处理确认对话框"""
-    confirm_pos = auto.text_click("确认", roi=roi_config.get_roi("confirm_button_pvp"))
-    if confirm_pos:
-        auto.sleep(2)
-        return True
-    return False
 
 
 def back_to_map(auto: Auto, timeout: int = 30) -> bool:
@@ -151,11 +134,6 @@ def click_back(auto: Auto, timeout: int = 30) -> bool:
     logger = auto.logger.create_task_logger("click_back")
 
     try:
-        # 检查是否存在返回提示文本，允许重试3次
-        if not auto.text_click("点击画面即可返回", click=False, roi=roi_config.get_roi("back_image_text"), retry=3):
-            logger.debug("未检测到点击画面返回提示，任务已完成")
-            return True
-
         # 使用带有验证的text_click，验证文本消失
         logger.info("尝试点击返回提示")
         if auto.text_click(
@@ -167,7 +145,7 @@ def click_back(auto: Auto, timeout: int = 30) -> bool:
                 "roi": roi_config.get_roi("back_image_text"),
             },
         ):
-            logger.debug("点击画面返回成功")
+            logger.debug("画面返回成功")
             return True
 
         logger.warning(f"点击返回超时，已达超时时间 {timeout} 秒")

@@ -2,10 +2,11 @@
 
 包含每日任务和每周任务的奖励领取功能
 """
+
 import time
 
 from src.auto_control.core.auto import Auto
-from src.auto_tasks.tasks.public import back_to_main, click_back, calculate_remaining_timeout
+from src.auto_tasks.tasks.public import back_to_main, calculate_remaining_timeout, click_back
 from src.auto_tasks.utils.roi_config import roi_config
 
 
@@ -24,7 +25,6 @@ def daily_missions(auto: Auto, timeout: int = 300) -> bool:
 
     start_time = time.time()
 
-    # 使用任务链替代状态机
     chain = auto.chain()
     chain.set_total_timeout(timeout)
 
@@ -38,56 +38,61 @@ def daily_missions(auto: Auto, timeout: int = 300) -> bool:
         "任务",
         roi=roi_config.get_roi("daily_missions_text", "daily_missions"),
         verify={"type": "text", "target": "每日任务", "roi": roi_config.get_roi("daily_tasks", "daily_missions")},
-        click_time=2
+        click_time=2,
     )
 
-    # 3. 领取每日任务奖励
-    def receive_daily_rewards_step() -> bool:
-        """领取每日任务奖励的自定义步骤"""
-        pos = auto.text_click(
-            "全部获得", 
-            click=False, 
-            roi=roi_config.get_roi("receive", "daily_missions"),
-            verify={"type": "exist", "target": "每日任务", "roi": roi_config.get_roi("daily_tasks", "daily_missions")}
+    # 3. 领取每日任务奖励 - 使用纯链式操作
+    # 设计：识别到"全部获得"时点击，然后执行click_back，click_back结果不影响步骤，识别不到目标时直接继续
+    def receive_rewards_step():
+        # 尝试点击"全部获得"，不重试，识别不到就返回
+        click_result = auto.text_click(
+            "全部获得", roi=roi_config.get_roi("receive", "daily_missions"), click_time=2, retry=0
         )
-        if pos:
-            logger.info("点击全部获得按钮")
-            for _ in range(2):
-                auto.click(pos, click_time=2, coord_type="LOGICAL")
-                auto.sleep(1)
-            
-            click_back(auto, remaining_timeout)
-            logger.info("每日任务奖励领取成功")
+        # 如果点击成功，执行click_back，结果不影响步骤
+        if click_result.success:
+            auto.logger.info("点击全部获得按钮")
+            click_back(auto, remaining_timeout)  # 执行click_back，结果忽略
         else:
-            logger.warning("无每日任务奖励可以领取")
-        return True
-    chain.then().custom_step(receive_daily_rewards_step)
+            auto.logger.warning("无每日任务奖励可以领取")
+        return True  # 无论如何都返回成功，继续下一个步骤
 
-    # 4. 进入每周任务界面
-    chain.then().text_click(
-        "每周任务", 
-        click_time=2, 
-        roi=roi_config.get_roi("weekly_missions_text", "daily_missions"),
-        verify={"type": "text", "target": "每周任务"}
-    )
-
-    # 5. 领取每周任务奖励
-    chain.then().text_click(
-        "全部获得", 
-        click_time=2, 
-        roi=roi_config.get_roi("receive", "daily_missions"),
-        verify={"type": "text", "target": "每周任务"}
-    )
-
-    # 6. 返回主界面
     chain.then().custom_step(
-        lambda: (
-            click_back(auto, remaining_timeout) or True,  # 确保返回True，继续执行
-            auto.key_press("esc"),
-            auto.sleep(1),
-            back_to_main(auto, remaining_timeout)
-        )[3],  # 返回back_to_main的结果
-        timeout=remaining_timeout
+        func=receive_rewards_step, timeout=remaining_timeout, retry_on_failure=False  # 确保步骤永远成功，不影响后续执行
+    )
+
+    # 4. 进入每周任务界面 - 识别到目标时点击，结果不影响后续步骤
+    chain.then().text_click(
+        "每周任务",
+        click_time=2,
+        roi=roi_config.get_roi("weekly_missions_text", "daily_missions"),
+        retry_on_failure=False,  # 识别不到时直接继续
+    )
+
+    # 5. 领取每周任务奖励 - 识别到目标时点击，结果不影响后续步骤
+    def receive_weekly_rewards_step():
+        # 尝试点击"全部获得"，不重试，识别不到就返回
+        click_result = auto.text_click(
+            "全部获得", roi=roi_config.get_roi("receive", "daily_missions"), click_time=2, retry=0
+        )
+        # 如果点击成功，执行click_back，结果不影响步骤
+        if click_result.success:
+            auto.logger.info("点击每周任务全部获得按钮")
+            click_back(auto, remaining_timeout)  # 执行click_back，结果忽略
+        else:
+            auto.logger.warning("无每周任务奖励可以领取")
+        return True  # 无论如何都返回成功，继续下一个步骤
+
+    chain.then().custom_step(
+        func=receive_weekly_rewards_step,
+        timeout=remaining_timeout,
+        retry_on_failure=False,  # 确保步骤永远成功，不影响后续执行
+    )
+
+    # 6. 返回主界面 - 直接调用back_to_main函数，它已包含完整返回逻辑
+    chain.then().custom_step(
+        func=lambda: back_to_main(auto, remaining_timeout),
+        timeout=remaining_timeout,
+        retry_on_failure=False,  # 失败时直接继续
     )
 
     # 执行任务链
